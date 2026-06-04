@@ -75,4 +75,94 @@ class AppLocalizationsCs extends AppLocalizations {
   String comingSoon(String feature) {
     return '$feature již brzy';
   }
+
+  @override
+  String get folders => 'Složky';
+
+  @override
+  String get newFolder => 'Nová složka';
+
+  @override
+  String get uploadFile => 'Nahrát soubor';
+
+  @override
+  String get rename => 'Přejmenovat';
+
+  @override
+  String get delete => 'Smazat';
+
+  @override
+  String get share => 'Sdílet';
+
+  @override
+  String get restore => 'Obnovit';
+
+  @override
+  String get emptyTrash => 'Vysypat koš';
+
+  @override
+  String get trash => 'Koš';
+
+  @override
+  String get search => 'Hledat';
+
+  @override
+  String get noFiles => 'Žádné soubory';
+
+  @override
+  String get createFolder => 'Vytvořit složku';
+
+  @override
+  String get folderName => 'Název složky';
+
+  @override
+  String get enterFolderName => 'Zadejte název složky';
+
+  @override
+  String get fileDeleted => 'Soubor smazán';
+
+  @override
+  String get fileRestored => 'Soubor obnoven';
+
+  @override
+  String get shareLink => 'Odkaz ke sdílení';
+
+  @override
+  String get copyLink => 'Kopírovat odkaz';
+
+  @override
+  String get linkCopied => 'Odkaz zkopírován';
+
+  @override
+  String get permission => 'Oprávnění';
+
+  @override
+  String get readOnly => 'Jen ke čtení';
+
+  @override
+  String get readWrite => 'Čtení a zápis';
+
+  @override
+  String get expiresAt => 'Platnost do';
+
+  @override
+  String get never => 'Neomezeně';
+
+  @override
+  String get uploadProgress => 'Nahrávání...';
+
+  @override
+  String get uploadComplete => 'Nahrávání dokončeno';
+
+  @override
+  String get confirmDelete => 'Potvrdit smazání';
+
+  @override
+  String get confirmEmptyTrash => 'Trvale smazat vše v koši?';
+
+  @override
+  String get cancel => 'Zrušit';
+
+  @override
+  String get ok => 'OK';
 }

@@ -28,5 +28,35 @@
         "type": "String"
       }
     }
-  }
+  },
+  "folders": "Folders",
+  "newFolder": "New folder",
+  "uploadFile": "Upload file",
+  "rename": "Rename",
+  "delete": "Delete",
+  "share": "Share",
+  "restore": "Restore",
+  "emptyTrash": "Empty trash",
+  "trash": "Trash",
+  "search": "Search",
+  "noFiles": "No files",
+  "createFolder": "Create folder",
+  "folderName": "Folder name",
+  "enterFolderName": "Enter folder name",
+  "fileDeleted": "File deleted",
+  "fileRestored": "File restored",
+  "shareLink": "Share link",
+  "copyLink": "Copy link",
+  "linkCopied": "Link copied",
+  "permission": "Permission",
+  "readOnly": "Read only",
+  "readWrite": "Read & Write",
+  "expiresAt": "Expires at",
+  "never": "Never",
+  "uploadProgress": "Uploading...",
+  "uploadComplete": "Upload complete",
+  "confirmDelete": "Confirm delete",
+  "confirmEmptyTrash": "Permanently delete all items in trash?",
+  "cancel": "Cancel",
+  "ok": "OK"
 }

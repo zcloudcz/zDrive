@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_bloc.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
+import '../../features/files/presentation/pages/file_browser_page.dart';
+import '../../features/files/presentation/pages/search_page.dart';
+import '../../features/files/presentation/pages/trash_page.dart';
 import '../../features/home/presentation/home_page.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
@@ -32,7 +35,23 @@ GoRouter createRouter(AuthBloc authBloc) {
             routes: [
               GoRoute(
                 path: '/home/files',
-                builder: (_, _) => const PlaceholderTab(featureName: 'Files'),
+                builder: (_, _) => const FileBrowserPage(),
+                routes: [
+                  GoRoute(
+                    path: 'folder/:folderId',
+                    builder: (_, state) => FileBrowserPage(
+                      folderId: state.pathParameters['folderId'],
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'trash',
+                    builder: (_, _) => const TrashPage(),
+                  ),
+                  GoRoute(
+                    path: 'search',
+                    builder: (_, _) => const SearchPage(),
+                  ),
+                ],
               ),
             ],
           ),

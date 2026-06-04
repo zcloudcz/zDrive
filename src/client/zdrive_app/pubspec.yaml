@@ -23,6 +23,9 @@ dependencies:
   equatable: ^2.0.7
   json_annotation: ^4.9.0
   intl: any
+  file_picker: ^8.0.0
+  share_plus: ^10.0.0
+  timeago: ^3.6.0
 
 dev_dependencies:
   flutter_test:

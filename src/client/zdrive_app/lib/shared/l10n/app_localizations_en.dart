@@ -75,4 +75,94 @@ class AppLocalizationsEn extends AppLocalizations {
   String comingSoon(String feature) {
     return '$feature coming soon';
   }
+
+  @override
+  String get folders => 'Folders';
+
+  @override
+  String get newFolder => 'New folder';
+
+  @override
+  String get uploadFile => 'Upload file';
+
+  @override
+  String get rename => 'Rename';
+
+  @override
+  String get delete => 'Delete';
+
+  @override
+  String get share => 'Share';
+
+  @override
+  String get restore => 'Restore';
+
+  @override
+  String get emptyTrash => 'Empty trash';
+
+  @override
+  String get trash => 'Trash';
+
+  @override
+  String get search => 'Search';
+
+  @override
+  String get noFiles => 'No files';
+
+  @override
+  String get createFolder => 'Create folder';
+
+  @override
+  String get folderName => 'Folder name';
+
+  @override
+  String get enterFolderName => 'Enter folder name';
+
+  @override
+  String get fileDeleted => 'File deleted';
+
+  @override
+  String get fileRestored => 'File restored';
+
+  @override
+  String get shareLink => 'Share link';
+
+  @override
+  String get copyLink => 'Copy link';
+
+  @override
+  String get linkCopied => 'Link copied';
+
+  @override
+  String get permission => 'Permission';
+
+  @override
+  String get readOnly => 'Read only';
+
+  @override
+  String get readWrite => 'Read & Write';
+
+  @override
+  String get expiresAt => 'Expires at';
+
+  @override
+  String get never => 'Never';
+
+  @override
+  String get uploadProgress => 'Uploading...';
+
+  @override
+  String get uploadComplete => 'Upload complete';
+
+  @override
+  String get confirmDelete => 'Confirm delete';
+
+  @override
+  String get confirmEmptyTrash => 'Permanently delete all items in trash?';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
+  String get ok => 'OK';
 }
