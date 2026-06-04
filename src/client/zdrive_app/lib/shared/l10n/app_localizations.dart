@@ -409,6 +409,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'OK'**
   String get ok;
+
+  /// No description provided for @noPhotos.
+  ///
+  /// In en, this message translates to:
+  /// **'No photos yet'**
+  String get noPhotos;
+
+  /// No description provided for @albums.
+  ///
+  /// In en, this message translates to:
+  /// **'Albums'**
+  String get albums;
+
+  /// No description provided for @noAlbums.
+  ///
+  /// In en, this message translates to:
+  /// **'No albums yet'**
+  String get noAlbums;
+
+  /// No description provided for @newAlbum.
+  ///
+  /// In en, this message translates to:
+  /// **'New album'**
+  String get newAlbum;
+
+  /// No description provided for @albumName.
+  ///
+  /// In en, this message translates to:
+  /// **'Album name'**
+  String get albumName;
+
+  /// No description provided for @syncStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync status'**
+  String get syncStatus;
+
+  /// No description provided for @allSynced.
+  ///
+  /// In en, this message translates to:
+  /// **'Everything is synced'**
+  String get allSynced;
+
+  /// No description provided for @syncDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Your files are up to date across all devices.'**
+  String get syncDescription;
 }
 
 class _AppLocalizationsDelegate

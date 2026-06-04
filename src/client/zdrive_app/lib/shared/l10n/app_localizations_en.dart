@@ -165,4 +165,28 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get ok => 'OK';
+
+  @override
+  String get noPhotos => 'No photos yet';
+
+  @override
+  String get albums => 'Albums';
+
+  @override
+  String get noAlbums => 'No albums yet';
+
+  @override
+  String get newAlbum => 'New album';
+
+  @override
+  String get albumName => 'Album name';
+
+  @override
+  String get syncStatus => 'Sync status';
+
+  @override
+  String get allSynced => 'Everything is synced';
+
+  @override
+  String get syncDescription => 'Your files are up to date across all devices.';
 }

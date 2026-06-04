@@ -8,6 +8,9 @@ import '../../features/files/presentation/pages/file_browser_page.dart';
 import '../../features/files/presentation/pages/search_page.dart';
 import '../../features/files/presentation/pages/trash_page.dart';
 import '../../features/home/presentation/home_page.dart';
+import '../../features/photos/presentation/pages/albums_page.dart';
+import '../../features/photos/presentation/pages/photos_tab.dart';
+import '../../features/sync/presentation/sync_page.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
   return GoRouter(
@@ -59,8 +62,13 @@ GoRouter createRouter(AuthBloc authBloc) {
             routes: [
               GoRoute(
                 path: '/home/photos',
-                builder: (_, _) =>
-                    const PlaceholderTab(featureName: 'Photos'),
+                builder: (_, _) => const PhotosTab(),
+                routes: [
+                  GoRoute(
+                    path: 'albums',
+                    builder: (_, _) => const AlbumsPage(),
+                  ),
+                ],
               ),
             ],
           ),
@@ -68,8 +76,7 @@ GoRouter createRouter(AuthBloc authBloc) {
             routes: [
               GoRoute(
                 path: '/home/settings',
-                builder: (_, _) =>
-                    const PlaceholderTab(featureName: 'Settings'),
+                builder: (_, _) => const SyncPage(),
               ),
             ],
           ),

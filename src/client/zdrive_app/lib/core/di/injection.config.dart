@@ -41,6 +41,14 @@ import 'package:zdrive_app/features/files/domain/use_cases/share_file_use_case.d
     as _i694;
 import 'package:zdrive_app/features/files/domain/use_cases/upload_file_use_case.dart'
     as _i622;
+import 'package:zdrive_app/features/photos/data/photo_remote_data_source.dart'
+    as _i5;
+import 'package:zdrive_app/features/photos/data/photo_repository_impl.dart'
+    as _i826;
+import 'package:zdrive_app/features/photos/domain/photo_repository.dart'
+    as _i328;
+import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart'
+    as _i319;
 
 extension GetItInjectableX on _i174.GetIt {
   // initializes the registration of main-scope dependencies inside of GetIt
@@ -69,6 +77,12 @@ extension GetItInjectableX on _i174.GetIt {
     );
     gh.lazySingleton<_i223.FileUploadDataSource>(
       () => _i223.FileUploadDataSource(gh<_i361.Dio>()),
+    );
+    gh.lazySingleton<_i5.PhotoRemoteDataSource>(
+      () => _i5.PhotoRemoteDataSource(gh<_i361.Dio>()),
+    );
+    gh.lazySingleton<_i319.SyncRemoteDataSource>(
+      () => _i319.SyncRemoteDataSource(gh<_i361.Dio>()),
     );
     gh.lazySingleton<_i1043.FileRepository>(
       () => _i884.FileRepositoryImpl(
@@ -99,6 +113,9 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i568.AuthRemoteDataSource>(),
         gh<_i323.TokenStorage>(),
       ),
+    );
+    gh.lazySingleton<_i328.PhotoRepository>(
+      () => _i826.PhotoRepositoryImpl(gh<_i5.PhotoRemoteDataSource>()),
     );
     return this;
   }

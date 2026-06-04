@@ -58,5 +58,13 @@
   "confirmDelete": "Confirm delete",
   "confirmEmptyTrash": "Permanently delete all items in trash?",
   "cancel": "Cancel",
-  "ok": "OK"
+  "ok": "OK",
+  "noPhotos": "No photos yet",
+  "albums": "Albums",
+  "noAlbums": "No albums yet",
+  "newAlbum": "New album",
+  "albumName": "Album name",
+  "syncStatus": "Sync status",
+  "allSynced": "Everything is synced",
+  "syncDescription": "Your files are up to date across all devices."
 }

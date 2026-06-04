@@ -165,4 +165,29 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get ok => 'OK';
+
+  @override
+  String get noPhotos => 'Zatím žádné fotky';
+
+  @override
+  String get albums => 'Alba';
+
+  @override
+  String get noAlbums => 'Zatím žádná alba';
+
+  @override
+  String get newAlbum => 'Nové album';
+
+  @override
+  String get albumName => 'Název alba';
+
+  @override
+  String get syncStatus => 'Stav synchronizace';
+
+  @override
+  String get allSynced => 'Vše je synchronizované';
+
+  @override
+  String get syncDescription =>
+      'Vaše soubory jsou aktuální na všech zařízeních.';
 }
