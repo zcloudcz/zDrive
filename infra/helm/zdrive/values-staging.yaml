@@ -1,0 +1,30 @@
+# Staging environment overrides
+
+namespace: zdrive-staging
+
+authService:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+apiGateway:
+  replicaCount: 1
+  ingress:
+    enabled: true
+    host: staging.zdrive.example.com
+    tls: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+config:
+  seqUrl: "http://seq.zdrive-staging.svc.cluster.local:5341"

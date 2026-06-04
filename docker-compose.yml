@@ -1,0 +1,104 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: zdrive-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zdrive
+      POSTGRES_PASSWORD: zdrive_dev
+      POSTGRES_DB: zdrive
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zdrive -d zdrive"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zdrive-network
+
+  redis:
+    image: redis:7
+    container_name: zdrive-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zdrive-network
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: zdrive-azurite
+    restart: unless-stopped
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - azurite-data:/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "10000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zdrive-network
+
+  seq:
+    image: datalust/seq
+    container_name: zdrive-seq
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+    ports:
+      - "5341:5341"
+      - "8081:80"
+    volumes:
+      - seq-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5341/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zdrive-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: zdrive-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zdrive-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  azurite-data:
+  seq-data:
+  rabbitmq-data:
+
+networks:
+  zdrive-network:
+    driver: bridge

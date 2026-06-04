@@ -1,0 +1,32 @@
+{
+  "@@locale": "en",
+  "appTitle": "zDrive",
+  "login": "Login",
+  "register": "Register",
+  "email": "Email",
+  "password": "Password",
+  "confirmPassword": "Confirm password",
+  "displayName": "Display name",
+  "files": "Files",
+  "photos": "Photos",
+  "settings": "Settings",
+  "logout": "Logout",
+  "createAccount": "Create account",
+  "loginButton": "Sign in",
+  "registerButton": "Create account",
+  "emailRequired": "Email is required",
+  "invalidEmail": "Enter a valid email address",
+  "passwordTooShort": "Password must be at least 8 characters",
+  "passwordsDontMatch": "Passwords don't match",
+  "displayNameRequired": "Display name is required",
+  "loginFailed": "Login failed. Check your credentials.",
+  "registerFailed": "Registration failed. Try again.",
+  "comingSoon": "{feature} coming soon",
+  "@comingSoon": {
+    "placeholders": {
+      "feature": {
+        "type": "String"
+      }
+    }
+  }
+}

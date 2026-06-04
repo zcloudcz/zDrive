@@ -1,0 +1,54 @@
+# .NET
+bin/
+obj/
+publish/
+*.user
+*.suo
+*.DotSettings.user
+project.lock.json
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+*.iml
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+pubspec.lock
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+secrets/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Session state
+MEMORY.md
+
+# Build artifacts
+TestResults/
+coverage/
+*.nupkg

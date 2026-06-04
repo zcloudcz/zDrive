@@ -1,0 +1,30 @@
+# Production environment overrides
+
+namespace: zdrive
+
+authService:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+apiGateway:
+  replicaCount: 3
+  ingress:
+    enabled: true
+    host: api.zdrive.example.com
+    tls: true
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+
+config:
+  seqUrl: "http://seq.zdrive.svc.cluster.local:5341"

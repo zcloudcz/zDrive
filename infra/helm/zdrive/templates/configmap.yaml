@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zdrive-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "zdrive.labels" . | nindent 4 }}
+data:
+  JWT_ISSUER: {{ .Values.config.jwtIssuer | quote }}
+  SEQ_URL: {{ .Values.config.seqUrl | quote }}
+  ASPNETCORE_ENVIRONMENT: "Production"
