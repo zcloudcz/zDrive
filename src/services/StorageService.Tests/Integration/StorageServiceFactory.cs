@@ -91,6 +91,31 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
             services.Remove(descriptor);
     }
 
+    /// <summary>
+    /// Creates a JWT signed with this factory's key, valid for the service under test.
+    /// </summary>
+    public string CreateAccessToken(Guid userId, Guid tenantId)
+    {
+        var credentials = new SigningCredentials(new RsaSecurityKey(Rsa), SecurityAlgorithms.RsaSha256);
+
+        var claims = new[]
+        {
+            new System.Security.Claims.Claim("sub", userId.ToString()),
+            new System.Security.Claims.Claim("tenant_id", tenantId.ToString()),
+            new System.Security.Claims.Claim("role", "Owner"),
+            new System.Security.Claims.Claim("display_name", "Test User")
+        };
+
+        var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
+            issuer: "zdrive",
+            audience: "zdrive-api",
+            claims: claims,
+            expires: DateTime.UtcNow.AddHours(1),
+            signingCredentials: credentials);
+
+        return new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(token);
+    }
+
     public async Task InitializeAsync()
     {
         await Task.WhenAll(

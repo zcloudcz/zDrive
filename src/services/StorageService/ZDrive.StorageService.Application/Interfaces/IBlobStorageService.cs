@@ -45,6 +45,30 @@ public interface IBlobStorageService
     Task DeleteFileAsync(Guid tenantId, Guid userId, Guid fileId, CancellationToken ct = default);
 
     /// <summary>
+    /// Computes the SHA-256 hash (lowercase hex) of a temp chunk's content.
+    /// Used as the content address of the final chunk blob, so identical
+    /// content is stored once and older file versions keep their chunks.
+    /// </summary>
+    Task<string> ComputeTempChunkHashAsync(Guid sessionId, int chunkIndex, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores an immutable snapshot of a manifest under its content hash.
+    /// One snapshot per file version; the latest manifest stays at manifest.json.
+    /// </summary>
+    Task UploadManifestSnapshotAsync(Guid tenantId, Guid userId, Guid fileId, string manifestHash, ChunkManifest manifest, CancellationToken ct = default);
+
+    /// <summary>
+    /// Downloads a manifest snapshot by its content hash, or null when missing.
+    /// </summary>
+    Task<ChunkManifest?> DownloadManifestSnapshotAsync(Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default);
+
+    /// <summary>
+    /// Makes a manifest snapshot the current manifest (manifest.json).
+    /// Returns false when the snapshot does not exist.
+    /// </summary>
+    Task<bool> RestoreManifestSnapshotAsync(Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default);
+
+    /// <summary>
     /// Checks if a temp chunk exists.
     /// </summary>
     Task<bool> TempChunkExistsAsync(Guid sessionId, int chunkIndex, CancellationToken ct = default);

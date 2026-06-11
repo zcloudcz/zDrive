@@ -6,7 +6,9 @@ using ZDrive.FileService.Application.Commands.DeleteFile;
 using ZDrive.FileService.Application.Commands.EmptyTrash;
 using ZDrive.FileService.Application.Commands.MoveFile;
 using ZDrive.FileService.Application.Commands.RenameFile;
+using ZDrive.FileService.Application.Commands.CreateFileVersion;
 using ZDrive.FileService.Application.Commands.RestoreFile;
+using ZDrive.FileService.Application.Commands.RestoreFileVersion;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Application.Queries.GetFile;
 using ZDrive.FileService.Application.Queries.GetFileVersions;
@@ -149,6 +151,39 @@ public sealed class FilesController : ControllerBase
         return Ok(ApiResponse<PagedResult<FileDto>>.Ok(result));
     }
 
+    /// <summary>
+    /// Records a new version after a completed upload. The client passes the
+    /// manifest hash returned by StorageService's upload-complete response.
+    /// </summary>
+    [HttpPost("{id:guid}/versions")]
+    [ProducesResponseType(typeof(ApiResponse<FileVersionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateFileVersion(
+        Guid id, [FromBody] CreateFileVersionRequest request, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var result = await _mediator.Send(new CreateFileVersionCommand(
+            tenantId, userId, id, request.BlobVersionId, request.SizeBytes, request.ManifestHash, request.Comment), ct);
+        return Ok(ApiResponse<FileVersionDto>.Ok(result));
+    }
+
+    /// <summary>
+    /// Restores an older version (metadata side). The client must follow up
+    /// with StorageService restore-manifest to flip the blob-side manifest.
+    /// </summary>
+    [HttpPost("{id:guid}/versions/{versionId:guid}/restore")]
+    [ProducesResponseType(typeof(ApiResponse<FileVersionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RestoreFileVersion(Guid id, Guid versionId, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var result = await _mediator.Send(new RestoreFileVersionCommand(tenantId, userId, id, versionId), ct);
+        return Ok(ApiResponse<FileVersionDto>.Ok(result));
+    }
+
     [HttpGet("{id:guid}/versions")]
     [ProducesResponseType(typeof(ApiResponse<List<FileVersionDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -173,3 +208,9 @@ public sealed record CreateFileRequest(
 public sealed record RenameFileRequest(string NewName);
 
 public sealed record MoveFileRequest(Guid? NewParentId);
+
+public sealed record CreateFileVersionRequest(
+    string BlobVersionId,
+    long SizeBytes,
+    string? ManifestHash,
+    string? Comment);

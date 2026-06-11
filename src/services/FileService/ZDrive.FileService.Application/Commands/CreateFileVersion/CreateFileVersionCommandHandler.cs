@@ -1,7 +1,9 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Application.Interfaces;
+using ZDrive.FileService.Application.Options;
 using ZDrive.FileService.Domain.Entities;
 using ZDrive.Shared.Exceptions;
 
@@ -10,13 +12,24 @@ namespace ZDrive.FileService.Application.Commands.CreateFileVersion;
 public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFileVersionCommand, FileVersionDto>
 {
     private readonly IFileDbContext _db;
+    private readonly VersioningOptions _options;
 
-    public CreateFileVersionCommandHandler(IFileDbContext db) => _db = db;
+    public CreateFileVersionCommandHandler(IFileDbContext db, IOptions<VersioningOptions> options)
+    {
+        _db = db;
+        _options = options.Value;
+    }
 
     public async Task<FileVersionDto> Handle(CreateFileVersionCommand request, CancellationToken cancellationToken)
     {
         var file = await _db.FileNodes
-            .FirstOrDefaultAsync(f => f.Id == request.FileId && !f.IsDeleted && !f.IsFolder, cancellationToken)
+            .FirstOrDefaultAsync(f =>
+                f.Id == request.FileId
+                && f.TenantId == request.TenantId
+                && f.UserId == request.UserId
+                && !f.IsDeleted
+                && !f.IsFolder,
+                cancellationToken)
             ?? throw new NotFoundException("FileNode", request.FileId);
 
         var maxVersion = await _db.FileVersions
@@ -31,7 +44,7 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
             BlobVersionId = request.BlobVersionId,
             SizeBytes = request.SizeBytes,
             ManifestHash = request.ManifestHash,
-            CreatedBy = request.CreatedBy,
+            CreatedBy = request.UserId,
             Comment = request.Comment
         };
 
@@ -41,8 +54,33 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
         file.UpdatedAt = DateTime.UtcNow;
 
         _db.FileVersions.Add(version);
+
+        await PruneOldVersionsAsync(request.FileId, cancellationToken);
+
         await _db.SaveChangesAsync(cancellationToken);
 
         return version.ToDto();
+    }
+
+    /// <summary>
+    /// Retention policy: keeps at most MaxVersionsPerFile versions (including
+    /// the one being added in this request); the oldest rows are removed.
+    /// Blob manifest snapshots are content-addressed and shared, so removing
+    /// metadata rows is enough — orphaned snapshots are garbage, not data loss.
+    /// </summary>
+    private async Task PruneOldVersionsAsync(Guid fileId, CancellationToken cancellationToken)
+    {
+        if (_options.MaxVersionsPerFile <= 0)
+            return;
+
+        // -1 accounts for the new version added to the change tracker above.
+        var excess = await _db.FileVersions
+            .Where(v => v.FileId == fileId)
+            .OrderByDescending(v => v.VersionNumber)
+            .Skip(Math.Max(0, _options.MaxVersionsPerFile - 1))
+            .ToListAsync(cancellationToken);
+
+        foreach (var old in excess)
+            _db.FileVersions.Remove(old);
     }
 }

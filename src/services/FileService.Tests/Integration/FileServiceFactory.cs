@@ -28,6 +28,8 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     // with this key and the service is configured to validate against it.
     private readonly RSA _rsa = RSA.Create(2048);
 
+    public const int MaxVersionsPerFile = 3;
+
     public Guid TestUserId { get; } = Guid.NewGuid();
     public Guid TestTenantId { get; } = Guid.NewGuid();
 
@@ -43,6 +45,11 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
             services.PostConfigure<JwtBearerOptions>(
                 JwtBearerDefaults.AuthenticationScheme,
                 options => options.TokenValidationParameters.IssuerSigningKey = new RsaSecurityKey(_rsa));
+
+            // Small retention limit so version pruning is testable without
+            // creating dozens of versions (see VersionFlowTests).
+            services.PostConfigure<ZDrive.FileService.Application.Options.VersioningOptions>(
+                options => options.MaxVersionsPerFile = MaxVersionsPerFile);
         });
 
         builder.ConfigureServices(services =>
