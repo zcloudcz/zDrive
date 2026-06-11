@@ -59,5 +59,18 @@
   "albumName": "Název alba",
   "syncStatus": "Stav synchronizace",
   "allSynced": "Vše je synchronizované",
-  "syncDescription": "Vaše soubory jsou aktuální na všech zařízeních."
+  "syncDescription": "Vaše soubory jsou aktuální na všech zařízeních.",
+  "versionHistory": "Historie verzí",
+  "noVersions": "Zatím žádné verze",
+  "restoreVersion": "Obnovit",
+  "versionLabel": "Verze {number}",
+  "@versionLabel": {
+    "placeholders": {
+      "number": { "type": "int" }
+    }
+  },
+  "confirmRestoreVersion": "Obnovit tuto verzi?",
+  "versionRestored": "Verze obnovena",
+  "latestVersion": "Aktuální",
+  "close": "Zavřít"
 }

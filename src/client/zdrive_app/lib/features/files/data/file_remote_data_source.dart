@@ -112,4 +112,30 @@ class FileRemoteDataSource {
   Future<void> revokeShare(String id) async {
     await _dio.delete('${ApiConstants.shares}/$id');
   }
+
+  /// Versions endpoints use the real backend envelope ({success, data, error});
+  /// the payload lives under "data".
+  Future<List<Map<String, dynamic>>> getFileVersions(String fileId) async {
+    final response = await _dio.get('${ApiConstants.files}/$fileId/versions');
+    final envelope = response.data as Map<String, dynamic>;
+    return (envelope['data'] as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> restoreFileVersion(
+    String fileId,
+    String versionId,
+  ) async {
+    final response = await _dio.post(
+      '${ApiConstants.files}/$fileId/versions/$versionId/restore',
+    );
+    final envelope = response.data as Map<String, dynamic>;
+    return envelope['data'] as Map<String, dynamic>;
+  }
+
+  /// Flips the blob-side manifest to a snapshot (StorageService).
+  Future<void> restoreStorageManifest(String fileId, String manifestHash) async {
+    await _dio.post(
+      '${ApiConstants.storage}/files/$fileId/manifests/$manifestHash/restore',
+    );
+  }
 }

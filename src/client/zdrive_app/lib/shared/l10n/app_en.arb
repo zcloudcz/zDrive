@@ -66,5 +66,18 @@
   "albumName": "Album name",
   "syncStatus": "Sync status",
   "allSynced": "Everything is synced",
-  "syncDescription": "Your files are up to date across all devices."
+  "syncDescription": "Your files are up to date across all devices.",
+  "versionHistory": "Version history",
+  "noVersions": "No versions yet",
+  "restoreVersion": "Restore",
+  "versionLabel": "Version {number}",
+  "@versionLabel": {
+    "placeholders": {
+      "number": { "type": "int" }
+    }
+  },
+  "confirmRestoreVersion": "Restore this version?",
+  "versionRestored": "Version restored",
+  "latestVersion": "Latest",
+  "close": "Close"
 }

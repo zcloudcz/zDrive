@@ -18,6 +18,7 @@ import '../widgets/file_grid_item.dart';
 import '../widgets/file_list_item.dart';
 import '../widgets/rename_dialog.dart';
 import '../widgets/share_dialog.dart';
+import '../widgets/version_history_dialog.dart';
 
 class FileBrowserPage extends StatelessWidget {
   final String? folderId;
@@ -208,6 +209,7 @@ class _FileBrowserView extends StatelessWidget {
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
+          onVersions: () => _showVersionHistoryDialog(context, file),
         );
       },
     );
@@ -231,6 +233,7 @@ class _FileBrowserView extends StatelessWidget {
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
+          onVersions: () => _showVersionHistoryDialog(context, file),
         );
       },
     );
@@ -315,6 +318,19 @@ class _FileBrowserView extends StatelessWidget {
       builder: (_) => ShareDialog(
         fileId: file.id,
         onShare: repo.createShare,
+      ),
+    );
+  }
+
+  void _showVersionHistoryDialog(BuildContext context, FileItem file) {
+    final repo = getIt<FileRepository>();
+    showDialog(
+      context: context,
+      builder: (_) => VersionHistoryDialog(
+        fileId: file.id,
+        fileName: file.name,
+        onLoadVersions: repo.getVersions,
+        onRestore: repo.restoreVersion,
       ),
     );
   }

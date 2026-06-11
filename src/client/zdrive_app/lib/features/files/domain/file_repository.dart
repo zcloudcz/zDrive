@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'file_item.dart';
+import 'file_version.dart';
 
 abstract class FileRepository {
   Future<FileItem> getFile(String id);
@@ -34,4 +35,11 @@ abstract class FileRepository {
     void Function(double progress)? onProgress,
   );
   Future<String> getDownloadUrl(String fileId);
+
+  /// Lists recorded versions of a file, newest first.
+  Future<List<FileVersion>> getVersions(String fileId);
+
+  /// Restores an older version. Records the restore as a new version in
+  /// FileService and flips the blob-side manifest in StorageService.
+  Future<FileVersion> restoreVersion(String fileId, String versionId);
 }

@@ -189,4 +189,30 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get syncDescription => 'Your files are up to date across all devices.';
+
+  @override
+  String get versionHistory => 'Version history';
+
+  @override
+  String get noVersions => 'No versions yet';
+
+  @override
+  String get restoreVersion => 'Restore';
+
+  @override
+  String versionLabel(int number) {
+    return 'Version $number';
+  }
+
+  @override
+  String get confirmRestoreVersion => 'Restore this version?';
+
+  @override
+  String get versionRestored => 'Version restored';
+
+  @override
+  String get latestVersion => 'Latest';
+
+  @override
+  String get close => 'Close';
 }

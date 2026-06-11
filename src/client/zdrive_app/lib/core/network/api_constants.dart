@@ -14,4 +14,7 @@ class ApiConstants {
   static const String filesSearch = '/files/search';
   static const String shares = '/files/shares';
   static const String uploads = '/files/uploads';
+
+  // Storage (blob side)
+  static const String storage = '/storage';
 }
