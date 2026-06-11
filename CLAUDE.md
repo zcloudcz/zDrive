@@ -128,9 +128,25 @@ last-write-wins auto + fork-and-prompt for manual cases.
 
 ### Blob versioning
 
-Azure Blob Versioning enabled at container level. Every write creates an
-automatic version. Semantic version metadata (description, author) stored in
-PostgreSQL `file_versions` table. Retention policy configurable per tenant.
+Implemented with content-addressed snapshots instead of Azure Blob Versioning
+(Azurite does not support the versioning API, and the chunk+manifest model
+gives us versioning for free):
+
+- Chunks are stored under their SHA-256 content hash
+  (`{base}/chunks/{hash}.blk`) — a re-upload never overwrites data an older
+  version still references, and identical chunks dedupe automatically.
+- Every completed upload writes the manifest twice: `manifest.json` (latest)
+  and an immutable snapshot `manifests/{manifestHash}.json`. The manifest
+  hash is the version identifier (`FileVersion.BlobVersionId`).
+- Version metadata (number, size, author, comment) lives in PostgreSQL
+  `file_versions` (FileService). Restore = FileService
+  `POST /files/{id}/versions/{versionId}/restore` (metadata, records the
+  restore as a NEW version) followed by StorageService
+  `POST /storage/files/{id}/manifests/{hash}/restore` (blob flip). The client
+  orchestrates both calls — there is no service-to-service messaging yet.
+- Retention: `Versioning:MaxVersionsPerFile` (FileService appsettings,
+  default 10) prunes the oldest metadata rows on insert. Orphaned blob
+  snapshots/chunks are garbage, not data loss; GC is future work.
 
 ### Photo processing pipeline
 
