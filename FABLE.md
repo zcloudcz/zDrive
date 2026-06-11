@@ -29,6 +29,8 @@ Cloud storage platforma (alternativa OneDrive + Google Photos): .NET 8 mikroserv
 ## Odloženo z fáze 3
 - Text diff viewer, quota impact calculation.
 - GC osiřelých chunků/manifest snapshotů po retention prune.
+- **Vědomé kompromisy (hydra review 11. 6.):** (a) dvoufázová orchestrace restore (FileService → StorageService) nemá kompenzaci — když blob flip selže, metadata a blob divergují do dalšího restore/uploadu; (b) `POST /files/{id}/versions` nevaliduje `blobVersionId` proti StorageService (klient může zapsat verzi na neexistující snapshot — restore pak vrátí 404); (c) souběžné zápisy verzí téhož souboru řeší unique index `(FileId, VersionNumber)` — druhý request spadne na constraint, žádný retry. Vše řešitelné až se zavede service-to-service komunikace (event bus).
+- Codex review nedostupný (ChatGPT účet nepodporuje Codex API modely) — review provedla hydra vlastním čtením; až bude Codex funkční, zvážit zpětný audit fáze 3.
 - Flutter upload/files data source míjí reálný backend kontrakt (bez ApiResponse envelope, jiné cesty — `/files/uploads` vs. `/storage/upload`, PATCH vs. PUT) — klient z fáze 1 psaný proti předpokládanému API; nový versions kód už cílí na skutečný kontrakt. Zaslouží vlastní alignment task.
 
 ## Návrhy — další krok

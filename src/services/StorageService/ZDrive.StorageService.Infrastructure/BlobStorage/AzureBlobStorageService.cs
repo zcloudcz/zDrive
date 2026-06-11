@@ -153,19 +153,6 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         _logger.LogDebug("Uploaded manifest snapshot {ManifestHash} for file {FileId}", manifestHash, fileId);
     }
 
-    public async Task<ChunkManifest?> DownloadManifestSnapshotAsync(
-        Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default)
-    {
-        var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);
-        var blobClient = containerClient.GetBlobClient(GetManifestSnapshotPath(tenantId, userId, fileId, manifestHash));
-
-        if (!await blobClient.ExistsAsync(ct))
-            return null;
-
-        var response = await blobClient.DownloadContentAsync(ct);
-        return JsonSerializer.Deserialize<ChunkManifest>(response.Value.Content.ToString());
-    }
-
     public async Task<bool> RestoreManifestSnapshotAsync(
         Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default)
     {

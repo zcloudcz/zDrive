@@ -73,7 +73,9 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
         if (_options.MaxVersionsPerFile <= 0)
             return;
 
-        // -1 accounts for the new version added to the change tracker above.
+        // The new version is only in the change tracker — this query hits the
+        // database and does not see it. Keeping MaxVersionsPerFile - 1 existing
+        // rows therefore yields exactly MaxVersionsPerFile after SaveChanges.
         var excess = await _db.FileVersions
             .Where(v => v.FileId == fileId)
             .OrderByDescending(v => v.VersionNumber)

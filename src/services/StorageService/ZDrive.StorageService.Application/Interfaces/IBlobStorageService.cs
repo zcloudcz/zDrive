@@ -58,11 +58,6 @@ public interface IBlobStorageService
     Task UploadManifestSnapshotAsync(Guid tenantId, Guid userId, Guid fileId, string manifestHash, ChunkManifest manifest, CancellationToken ct = default);
 
     /// <summary>
-    /// Downloads a manifest snapshot by its content hash, or null when missing.
-    /// </summary>
-    Task<ChunkManifest?> DownloadManifestSnapshotAsync(Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default);
-
-    /// <summary>
     /// Makes a manifest snapshot the current manifest (manifest.json).
     /// Returns false when the snapshot does not exist.
     /// </summary>
