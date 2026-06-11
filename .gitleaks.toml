@@ -1,0 +1,13 @@
+# Gitleaks configuration for zDrive.
+# Extends the default ruleset; only well-known non-secrets are allowlisted.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Well-known public values that are not secrets"
+regexes = [
+  # Azurite (Azure Storage emulator) documented well-known account key —
+  # public knowledge, used only against the local emulator.
+  '''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==''',
+]

@@ -23,7 +23,7 @@ public sealed class UploadFlowTests : IClassFixture<StorageServiceFactory>
     public UploadFlowTests(StorageServiceFactory factory)
     {
         _client = factory.CreateClient();
-        _accessToken = GenerateTestToken(_userId, _tenantId);
+        _accessToken = GenerateTestToken(factory.Rsa, _userId, _tenantId);
     }
 
     [Fact]
@@ -212,38 +212,11 @@ public sealed class UploadFlowTests : IClassFixture<StorageServiceFactory>
     }
 
     /// <summary>
-    /// Generates a test JWT token using the same dev key that the service validates against.
+    /// Generates a test JWT signed with the factory key pair; the service
+    /// validates against the matching public key injected by the factory.
     /// </summary>
-    private static string GenerateTestToken(Guid userId, Guid tenantId)
+    private static string GenerateTestToken(RSA rsa, Guid userId, Guid tenantId)
     {
-        var rsa = RSA.Create();
-        rsa.ImportFromPem(@"-----BEGIN RSA PRIVATE KEY-----
-MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWep4PAtGoSo1YFqFiGQoL0wn1jOiRi
-LMJS4TjfEgLDBUkHaAMixGRdAi60BKMY69CYfSXkBHQOKDYDaFMVr2KFaFNpiGpj
-saW9Dg8s7QEXkzuxOMETJYIK3SQIT3REiN0XSDBuVQFutnJmNoRahWzZfJFO+04q
-qjfONKrT6JnKqDPR8TN3NB1tWFGVfCKbj/W0OqGqVoPHmm1VhQ6VvpXk3ARz+OG
-OW0bexW3RJkShjkTA7cXRPLRf4BGORXKNX3W1A6LSGZdzq3aB0apu1MRfWACGx2o
-hWMqW9IxWRcL6lMxjSjiPXbJxekwyjJ6k4URPQIDAQABAoIBAGQH+PBNb4sJLu3r
-mEnsJMCuJPUXQIFb1qXBERcX5y+PxNHjn6Qu3ZfgPQj+m6OnaFAi/yvHBHkTVJKy
-j6qhXJBtNHLDdFaXHVs5p+E9LB0VD9i4k3C7gZ1S1FH9aM8ZDW+MpHf7YR+p7oD
-jjQUyxHR4XLUYf/suPb4kUjGcA4uY/sBFJR8HDd+5JBJy9OQ7YP/CuGJjAk7d+yy
-PCVuVCOjCG4nFLR5NZpGJ9pOsRQ3pSHRbMh38fOR9EZE7GBD6M6pA3gzQomB0W8v
-REt/M5lh7lo/bUXaIaE4m6E5M+NXLGCM/VL/8B+sdfVNxEC0OzOH5OcZYOgZuBX/
-kpfVTgECgYEA7HW+9PGkIAHqFiWoiRyT/bHI3B0FMEz2viS4vJ0TjIOEWTaHxojD
-XjWRNG1TGiL8PoVfb4DMRK4gFMVpqJQ1O5s2hy7zCIRUjNi0FLB/S9e0t4DB2NXe
-JDsqIh/J63JKQVQ8pGBMwIJp9SoqEJUZBGRRAzjwV6p+ZemIqjGR30CgYEA4uTN
-QY3J4H4oSCIon0JnR4gqYfKam9Gp0SMCfvXrcGGnIiC6SlRjxOGsYO1b3J9Kwtx/
-P/KaJc6HFXy/QcWYG35aKfCBdHGnU3iKS7w8F9s2wT5XkmRb7jMgOdJEz1qnCfy0
-JWOHxN5gPEMjwBn0eM/PVAaIVNYLOsFc0bOjVQECgYBw3Dz+JNPFjC90lPIiqbN5
-BQ8rnB3x1XSJNSBqLJG5RFaJNJZ4bPwEVoiUJCjVdzrg1JVMKfj53CIvhGpviHVB
-E7fKmJhYbN0g5Hba+aSBKcNcBX1OEh1p47D/2umj0wiN4/hlGAJHTjIq7Q0F3FZl
-J0oFdKQkkJxkiE2dVUMvXQKBgCm0S91pRX1VDfJ7kSLtjOcd6bGDmbJvIVaIYEy0
-JbNFfz5L9p7u4CxIiKDJC1kYfz3C+vxJJCeAz3S/mtBv7/OzN3l1XhJR9DlKUU5a
-eaenJo0Y7Q7y3/HB7FUNfVnEGxJ/hPhbW68BmR0sIpMBkV0bPYhqjKPRblzRNMKB
-AoGBAL+sHIjhkxZA0RnDFfSHUFHRSrVz0FO/juFXBe1c0Bh48IvSjkPQVXaRRnHU
-v+DYf60t4LZ5LiIF1FGBJMmqaDIK8DFqMW7vGjM0HVlkb0cJfD3kJd1Eiw/NyRpR
-f9OY/MN4eNQjx5jx3LKzXaMrDqaJU95kCL79k5SZILQ/e2Rb
------END RSA PRIVATE KEY-----");
 
         var credentials = new SigningCredentials(new RsaSecurityKey(rsa), SecurityAlgorithms.RsaSha256);
 

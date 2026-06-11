@@ -18,10 +18,14 @@ builder.Host.UseSerilog((context, config) => config
 // Layers
 builder.Services.AddSharedServices();
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 
 // Controllers
-builder.Services.AddControllers();
+// Accept enum values as strings ("InApp") as well as numbers in JSON payloads.
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
 // SignalR
 builder.Services.AddSignalR();
@@ -80,6 +84,15 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Create the database schema on first run in Development. There are no EF
+// migrations yet — production deployments will introduce them once the schema
+// stabilizes; until then a fresh dev database is provisioned automatically.
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<NotificationDbContext>().Database.EnsureCreatedAsync();
+}
 
 // Middleware pipeline
 app.UseMiddleware<CorrelationIdMiddleware>();

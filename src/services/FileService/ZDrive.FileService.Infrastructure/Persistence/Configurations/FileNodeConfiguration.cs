@@ -54,7 +54,7 @@ public sealed class FileNodeConfiguration : IEntityTypeConfiguration<FileNode>
         builder.Property<NpgsqlTypes.NpgsqlTsVector>("name_tsv")
             .HasColumnName("name_tsv")
             .IsRequired(false)
-            .HasComputedColumnSql(@"to_tsvector('simple', ""Name"")", stored: true);
+            .HasComputedColumnSql("to_tsvector('simple', name)", stored: true);
 
         builder.HasIndex("name_tsv")
             .HasMethod("GIN");

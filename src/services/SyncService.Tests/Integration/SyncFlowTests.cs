@@ -24,7 +24,7 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
     {
         _client = factory.CreateClient();
         _client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", GenerateTestJwt(_userId));
+            new AuthenticationHeaderValue("Bearer", GenerateTestJwt(factory.Rsa, _userId));
     }
 
     [Fact]
@@ -263,45 +263,11 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
     }
 
     /// <summary>
-    /// Generates a test JWT matching the RSA public key in appsettings.json.
-    /// The private key here is the pair to the public key already configured.
+    /// Generates a test JWT signed with the factory key pair; the service
+    /// validates against the matching public key injected by the factory.
     /// </summary>
-    private static string GenerateTestJwt(Guid userId)
+    private static string GenerateTestJwt(RSA rsa, Guid userId)
     {
-        // This is the private key corresponding to the public key in appsettings.json.
-        // Only used for testing.
-        const string privateKeyPem = """
-            -----BEGIN RSA PRIVATE KEY-----
-            MIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWeGNGMBAH/KFocmwMIi1AadTa0vf0V
-            VVkMDEJHMJx5JOFdqrxiMvOqFr0GDzrB8f6jXHRBJF5YBplPMakldqtHPKP+f2jP
-            JA8+7m+0q8NGVelL3VfdhaIuhy6UPiMxZ+K/lbYNiIFBOYHecaZOVfE3FGFhqWig
-            B5U/L/aGkI7lMBP2LBmWcnXBfWfmVG+OBBqExW+WNKQR/g14J3k2eCmfs8fUps1
-            PNY/MEbBVz0MjMqWJISdJPf/kAAA99xXMT1vDHMlakG3jbGc5rLgh8WOGx3WjC1S
-            tYJBLSxFPx9qbXx+20NiWNMunm2FXPY8a5S1ewwIDAQABAoIBAC5RgZ+hBx7xHNaM
-            pPgwGMnCd3KE8F8ZBJj4H8gCdWCnMrSY/bHGUwCo0gPClDB4xHPkUO/Sx3QLSEU
-            K+n/fjBaGUSJn1jPx5X9Y+PujMFaj0gEBODOv3uJBmpPMDIT+VdgfcBEMnXwSKzM
-            RYbXeJkJd0t0bKPaBRHo3qWmAi3M6sFB/BKhPF8z/TtN3csBgaIc/L+xpO1mBOe
-            rlKQ3VUNB8nvnBFBBV16+h/HZGLjWVALBHxNQaijJfR+ohpHxaXbwJQFEmrubQ3I
-            8LRFnMFfPviX8mHHxiPnVzlM99A2TdI7S1dMcfhJNJHEBqTLGQRzG4cNu+EavOl
-            M0k/LoECgYEA6VGUxHd/I/XPgGn7fBoKoCECrM2CcaM0p4IWYfSpQIBjcI8C/Ly0
-            Nc9IMFJK0cGCAJlK6QhDGN2BV1KQEK+mBdC08yffOWN+3RfwFLTi7C0IBjCsM5O
-            HgBxe2mC1fZ0OuAnUYJ1VQHEra2ODeYYk5G4oKPNkJkaq/3MyG+o5wECgYEA5b2r
-            Fxq+kOQ4uIEWmnVD+Y7gV4I1E1GAMHnV+cWfoAPC+i4PZfLI2aCjAzgJb9I1JIpH
-            nIKbhWgcsFXAESdE3K8zKFcKK1Uw11xKPQRACXr8/yNa+jdJSaHjjFYnRTdGGSVF
-            VqmXotQmqPr9B0JiwYL71UnG3l6U5l/EA78oi8MCgYBmDxZ8wXS/vNKaPG2rUm6O
-            QGs+j1KhDB/xcuiQsFwdQNX61yrCyRHYpInyj9h0ISmUl+VVmf+MtQtcMlidRpVa
-            +fh7grj3EfVgLB96cH8eN1Y1z/PMVDloR1UDan7FCRE6qF1Rf5aU4dL01yvbJxlK
-            NqJW9yzP3rLkqK/U1kvAAQKBgQC00U7ICAKPyQmKbJleLT5fNdi3VleX9A0w/4Hn
-            Ee5r1sFDr+xlGfHVBdLCiTfWKTCEDLdGSiF9VJR4tWSRYmGXxDBYKl+/pE7aXGLk
-            MxGMn0j7fKVcpO0F5Y6VGv2shg0MgSz1D4WmKC0F3QIElu/EOMM7R+ELb/4z7F2V
-            4zfPNwKBgQDXFiD6w5b0J3XPWlxjh3FJI0iqpAK9HjVfOQ65Kqm5Al3DqDE9TwnV
-            azjuuCqFI7pLq3oiT/TcUaUzrDKTpJmMOh7Vrr3aFKVGB3cIiE5Z7uawWJRxNyqO
-            G/KO4sN9QElGMQzl+j3woS/I0J5X1cJ/VTf3tN+G9aKkJoSOqgzNcQ==
-            -----END RSA PRIVATE KEY-----
-            """;
-
-        var rsa = RSA.Create();
-        rsa.ImportFromPem(privateKeyPem);
 
         var signingCredentials = new SigningCredentials(
             new RsaSecurityKey(rsa), SecurityAlgorithms.RsaSha256);

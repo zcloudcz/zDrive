@@ -8,6 +8,7 @@ using ZDrive.NotificationService.Application.Interfaces;
 using ZDrive.NotificationService.Domain.Entities;
 using ZDrive.NotificationService.Infrastructure.Persistence;
 using ZDrive.NotificationService.Infrastructure.SignalR;
+using ZDrive.Shared.Auth;
 
 namespace ZDrive.NotificationService.Infrastructure;
 
@@ -15,7 +16,8 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool isDevelopment)
     {
         // EF Core + PostgreSQL
         services.AddDbContext<NotificationDbContext>(options =>
@@ -33,7 +35,19 @@ public static class DependencyInjection
 
         // Authentication
         var jwtSection = configuration.GetSection("Jwt");
-        var publicKeyPem = jwtSection["RsaPublicKeyPem"]!;
+        var publicKeyPem = jwtSection["RsaPublicKeyPem"];
+        if (string.IsNullOrWhiteSpace(publicKeyPem))
+        {
+            if (!isDevelopment)
+            {
+                throw new InvalidOperationException(
+                    "Jwt:RsaPublicKeyPem must be configured outside Development.");
+            }
+
+            // Same per-machine dev key pair AuthService signs with.
+            publicKeyPem = DevJwtKeyProvider.GetOrCreateKeyPair().PublicKeyPem;
+        }
+
         var rsa = RSA.Create();
         rsa.ImportFromPem(publicKeyPem);
 
@@ -44,6 +58,9 @@ public static class DependencyInjection
         })
         .AddJwtBearer(options =>
         {
+            // Keep raw JWT claim names ("sub", "tenant_id") — ClaimsHelper reads them directly.
+            options.MapInboundClaims = false;
+
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
