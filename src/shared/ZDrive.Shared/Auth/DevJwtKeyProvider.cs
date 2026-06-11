@@ -23,9 +23,9 @@ public static class DevJwtKeyProvider
     private const string PrivateKeyFileName = "jwt-signing.key.pem";
     private const string PublicKeyFileName = "jwt-signing.pub.pem";
 
-    // Serializes generation within one process; cross-process races are tolerated
-    // (worst case two services generate simultaneously and one pair wins — both
-    // files are always written together, see GenerateAndStore).
+    // Serializes generation within one process. Cross-process races are resolved
+    // in GenerateAndStore: a move-without-overwrite on the private key file picks
+    // a single winner; losers discard their pair and read the winner's files.
     private static readonly object Lock = new();
 
     /// <summary>
@@ -70,11 +70,54 @@ public static class DevJwtKeyProvider
         var privatePem = rsa.ExportRSAPrivateKeyPem();
         var publicPem = rsa.ExportSubjectPublicKeyInfoPem();
 
-        // Write private key first so a half-written state never has a public key
-        // without its matching private key (services validate against the public one).
-        File.WriteAllText(privatePath, privatePem);
-        File.WriteAllText(publicPath, publicPem);
+        // Write the pair to temp files first so no other process can ever read a
+        // half-written PEM, then move into place. The move-without-overwrite on
+        // the private key decides a single winner when several services generate
+        // at the same time (e.g. parallel first start on a clean machine).
+        var tempSuffix = "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var tempPrivate = privatePath + tempSuffix;
+        var tempPublic = publicPath + tempSuffix;
+        File.WriteAllText(tempPrivate, privatePem);
+        File.WriteAllText(tempPublic, publicPem);
 
+        try
+        {
+            File.Move(tempPrivate, privatePath); // throws if another process won
+        }
+        catch (IOException)
+        {
+            File.Delete(tempPrivate);
+            File.Delete(tempPublic);
+            return ReadExistingPair(privatePath, publicPath);
+        }
+
+        File.Move(tempPublic, publicPath, overwrite: true);
         return (privatePem, publicPem);
+    }
+
+    private static (string PrivateKeyPem, string PublicKeyPem) ReadExistingPair(
+        string privatePath, string publicPath)
+    {
+        // The winning process may still be moving its public key into place —
+        // wait briefly for both files to become readable.
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            if (File.Exists(privatePath) && File.Exists(publicPath))
+            {
+                try
+                {
+                    return (File.ReadAllText(privatePath), File.ReadAllText(publicPath));
+                }
+                catch (IOException)
+                {
+                    // File mid-move; fall through to retry.
+                }
+            }
+
+            Thread.Sleep(100);
+        }
+
+        throw new InvalidOperationException(
+            $"Timed out waiting for the dev JWT key pair in '{Path.GetDirectoryName(privatePath)}'.");
     }
 }
