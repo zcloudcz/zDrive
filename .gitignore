@@ -52,3 +52,6 @@ MEMORY.md
 TestResults/
 coverage/
 *.nupkg
+
+# Working-state log (volatile, per CLAUDE.md convention)
+MEMORY.md

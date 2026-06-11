@@ -18,15 +18,30 @@ builder.Host.UseSerilog((context, config) => config
 // Shared services
 builder.Services.AddSharedServices();
 
-// JWT validation
+// JWT validation — public key from configuration; in Development fall back to
+// the per-machine dev key pair shared with AuthService (no keys in the repo).
 var jwtSection = builder.Configuration.GetSection("Jwt");
-var publicKeyPem = jwtSection["RsaPublicKeyPem"]!;
+var publicKeyPem = jwtSection["RsaPublicKeyPem"];
+if (string.IsNullOrWhiteSpace(publicKeyPem))
+{
+    if (!builder.Environment.IsDevelopment())
+    {
+        throw new InvalidOperationException(
+            "Jwt:RsaPublicKeyPem must be configured outside Development.");
+    }
+
+    publicKeyPem = ZDrive.Shared.Auth.DevJwtKeyProvider.GetOrCreateKeyPair().PublicKeyPem;
+}
+
 var rsa = RSA.Create();
 rsa.ImportFromPem(publicKeyPem);
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        // Keep raw JWT claim names ("sub", "tenant_id") — ClaimsHelper reads them directly.
+        options.MapInboundClaims = false;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,

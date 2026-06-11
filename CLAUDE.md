@@ -170,6 +170,30 @@ Tenant-scoped for B2B.
 
 Never commit secrets. Use Azure Key Vault in deployed environments,
 `dotnet user-secrets` or `.env` locally (`.env` is in `.gitignore`).
+CI runs a gitleaks scan (`.github/workflows/secret-scan.yml`) over the
+working tree on every push.
+
+### JWT dev keys
+
+JWT signing keys are never stored in the repository. Locally, the first
+service that starts generates an RSA key pair into `~/.zdrive/dev-keys/`
+(override with `ZDRIVE_DEV_KEY_DIR`) via `DevJwtKeyProvider` in
+`ZDrive.Shared`. All services read the same files, so tokens issued by
+AuthService validate everywhere. Outside Development a missing
+`Jwt:RsaPrivateKeyPem` / `Jwt:RsaPublicKeyPem` is a hard startup failure.
+
+### Local substitutes for Azure services
+
+The production design targets Azure managed services; local development
+(docker-compose) runs open-source equivalents:
+
+| Production (design) | Local (docker-compose) | Notes |
+|---------------------|------------------------|-------|
+| Azure Service Bus | RabbitMQ (`localhost:5672`, mgmt UI `:15672`) | Same async-event role; abstraction layer hides the transport |
+| Azure SignalR Service | Self-hosted SignalR in NotificationService | Same hub code; Azure SignalR is a scale-out proxy only |
+| Azure Blob Storage | Azurite emulator (`localhost:10000`) | `UseDevelopmentStorage=true` connection string |
+| Azure AI Vision / Face | not emulated | Photo AI features (Phase 5) need a real Azure endpoint |
+| Application Insights / managed monitoring | Seq (`localhost:5341`, UI `:8081`) | Serilog sink |
 
 ## Coding rules
 

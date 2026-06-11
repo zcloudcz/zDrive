@@ -1,8 +1,10 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -22,7 +24,11 @@ public sealed class NotificationServiceFactory : WebApplicationFactory<Program>,
         .WithPassword("test")
         .Build();
 
-    private RSA _rsa = null!;
+    // Created eagerly so it exists before the host is built; tests sign JWTs
+    // with this key and the service is configured to validate against it.
+    // Per-instance (NOT a process-wide environment variable) — test classes
+    // each get their own factory and would otherwise race on shared state.
+    private readonly RSA _rsa = RSA.Create(2048);
 
     public string GenerateTestToken(Guid userId, string displayName = "Test User")
     {
@@ -50,6 +56,16 @@ public sealed class NotificationServiceFactory : WebApplicationFactory<Program>,
     {
         builder.UseEnvironment("Development");
 
+        // Make the service validate tokens signed by this factory's key instead
+        // of the per-machine dev key pair. PostConfigure runs after the app's own
+        // service registration, so it reliably overrides the signing key.
+        builder.ConfigureTestServices(services =>
+        {
+            services.PostConfigure<JwtBearerOptions>(
+                JwtBearerDefaults.AuthenticationScheme,
+                options => options.TokenValidationParameters.IssuerSigningKey = new RsaSecurityKey(_rsa));
+        });
+
         builder.ConfigureServices(services =>
         {
             // Remove the real DbContext registration
@@ -66,13 +82,6 @@ public sealed class NotificationServiceFactory : WebApplicationFactory<Program>,
 
     public async Task InitializeAsync()
     {
-        // Create RSA key pair for test JWT signing
-        _rsa = RSA.Create(2048);
-
-        // Set the environment variable so DI can pick up the public key
-        var publicKeyPem = _rsa.ExportSubjectPublicKeyInfoPem();
-        Environment.SetEnvironmentVariable("Jwt__RsaPublicKeyPem", publicKeyPem);
-
         await _postgres.StartAsync();
 
         // Apply migrations

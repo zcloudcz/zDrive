@@ -15,7 +15,7 @@ builder.Host.UseSerilog((context, config) => config
 
 builder.Services.AddSharedServices();
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 
 builder.Services.AddControllers();
 
@@ -70,6 +70,15 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Create the database schema on first run in Development. There are no EF
+// migrations yet — production deployments will introduce them once the schema
+// stabilizes; until then a fresh dev database is provisioned automatically.
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<PhotoDbContext>().Database.EnsureCreatedAsync();
+}
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();

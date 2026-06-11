@@ -1,11 +1,15 @@
+using System.Security.Cryptography;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Azure.Storage;
 using Azure.Storage.Blobs;
+using Microsoft.IdentityModel.Tokens;
 using Testcontainers.PostgreSql;
 using Xunit;
 using ZDrive.StorageService.Application.Interfaces;
@@ -33,9 +37,23 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
 
     public string AzuriteConnectionString => $"DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://{_azurite.Hostname}:{_azurite.GetMappedPublicPort(10000)}/devstoreaccount1;";
 
+    // Created eagerly so it exists before the host is built; tests sign JWTs
+    // with this key and the service is configured to validate against it.
+    public RSA Rsa { get; } = RSA.Create(2048);
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+
+        // Make the service validate tokens signed by this factory's key instead
+        // of the per-machine dev key pair. PostConfigure runs after the app's own
+        // service registration, so it reliably overrides the signing key.
+        builder.ConfigureTestServices(services =>
+        {
+            services.PostConfigure<JwtBearerOptions>(
+                JwtBearerDefaults.AuthenticationScheme,
+                options => options.TokenValidationParameters.IssuerSigningKey = new RsaSecurityKey(Rsa));
+        });
 
         builder.ConfigureServices(services =>
         {
@@ -87,6 +105,7 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
 
     async Task IAsyncLifetime.DisposeAsync()
     {
+        Rsa.Dispose();
         await Task.WhenAll(
             _postgres.DisposeAsync().AsTask(),
             _azurite.DisposeAsync().AsTask());
