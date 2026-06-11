@@ -6,6 +6,7 @@ using ZDrive.Shared.DTOs;
 using ZDrive.StorageService.Application.Commands.CompleteUpload;
 using ZDrive.StorageService.Application.Commands.DeleteBlob;
 using ZDrive.StorageService.Application.Commands.InitUpload;
+using ZDrive.StorageService.Application.Commands.RestoreManifest;
 using ZDrive.StorageService.Application.Commands.UploadChunk;
 using ZDrive.StorageService.Application.DTOs;
 using ZDrive.StorageService.Application.Queries.GetChunkDownloadUrl;
@@ -97,6 +98,20 @@ public sealed class StorageController : ControllerBase
         var query = new GetThumbnailUrlQuery(tenantId, userId, photoId, size);
         var result = await _mediator.Send(query, ct);
         return Ok(ApiResponse<string>.Ok(result));
+    }
+
+    [HttpPost("files/{fileId:guid}/manifests/{manifestHash}/restore")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RestoreManifest(Guid fileId, string manifestHash, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+
+        var command = new RestoreManifestCommand(tenantId, userId, fileId, manifestHash);
+        var result = await _mediator.Send(command, ct);
+        return Ok(ApiResponse<bool>.Ok(result));
     }
 
     [HttpDelete("{fileId:guid}")]

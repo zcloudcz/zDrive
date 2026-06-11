@@ -10,6 +10,7 @@ class FileGridItem extends StatelessWidget {
   final VoidCallback onRename;
   final VoidCallback onDelete;
   final VoidCallback onShare;
+  final VoidCallback onVersions;
 
   const FileGridItem({
     super.key,
@@ -18,6 +19,7 @@ class FileGridItem extends StatelessWidget {
     required this.onRename,
     required this.onDelete,
     required this.onShare,
+    required this.onVersions,
   });
 
   @override
@@ -66,6 +68,8 @@ class FileGridItem extends StatelessWidget {
                             onDelete();
                           case 'share':
                             onShare();
+                          case 'versions':
+                            onVersions();
                         }
                       },
                       itemBuilder: (_) => [
@@ -73,6 +77,11 @@ class FileGridItem extends StatelessWidget {
                             value: 'rename', child: Text(l10n.rename)),
                         PopupMenuItem(
                             value: 'share', child: Text(l10n.share)),
+                        // Folders have no content, so no version history.
+                        if (!file.isFolder)
+                          PopupMenuItem(
+                              value: 'versions',
+                              child: Text(l10n.versionHistory)),
                         PopupMenuItem(
                             value: 'delete', child: Text(l10n.delete)),
                       ],

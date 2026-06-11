@@ -457,6 +457,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your files are up to date across all devices.'**
   String get syncDescription;
+
+  /// No description provided for @versionHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'Version history'**
+  String get versionHistory;
+
+  /// No description provided for @noVersions.
+  ///
+  /// In en, this message translates to:
+  /// **'No versions yet'**
+  String get noVersions;
+
+  /// No description provided for @restoreVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get restoreVersion;
+
+  /// No description provided for @versionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {number}'**
+  String versionLabel(int number);
+
+  /// No description provided for @confirmRestoreVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore this version?'**
+  String get confirmRestoreVersion;
+
+  /// No description provided for @versionRestored.
+  ///
+  /// In en, this message translates to:
+  /// **'Version restored'**
+  String get versionRestored;
+
+  /// No description provided for @latestVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Latest'**
+  String get latestVersion;
+
+  /// No description provided for @close.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get close;
 }
 
 class _AppLocalizationsDelegate

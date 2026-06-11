@@ -11,6 +11,7 @@ class FileListItem extends StatelessWidget {
   final VoidCallback onRename;
   final VoidCallback onDelete;
   final VoidCallback onShare;
+  final VoidCallback onVersions;
 
   const FileListItem({
     super.key,
@@ -19,6 +20,7 @@ class FileListItem extends StatelessWidget {
     required this.onRename,
     required this.onDelete,
     required this.onShare,
+    required this.onVersions,
   });
 
   @override
@@ -43,11 +45,16 @@ class FileListItem extends StatelessWidget {
               onDelete();
             case 'share':
               onShare();
+            case 'versions':
+              onVersions();
           }
         },
         itemBuilder: (_) => [
           PopupMenuItem(value: 'rename', child: Text(l10n.rename)),
           PopupMenuItem(value: 'share', child: Text(l10n.share)),
+          // Folders have no content, so no version history.
+          if (!file.isFolder)
+            PopupMenuItem(value: 'versions', child: Text(l10n.versionHistory)),
           PopupMenuItem(value: 'delete', child: Text(l10n.delete)),
         ],
       ),

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Azure.Storage;
 using Azure.Storage.Blobs;
@@ -125,6 +126,50 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         _logger.LogInformation("Deleted all blobs for file {FileId}", fileId);
     }
 
+    public async Task<string> ComputeTempChunkHashAsync(Guid sessionId, int chunkIndex, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(SystemContainer);
+        var blobClient = containerClient.GetBlobClient(GetTempBlobPath(sessionId, chunkIndex));
+
+        // Stream the blob through the hash so large chunks never load into memory.
+        await using var stream = await blobClient.OpenReadAsync(cancellationToken: ct);
+        using var sha256 = SHA256.Create();
+        var hash = await sha256.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    public async Task UploadManifestSnapshotAsync(
+        Guid tenantId, Guid userId, Guid fileId, string manifestHash, ChunkManifest manifest, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);
+        await containerClient.CreateIfNotExistsAsync(cancellationToken: ct);
+
+        var blobClient = containerClient.GetBlobClient(GetManifestSnapshotPath(tenantId, userId, fileId, manifestHash));
+
+        var json = JsonSerializer.Serialize(manifest);
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+        await blobClient.UploadAsync(stream, overwrite: true, ct);
+
+        _logger.LogDebug("Uploaded manifest snapshot {ManifestHash} for file {FileId}", manifestHash, fileId);
+    }
+
+    public async Task<bool> RestoreManifestSnapshotAsync(
+        Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);
+        var snapshotBlob = containerClient.GetBlobClient(GetManifestSnapshotPath(tenantId, userId, fileId, manifestHash));
+
+        if (!await snapshotBlob.ExistsAsync(ct))
+            return false;
+
+        var currentBlob = containerClient.GetBlobClient(GetManifestPath(tenantId, userId, fileId));
+        var copyOperation = await currentBlob.StartCopyFromUriAsync(snapshotBlob.Uri, cancellationToken: ct);
+        await copyOperation.WaitForCompletionAsync(ct);
+
+        _logger.LogInformation("Restored manifest snapshot {ManifestHash} for file {FileId}", manifestHash, fileId);
+        return true;
+    }
+
     public async Task<bool> TempChunkExistsAsync(Guid sessionId, int chunkIndex, CancellationToken ct = default)
     {
         var containerClient = _blobServiceClient.GetBlobContainerClient(SystemContainer);
@@ -174,4 +219,7 @@ public sealed class AzureBlobStorageService : IBlobStorageService
 
     private static string GetManifestPath(Guid tenantId, Guid userId, Guid fileId) =>
         $"{tenantId}/{userId}/files/{fileId}/manifest.json";
+
+    private static string GetManifestSnapshotPath(Guid tenantId, Guid userId, Guid fileId, string manifestHash) =>
+        $"{tenantId}/{userId}/files/{fileId}/manifests/{manifestHash}.json";
 }

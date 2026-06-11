@@ -27,6 +27,10 @@ public static class DependencyInjection
 
         services.AddScoped<IFileDbContext>(sp => sp.GetRequiredService<FileDbContext>());
 
+        // Version retention policy (defaults apply when the section is missing)
+        services.Configure<ZDrive.FileService.Application.Options.VersioningOptions>(
+            configuration.GetSection(ZDrive.FileService.Application.Options.VersioningOptions.SectionName));
+
         // Authentication (validates JWTs issued by AuthService)
         var publicKeyPem = configuration["Jwt:RsaPublicKeyPem"];
         if (string.IsNullOrWhiteSpace(publicKeyPem))

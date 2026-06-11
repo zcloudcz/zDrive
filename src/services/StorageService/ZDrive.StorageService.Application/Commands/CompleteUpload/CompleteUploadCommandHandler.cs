@@ -54,7 +54,11 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
         for (var i = 0; i < session.TotalChunks; i++)
         {
             var chunkSize = await _blobStorage.GetTempChunkSizeAsync(session.Id, i, cancellationToken);
-            var chunkHash = $"chunk-{i:D6}";
+
+            // Content-addressed chunk name: identical content lands on the same
+            // blob path, so re-uploads never destroy chunks an older file
+            // version still references (and identical chunks dedupe for free).
+            var chunkHash = await _blobStorage.ComputeTempChunkHashAsync(session.Id, i, cancellationToken);
             var blobPath = await _blobStorage.MoveChunkToFinalAsync(
                 session.Id, i, session.TenantId, session.UserId, session.FileId, chunkHash, cancellationToken);
 
@@ -86,18 +90,29 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
             }).ToList()
         };
 
-        await _blobStorage.UploadManifestAsync(session.TenantId, session.UserId, session.FileId, manifest, cancellationToken);
+        // Manifest hash identifies this version — compute it up front so the
+        // immutable snapshot can be stored under its content address.
+        var manifestJson = JsonSerializer.Serialize(manifest);
+        var manifestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifestJson))).ToLowerInvariant();
 
-        // Persist chunk records
-        foreach (var chunk in chunks)
+        await _blobStorage.UploadManifestAsync(session.TenantId, session.UserId, session.FileId, manifest, cancellationToken);
+        await _blobStorage.UploadManifestSnapshotAsync(
+            session.TenantId, session.UserId, session.FileId, manifestHash, manifest, cancellationToken);
+
+        // Persist chunk records. Chunks are content-addressed, so skip hashes
+        // this file already knows (re-upload of identical content) and dedupe
+        // within the current upload.
+        var newHashes = chunks.Select(c => c.ChunkHash).ToList();
+        var knownHashes = await _db.BlobChunks
+            .Where(c => c.FileId == session.FileId && newHashes.Contains(c.ChunkHash))
+            .Select(c => c.ChunkHash)
+            .ToListAsync(cancellationToken);
+
+        foreach (var chunk in chunks.DistinctBy(c => c.ChunkHash).Where(c => !knownHashes.Contains(c.ChunkHash)))
             _db.BlobChunks.Add(chunk);
 
         session.Status = UploadSessionStatus.Completed;
         await _db.SaveChangesAsync(cancellationToken);
-
-        // Compute manifest hash
-        var manifestJson = JsonSerializer.Serialize(manifest);
-        var manifestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifestJson))).ToLowerInvariant();
 
         var basePath = $"{session.TenantId}/{session.UserId}/files/{session.FileId}";
         return new UploadCompleteDto(basePath, manifestHash, totalSize);

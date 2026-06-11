@@ -4,6 +4,7 @@ import 'package:injectable/injectable.dart';
 
 import '../domain/file_item.dart';
 import '../domain/file_repository.dart';
+import '../domain/file_version.dart';
 import 'file_dtos.dart';
 import 'file_remote_data_source.dart';
 import 'file_upload_data_source.dart';
@@ -147,6 +148,35 @@ class FileRepositoryImpl implements FileRepository {
   @override
   Future<String> getDownloadUrl(String fileId) {
     return _uploadDataSource.getDownloadUrl(fileId);
+  }
+
+  @override
+  Future<List<FileVersion>> getVersions(String fileId) async {
+    final list = await _remoteDataSource.getFileVersions(fileId);
+    return list.map(_mapVersion).toList();
+  }
+
+  @override
+  Future<FileVersion> restoreVersion(String fileId, String versionId) async {
+    // Metadata first: FileService validates ownership and records the restore
+    // as a new version. Only then flip the blob-side manifest.
+    final restored =
+        _mapVersion(await _remoteDataSource.restoreFileVersion(fileId, versionId));
+    await _remoteDataSource.restoreStorageManifest(fileId, restored.blobVersionId);
+    return restored;
+  }
+
+  FileVersion _mapVersion(Map<String, dynamic> json) {
+    return FileVersion(
+      id: json['id'] as String,
+      fileId: json['fileId'] as String,
+      versionNumber: json['versionNumber'] as int,
+      blobVersionId: json['blobVersionId'] as String,
+      sizeBytes: (json['sizeBytes'] as num).toInt(),
+      manifestHash: json['manifestHash'] as String?,
+      comment: json['comment'] as String?,
+      createdAt: DateTime.parse(json['createdAt'] as String),
+    );
   }
 
   FileItem _mapDtoToFileItem(FileDto dto) {

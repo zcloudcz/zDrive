@@ -190,4 +190,30 @@ class AppLocalizationsCs extends AppLocalizations {
   @override
   String get syncDescription =>
       'Vaše soubory jsou aktuální na všech zařízeních.';
+
+  @override
+  String get versionHistory => 'Historie verzí';
+
+  @override
+  String get noVersions => 'Zatím žádné verze';
+
+  @override
+  String get restoreVersion => 'Obnovit';
+
+  @override
+  String versionLabel(int number) {
+    return 'Verze $number';
+  }
+
+  @override
+  String get confirmRestoreVersion => 'Obnovit tuto verzi?';
+
+  @override
+  String get versionRestored => 'Verze obnovena';
+
+  @override
+  String get latestVersion => 'Aktuální';
+
+  @override
+  String get close => 'Zavřít';
 }
