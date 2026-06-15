@@ -22,6 +22,7 @@ dependencies:
   hive_flutter: ^1.1.0
   equatable: ^2.0.7
   json_annotation: ^4.9.0
+  crypto: ^3.0.0
   intl: any
   file_picker: ^8.0.0
   share_plus: ^10.0.0

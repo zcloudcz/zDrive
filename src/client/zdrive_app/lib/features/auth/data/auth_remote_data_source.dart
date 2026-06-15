@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:injectable/injectable.dart';
 
 import '../../../core/network/api_constants.dart';
+import '../../../core/network/api_envelope.dart';
 import 'auth_dtos.dart';
 
 @lazySingleton
@@ -18,7 +19,7 @@ class AuthRemoteDataSource {
       ApiConstants.authLogin,
       data: {'email': email, 'password': password},
     );
-    return AuthResponseDto.fromJson(response.data as Map<String, dynamic>);
+    return AuthResponseDto.fromJson(unwrapMap(response));
   }
 
   Future<AuthResponseDto> register({
@@ -34,11 +35,11 @@ class AuthRemoteDataSource {
         'displayName': displayName,
       },
     );
-    return AuthResponseDto.fromJson(response.data as Map<String, dynamic>);
+    return AuthResponseDto.fromJson(unwrapMap(response));
   }
 
   Future<UserDto> getCurrentUser() async {
     final response = await _dio.get(ApiConstants.usersMe);
-    return UserDto.fromJson(response.data as Map<String, dynamic>);
+    return UserDto.fromJson(unwrapMap(response));
   }
 }

@@ -54,6 +54,23 @@ public sealed class FilesController : ControllerBase
         return Ok(ApiResponse<PagedResult<FileDto>>.Ok(result));
     }
 
+    /// <summary>
+    /// Lists items at the root (no parent). Separate route because the
+    /// "{id:guid}/children" route cannot express a null parent.
+    /// </summary>
+    [HttpGet("root/children")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<FileDto>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListRootChildren(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
+        var result = await _mediator.Send(new ListChildrenQuery(userId, tenantId, null, page, pageSize), ct);
+        return Ok(ApiResponse<PagedResult<FileDto>>.Ok(result));
+    }
+
     [HttpPost]
     [ProducesResponseType(typeof(ApiResponse<FileDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]

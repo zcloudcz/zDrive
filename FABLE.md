@@ -33,7 +33,18 @@ Cloud storage platforma (alternativa OneDrive + Google Photos): .NET 8 mikroserv
 - Codex review nedostupný (ChatGPT účet nepodporuje Codex API modely) — review provedla hydra vlastním čtením; až bude Codex funkční, zvážit zpětný audit fáze 3.
 - Flutter upload/files data source míjí reálný backend kontrakt (bez ApiResponse envelope, jiné cesty — `/files/uploads` vs. `/storage/upload`, PATCH vs. PUT) — klient z fáze 1 psaný proti předpokládanému API; nový versions kód už cílí na skutečný kontrakt. Zaslouží vlastní alignment task.
 
+## Client API alignment — hotovo (15. 6. 2026, větev feature/client-api-alignment)
+- **Envelope:** helper `unwrapMap/unwrapMapList/ensureSuccess` + `ApiException` (`core/network/api_envelope.dart`). Backend balí vše do `{success,data,error}`; klient (auth/files/upload/sync) četl `response.data` přímo → vše rozbité. Helper se volá na call-site (robustnější než global interceptor proti stávajícím auth-refresh/retry interceptorům, které re-issue requesty přes bare Dio). Auth-refresh interceptor rozbaluje envelope ručně. **PhotoService envelope NEpoužívá** (`Ok(result)` přímo) — photo DS ponechán beze změny.
+- **Cesty/metody:** port `5000→5100` (gateway). rename `PUT /files/{id}/rename`, move `PUT /files/{id}/move`, createFolder `POST /files {isFolder:true}`, root listing `GET /files/root/children` (nová backend routa — `{id:guid}/children` neumí null parent). Shares `/api/v1/shares` + **nová gateway routa** (předtím gateway shares vůbec neroutoval).
+- **Upload přepsán** — klient orchestruje: `POST /files` (node) → `POST /storage/upload/init {fileId}` → `PUT /storage/upload/{s}/chunk/{i}` (raw body, `X-Chunk-Hash`=SHA-256) → `complete` → `POST /files/{id}/versions`. DTOs opraveny (`UploadSessionDto{sessionId,sasUploadUrl}`, `UploadCompleteDto{blobPath,manifestHash,totalSize}`, nový `DownloadUrlDto`). Download `GET /storage/download/{id}`. Přidána závislost `crypto`.
+- **Auth:** `AuthTokenDto` nevrací user → `AuthResponseDto` jen tokeny, login/register po uložení tokenů volá `getCurrentUser()` (`GET /users/me`).
+- **FileService** `JsonStringEnumConverter` (Permission lze poslat jménem; čte i číslo, takže stávající testy drží).
+- **Ověřeno:** flutter analyze čistý, Flutter 63/63 (29 nových data-source/envelope testů), .NET 191/191.
+
+### Odloženo (samostatný photos task)
+- PhotoService routuje gateway jen `/photos`; `/api/v1/albums` a `/api/v1/memories` controllery **gateway neroutuje** → alba/memories z klienta nedostupné. Navíc photo DS čte `response.data['items']` u album-photos, ale controller vrací holý list (paging kontrakt nesedí). Photos feature potřebuje vlastní alignment (gateway routy + paging).
+
 ## Návrhy — další krok
-- **Alignment Flutter klienta na reálné API** (viz výše) — bez něj upload z klienta nefunguje proti skutečnému backendu.
+- **Photos alignment** (gateway albums/memories routy + paging kontrakt) — viz výše.
 - Pak fáze 2 dokončení (sync engine) nebo fáze 5 (Photos AI) dle priority.
 - Při zavádění dalších fází zvážit EF migrace místo `EnsureCreated`.

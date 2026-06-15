@@ -129,8 +129,20 @@ class FileRepositoryImpl implements FileRepository {
     Uint8List bytes,
     void Function(double progress)? onProgress,
   ) async {
-    // MVP: single-chunk upload
-    final session = await _uploadDataSource.initUpload(parentId, fileName, 1);
+    // Client-orchestrated upload across two services:
+    //  1. FileService — create the file node (gives us the id).
+    //  2. StorageService — open a session, push chunks, complete (returns the
+    //     manifest hash that identifies this content).
+    //  3. FileService — record the version, binding the manifest to the file.
+    final node = await _remoteDataSource.createFile(
+      name: fileName,
+      isFolder: false,
+      parentId: parentId,
+      sizeBytes: bytes.length,
+    );
+
+    // MVP: single-chunk upload.
+    final session = await _uploadDataSource.initUpload(node.id, fileName, 1);
     await _uploadDataSource.uploadChunk(
       session.sessionId,
       0,
@@ -141,8 +153,16 @@ class FileRepositoryImpl implements FileRepository {
             }
           : null,
     );
-    final result = await _uploadDataSource.completeUpload(session.sessionId);
-    return result.fileId;
+    final complete = await _uploadDataSource.completeUpload(session.sessionId);
+
+    await _remoteDataSource.createFileVersion(
+      node.id,
+      blobVersionId: complete.manifestHash,
+      sizeBytes: complete.totalSize,
+      manifestHash: complete.manifestHash,
+    );
+
+    return node.id;
   }
 
   @override

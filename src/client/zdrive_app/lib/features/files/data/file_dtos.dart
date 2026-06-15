@@ -77,13 +77,11 @@ class PagedResultDto {
 @JsonSerializable()
 class UploadSessionDto {
   final String sessionId;
-  final String fileId;
-  final int totalChunks;
+  final String sasUploadUrl;
 
   const UploadSessionDto({
     required this.sessionId,
-    required this.fileId,
-    required this.totalChunks,
+    required this.sasUploadUrl,
   });
 
   factory UploadSessionDto.fromJson(Map<String, dynamic> json) =>
@@ -94,18 +92,34 @@ class UploadSessionDto {
 
 @JsonSerializable()
 class UploadCompleteDto {
-  final String fileId;
-  final String name;
-  final int sizeBytes;
+  final String blobPath;
+  final String manifestHash;
+  final int totalSize;
 
   const UploadCompleteDto({
-    required this.fileId,
-    required this.name,
-    required this.sizeBytes,
+    required this.blobPath,
+    required this.manifestHash,
+    required this.totalSize,
   });
 
   factory UploadCompleteDto.fromJson(Map<String, dynamic> json) =>
       _$UploadCompleteDtoFromJson(json);
 
   Map<String, dynamic> toJson() => _$UploadCompleteDtoToJson(this);
+}
+
+@JsonSerializable()
+class DownloadUrlDto {
+  final String sasUrl;
+  final DateTime expiresAt;
+
+  const DownloadUrlDto({
+    required this.sasUrl,
+    required this.expiresAt,
+  });
+
+  factory DownloadUrlDto.fromJson(Map<String, dynamic> json) =>
+      _$DownloadUrlDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$DownloadUrlDtoToJson(this);
 }

@@ -9,8 +9,9 @@ void main() {
   late MockDio dio;
   late SyncRemoteDataSource dataSource;
 
+  // Wraps payloads in the backend envelope { success, data, error }.
   Response<dynamic> response(dynamic data, String path) => Response<dynamic>(
-        data: data,
+        data: {'success': true, 'data': data, 'error': null},
         statusCode: 200,
         requestOptions: RequestOptions(path: path),
       );
