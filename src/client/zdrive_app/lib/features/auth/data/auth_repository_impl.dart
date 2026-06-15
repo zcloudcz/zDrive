@@ -25,12 +25,8 @@ class AuthRepositoryImpl implements AuthRepository {
       accessToken: response.accessToken,
       refreshToken: response.refreshToken,
     );
-    return User(
-      id: response.user.id,
-      email: response.user.email,
-      displayName: response.user.displayName,
-      avatarUrl: response.user.avatarUrl,
-    );
+    // Backend returns tokens only; load the profile with the new token.
+    return getCurrentUser();
   }
 
   @override
@@ -48,12 +44,8 @@ class AuthRepositoryImpl implements AuthRepository {
       accessToken: response.accessToken,
       refreshToken: response.refreshToken,
     );
-    return User(
-      id: response.user.id,
-      email: response.user.email,
-      displayName: response.user.displayName,
-      avatarUrl: response.user.avatarUrl,
-    );
+    // Backend returns tokens only; load the profile with the new token.
+    return getCurrentUser();
   }
 
   @override

@@ -45,8 +45,12 @@ class AuthInterceptor extends Interceptor {
           data: {'refreshToken': refreshToken},
         );
 
-        final newAccess = response.data['accessToken'] as String;
-        final newRefresh = response.data['refreshToken'] as String;
+        // Refresh runs on a bare Dio (no envelope interceptor) to avoid
+        // recursion, so unwrap the { success, data } envelope by hand.
+        final envelope = response.data as Map<String, dynamic>;
+        final tokens = envelope['data'] as Map<String, dynamic>;
+        final newAccess = tokens['accessToken'] as String;
+        final newRefresh = tokens['refreshToken'] as String;
         await _tokenStorage.saveTokens(
           accessToken: newAccess,
           refreshToken: newRefresh,

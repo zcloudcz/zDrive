@@ -19,8 +19,12 @@ builder.Services.AddSharedServices();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 
-// Controllers
-builder.Services.AddControllers();
+// Controllers — accept enum values as strings ("Read") as well as numbers,
+// so the Flutter client can send Permission by name.
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+        options.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
 // Swagger
 builder.Services.AddEndpointsApiExplorer();

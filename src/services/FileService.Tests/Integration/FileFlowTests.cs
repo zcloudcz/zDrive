@@ -64,6 +64,26 @@ public sealed class FileFlowTests : IClassFixture<FileServiceFactory>
     }
 
     [Fact]
+    public async Task ListRootChildren_ReturnsTopLevelItems()
+    {
+        // A folder created with no parent lives at the root.
+        var rootFolder = await _client.PostAsJsonAsync("/api/v1/files", new
+        {
+            name = "RootLevelFolder",
+            isFolder = true
+        });
+        rootFolder.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        // The root listing route (no GUID) must surface it.
+        var listResponse = await _client.GetAsync("/api/v1/files/root/children?page=1&pageSize=50");
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var listResult = await listResponse.Content.ReadFromJsonAsync<ApiResponse<PagedResult<FileDto>>>();
+        listResult!.Success.Should().BeTrue();
+        listResult.Data!.Items.Should().Contain(f => f.Name == "RootLevelFolder");
+    }
+
+    [Fact]
     public async Task RenameFile_UpdatesName()
     {
         // Create file

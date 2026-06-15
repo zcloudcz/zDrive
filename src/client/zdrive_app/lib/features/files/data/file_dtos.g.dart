@@ -67,27 +67,37 @@ Map<String, dynamic> _$PagedResultDtoToJson(PagedResultDto instance) =>
 UploadSessionDto _$UploadSessionDtoFromJson(Map<String, dynamic> json) =>
     UploadSessionDto(
       sessionId: json['sessionId'] as String,
-      fileId: json['fileId'] as String,
-      totalChunks: (json['totalChunks'] as num).toInt(),
+      sasUploadUrl: json['sasUploadUrl'] as String,
     );
 
 Map<String, dynamic> _$UploadSessionDtoToJson(UploadSessionDto instance) =>
     <String, dynamic>{
       'sessionId': instance.sessionId,
-      'fileId': instance.fileId,
-      'totalChunks': instance.totalChunks,
+      'sasUploadUrl': instance.sasUploadUrl,
     };
 
 UploadCompleteDto _$UploadCompleteDtoFromJson(Map<String, dynamic> json) =>
     UploadCompleteDto(
-      fileId: json['fileId'] as String,
-      name: json['name'] as String,
-      sizeBytes: (json['sizeBytes'] as num).toInt(),
+      blobPath: json['blobPath'] as String,
+      manifestHash: json['manifestHash'] as String,
+      totalSize: (json['totalSize'] as num).toInt(),
     );
 
 Map<String, dynamic> _$UploadCompleteDtoToJson(UploadCompleteDto instance) =>
     <String, dynamic>{
-      'fileId': instance.fileId,
-      'name': instance.name,
-      'sizeBytes': instance.sizeBytes,
+      'blobPath': instance.blobPath,
+      'manifestHash': instance.manifestHash,
+      'totalSize': instance.totalSize,
+    };
+
+DownloadUrlDto _$DownloadUrlDtoFromJson(Map<String, dynamic> json) =>
+    DownloadUrlDto(
+      sasUrl: json['sasUrl'] as String,
+      expiresAt: DateTime.parse(json['expiresAt'] as String),
+    );
+
+Map<String, dynamic> _$DownloadUrlDtoToJson(DownloadUrlDto instance) =>
+    <String, dynamic>{
+      'sasUrl': instance.sasUrl,
+      'expiresAt': instance.expiresAt.toIso8601String(),
     };

@@ -2,16 +2,18 @@ import 'package:json_annotation/json_annotation.dart';
 
 part 'auth_dtos.g.dart';
 
+/// Mirrors backend `AuthTokenDto` — tokens only, no user. The user profile is
+/// fetched separately via GET /users/me.
 @JsonSerializable()
 class AuthResponseDto {
   final String accessToken;
   final String refreshToken;
-  final UserDto user;
+  final DateTime expiresAt;
 
   const AuthResponseDto({
     required this.accessToken,
     required this.refreshToken,
-    required this.user,
+    required this.expiresAt,
   });
 
   factory AuthResponseDto.fromJson(Map<String, dynamic> json) =>
