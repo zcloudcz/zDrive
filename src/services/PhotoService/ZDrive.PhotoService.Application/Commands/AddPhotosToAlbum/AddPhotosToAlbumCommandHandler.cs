@@ -35,7 +35,10 @@ public sealed class AddPhotosToAlbumCommandHandler : IRequestHandler<AddPhotosTo
             if (existingPhotoIds.Contains(photoId))
                 continue;
 
-            var photoExists = await _db.Photos.AnyAsync(p => p.Id == photoId, cancellationToken);
+            // Same owner filter as the album lookup above: a photo belonging to
+            // another user is treated as not found and silently skipped, not added.
+            var photoExists = await _db.Photos
+                .AnyAsync(p => p.Id == photoId && p.UserId == request.UserId, cancellationToken);
             if (!photoExists)
                 continue;
 

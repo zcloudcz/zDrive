@@ -178,11 +178,11 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     }
 
     [Fact]
-    public async Task AddTag_PhotoOwnedByAnotherUser_SucceedsAnyway()
+    public async Task AddTag_PhotoOwnedByAnotherUser_Returns404()
     {
-        // Documents a known gap (see report): AddTagCommandHandler only checks
-        // that the photo exists globally, not that it belongs to the calling
-        // user/tenant. Not fixed here — out of scope for this task.
+        // Ownership is enforced by filtering on UserId/TenantId in the photo
+        // lookup, not by a separate authorization check — a foreign photo looks
+        // the same as a missing one (404, not 403 and not silently tagged).
         var photo = await IngestPhotoAsync("foreign-tag-target.jpg");
 
         using var foreignClient = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
@@ -193,7 +193,25 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
             source = 1
         });
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task AddTag_SameUserDifferentTenant_Returns404()
+    {
+        // Isolates the TenantId half of the ownership filter: same UserId as the
+        // photo owner, but a different tenant claim, must still be rejected.
+        var photo = await IngestPhotoAsync("cross-tenant-tag-target.jpg");
+
+        using var crossTenantClient = _factory.CreateAuthenticatedClient(_factory.TestUserId, Guid.NewGuid());
+        var response = await crossTenantClient.PostAsJsonAsync($"/api/v1/photos/{photo.Id}/tags", new
+        {
+            tag = "not-my-tenant",
+            confidence = 1.0f,
+            source = 1
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

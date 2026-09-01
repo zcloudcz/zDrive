@@ -78,11 +78,11 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
     }
 
     [Fact]
-    public async Task AddPhotos_PhotoOwnedByAnotherUser_IsAddedAnyway()
+    public async Task AddPhotos_PhotoOwnedByAnotherUser_IsNotAdded()
     {
-        // Documents a known gap (see report): AddPhotosToAlbumCommandHandler only
-        // checks that the photo exists globally, not that it belongs to the
-        // calling user/tenant. Not fixed here — out of scope for this task.
+        // Owner filter on the photo lookup makes a foreign photo behave exactly
+        // like a non-existent one for this bulk endpoint: it is silently skipped
+        // (added count excludes it), not added and not a hard failure.
         var album = await CreateAlbumAsync("AddPhotos_ForeignPhoto");
 
         using var foreignClient = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
@@ -101,7 +101,12 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
 
         addResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var added = await addResponse.Content.ReadFromJsonAsync<JsonElement>();
-        added.GetProperty("added").GetInt32().Should().Be(1);
+        added.GetProperty("added").GetInt32().Should().Be(0);
+
+        var photosResponse = await _client.GetAsync($"/api/v1/albums/{album.Id}/photos");
+        photosResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var photos = await photosResponse.Content.ReadFromJsonAsync<PagedResult<PhotoDto>>();
+        photos!.Items.Should().NotContain(p => p.Id == foreignPhoto.Id);
     }
 
     [Fact]

@@ -24,8 +24,9 @@ public class AlbumsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateAlbumCommand command, CancellationToken ct)
     {
-        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
-        var enriched = command with { UserId = User.GetUserId(), TenantId = tenantId };
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var enriched = command with { UserId = userId, TenantId = tenantId };
         var result = await _mediator.Send(enriched, ct);
         return CreatedAtAction(nameof(GetPhotos), new { id = result.Id }, result);
     }
@@ -33,16 +34,18 @@ public class AlbumsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
-        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
-        var result = await _mediator.Send(new GetAlbumsQuery(User.GetUserId(), tenantId), ct);
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var result = await _mediator.Send(new GetAlbumsQuery(userId, tenantId), ct);
         return Ok(result);
     }
 
     [HttpGet("{id:guid}/photos")]
     public async Task<IActionResult> GetPhotos(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
     {
-        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
-        var result = await _mediator.Send(new GetAlbumPhotosQuery(User.GetUserId(), tenantId, id, page, pageSize), ct);
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var result = await _mediator.Send(new GetAlbumPhotosQuery(userId, tenantId, id, page, pageSize), ct);
         return Ok(result);
     }
 

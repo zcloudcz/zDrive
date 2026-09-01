@@ -72,7 +72,17 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
     async Task IAsyncLifetime.DisposeAsync()
     {
         _rsa.Dispose();
-        await _postgres.DisposeAsync();
+        try
+        {
+            // Stop the test host before tearing down the container it depends on,
+            // otherwise the host is leaked and its DB calls fail mid-shutdown.
+            await base.DisposeAsync();
+        }
+        finally
+        {
+            // Always dispose the container, even if host shutdown throws.
+            await _postgres.DisposeAsync();
+        }
     }
 
     /// <summary>
