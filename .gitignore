@@ -24,6 +24,9 @@ pubspec.lock
 *.tfstate.backup
 *.tfplan
 .terraform.lock.hcl
+*.auto.tfvars
+*.auto.tfvars.json
+secrets.tfvars
 
 # IDE
 .vs/
