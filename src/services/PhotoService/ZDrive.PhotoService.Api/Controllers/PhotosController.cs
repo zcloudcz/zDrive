@@ -25,7 +25,7 @@ public class PhotosController : ControllerBase
         var enriched = command with
         {
             UserId = User.GetUserId(),
-            TenantId = User.GetTenantId()
+            TenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.")
         };
         var result = await _mediator.Send(enriched, ct);
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
@@ -39,15 +39,17 @@ public class PhotosController : ControllerBase
         [FromQuery] int offset = 0,
         CancellationToken ct = default)
     {
+        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
         var result = await _mediator.Send(new GetTimelineQuery(
-            User.GetUserId(), User.GetTenantId(), from, to, limit, offset), ct);
+            User.GetUserId(), tenantId, from?.UtcDateTime, to?.UtcDateTime, limit, offset), ct);
         return Ok(result);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
-        var result = await _mediator.Send(new GetPhotoQuery(User.GetUserId(), User.GetTenantId(), id), ct);
+        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
+        var result = await _mediator.Send(new GetPhotoQuery(User.GetUserId(), tenantId, id), ct);
         return Ok(result);
     }
 
@@ -58,8 +60,9 @@ public class PhotosController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
+        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
         var result = await _mediator.Send(new SearchPhotosQuery(
-            User.GetUserId(), User.GetTenantId(), q, page, pageSize), ct);
+            User.GetUserId(), tenantId, q, page, pageSize), ct);
         return Ok(result);
     }
 
