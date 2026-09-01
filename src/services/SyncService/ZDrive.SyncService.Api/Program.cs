@@ -96,24 +96,29 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
     var creator = (RelationalDatabaseCreator)db.Database.GetService<IRelationalDatabaseCreator>();
-    if (!await creator.ExistsAsync())
-        await creator.CreateAsync(); // physical "zdrive" database, if it doesn't exist yet
     try
     {
+        if (!await creator.ExistsAsync())
+            await creator.CreateAsync(); // physical "zdrive" database, if it doesn't exist yet
         await creator.CreateTablesAsync(); // only this context's schema + tables
     }
     catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.DuplicateTable
                                      || ex.SqlState == PostgresErrorCodes.DuplicateObject
-                                     || ex.SqlState == PostgresErrorCodes.DuplicateSchema)
+                                     || ex.SqlState == PostgresErrorCodes.DuplicateSchema
+                                     || ex.SqlState == PostgresErrorCodes.DuplicateDatabase)
     {
-        // Already created by a previous run — idempotent no-op.
+        // Already created by a previous run, or by another service racing to
+        // create the shared "zdrive" database on first boot — idempotent no-op
+        // either way.
+        Log.Warning("Schema init for {DbContext} skipped, already exists ({SqlState}): {Message}",
+            db.GetType().Name, ex.SqlState, ex.MessageText);
         // ponytail: this assumes one duplicate object means the whole schema
         // is up to date. CreateTablesAsync has no migration history, so if
         // this context's model gains a table on a later deploy, the DDL
         // transaction fails on the first pre-existing table, rolls back, and
-        // the new table silently never gets created — same "duplicate" catch,
-        // wrong conclusion. Real fix is EF migrations, which track what's
-        // already applied per context.
+        // the new table never gets created — the Log.Warning above fires, but
+        // nothing else surfaces this. Real fix is EF migrations, which track
+        // what's already applied per context.
     }
 }
 
