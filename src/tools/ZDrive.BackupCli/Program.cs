@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ZDrive.BackupCli.Api;
 using ZDrive.BackupCli.Backup;
 
@@ -63,6 +64,17 @@ catch (UriFormatException ex)
     return 1;
 }
 
+// Login sends the password in the request body — over plain http that's
+// readable to anyone on the network path. Allow it unencrypted only to
+// localhost (dev/test); anywhere else requires an explicit opt-in.
+if (InsecureHttpPolicy.IsBlocked(baseAddress))
+{
+    stderr.WriteLine(
+        $"Refusing plain http:// to non-localhost host '{baseAddress.Host}': credentials would be sent unencrypted. " +
+        "Set ZDRIVE_ALLOW_INSECURE=1 to override.");
+    return 1;
+}
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
@@ -97,6 +109,12 @@ catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
 {
     // DNS/TLS/connection failures during login — never contains the password.
     stderr.WriteLine($"Could not reach {apiUrl}: {ex.Message}");
+    return 1;
+}
+catch (JsonException ex)
+{
+    // Login got a non-JSON response (e.g. a proxy error page) — never contains the password.
+    stderr.WriteLine($"Login failed: unexpected response from {apiUrl} ({ex.Message}).");
     return 1;
 }
 

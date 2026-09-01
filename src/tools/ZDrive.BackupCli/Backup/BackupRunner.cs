@@ -49,47 +49,76 @@ public sealed class BackupRunner(IZdriveApiClient api, TextWriter stdout, TextWr
 
     private async Task BackupDirectoryAsync(DirectoryInfo dir, Guid? remoteParentId, Stats stats, CancellationToken ct)
     {
-        var existing = await api.ListChildrenAsync(remoteParentId, ct);
-
-        foreach (var subDir in dir.EnumerateDirectories().OrderBy(d => d.Name, StringComparer.Ordinal))
+        // Listing/enumeration is one unit of work: if it fails (remote API
+        // hiccup, or the directory itself becomes unreadable mid-enumeration),
+        // that's a failure of this one directory, not the whole run — record
+        // it and let the caller move on to sibling directories/files.
+        IReadOnlyDictionary<string, FileNode> existing;
+        List<DirectoryInfo> subDirs;
+        List<FileInfo> files;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-
-            // Symlinked directories could point outside the backup root or
-            // back at an ancestor (infinite recursion) — skip them rather
-            // than silently following.
-            if (subDir.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                stdout.WriteLine($"skip   {subDir.FullName} (symlink)");
-                continue;
-            }
-
-            Guid folderId;
-            if (existing.TryGetValue(subDir.Name, out var node) && node.IsFolder)
-            {
-                folderId = node.Id;
-            }
-            else
-            {
-                folderId = (await api.CreateFolderAsync(remoteParentId, subDir.Name, ct)).Id;
-                stdout.WriteLine($"mkdir  {subDir.FullName}");
-            }
-
-            await BackupDirectoryAsync(subDir, folderId, stats, ct);
+            existing = await api.ListChildrenAsync(remoteParentId, ct);
+            subDirs = dir.EnumerateDirectories().OrderBy(d => d.Name, StringComparer.Ordinal).ToList();
+            files = dir.EnumerateFiles().OrderBy(f => f.Name, StringComparer.Ordinal).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            stats.Failed++;
+            stderr.WriteLine($"ERROR  {dir.FullName}: {ex.Message}");
+            return;
         }
 
-        foreach (var file in dir.EnumerateFiles().OrderBy(f => f.Name, StringComparer.Ordinal))
+        foreach (var subDir in subDirs)
         {
             ct.ThrowIfCancellationRequested();
-
-            if (file.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                stdout.WriteLine($"skip   {file.FullName} (symlink)");
-                continue;
-            }
 
             try
             {
+                // Symlinked directories could point outside the backup root or
+                // back at an ancestor (infinite recursion) — skip them rather
+                // than silently following. Attribute lookup is inside this
+                // try too: it can throw (entry removed/inaccessible right
+                // after enumeration) just like the API calls below, and
+                // should be a per-item failure, not a whole-run crash.
+                if (subDir.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    stdout.WriteLine($"skip   {subDir.FullName} (symlink)");
+                    continue;
+                }
+
+                Guid folderId;
+                if (existing.TryGetValue(subDir.Name, out var node) && node.IsFolder)
+                {
+                    folderId = node.Id;
+                }
+                else
+                {
+                    folderId = (await api.CreateFolderAsync(remoteParentId, subDir.Name, ct)).Id;
+                    stdout.WriteLine($"mkdir  {subDir.FullName}");
+                }
+
+                await BackupDirectoryAsync(subDir, folderId, stats, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                stats.Failed++;
+                stderr.WriteLine($"ERROR  {subDir.FullName}: {ex.Message}");
+            }
+        }
+
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (file.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    stdout.WriteLine($"skip   {file.FullName} (symlink)");
+                    continue;
+                }
+
                 await BackupFileAsync(file, remoteParentId, existing.GetValueOrDefault(file.Name), stats, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

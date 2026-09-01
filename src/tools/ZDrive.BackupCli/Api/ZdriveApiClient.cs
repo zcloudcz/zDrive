@@ -70,9 +70,17 @@ public sealed class ZdriveApiClient(HttpClient http, HttpClient blobHttp) : IZdr
     public async Task<RemoteManifestResult?> TryGetManifestAsync(Guid fileId, CancellationToken ct)
     {
         var downloadUrl = await GetAsync<DownloadUrl>($"storage/download/{fileId}", ct);
+        var sasUri = new Uri(downloadUrl.SasUrl);
+        // Same rule as the API base address: a SAS URL grants read access to
+        // file content, so plain http to a non-localhost host needs the same
+        // explicit opt-in — see InsecureHttpPolicy.
+        if (InsecureHttpPolicy.IsBlocked(sasUri))
+            throw new ZdriveApiException(
+                $"Refusing plain http:// SAS URL to non-localhost host '{sasUri.Host}'. Set ZDRIVE_ALLOW_INSECURE=1 to override.");
+
         // The SAS URL points straight at blob storage — a different authority
         // than the gateway, so it must NOT carry our API bearer token.
-        using var response = await blobHttp.GetAsync(downloadUrl.SasUrl, ct);
+        using var response = await blobHttp.GetAsync(sasUri, ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
             return null;
         response.EnsureSuccessStatusCode();

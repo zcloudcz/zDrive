@@ -20,10 +20,22 @@ public sealed class FakeZdriveApiClient : IZdriveApiClient
     public int InitUploadCalls { get; private set; }
     public int CreateFileVersionCalls { get; private set; }
 
+    /// <summary>Fault injection for partial-failure tests: throws instead of creating a folder with this name.</summary>
+    public string? FailFolderName { get; set; }
+
+    /// <summary>Fault injection for partial-failure tests: throws instead of creating a file node with this name.</summary>
+    public string? FailFileName { get; set; }
+
+    /// <summary>Fault injection for partial-failure tests: throws instead of listing the children of the folder with this name.</summary>
+    public string? FailListChildrenForFolderName { get; set; }
+
     public byte[] GetUploadedContent(Guid fileId) => _content[fileId];
 
     public Task<IReadOnlyDictionary<string, FileNode>> ListChildrenAsync(Guid? parentId, CancellationToken ct)
     {
+        if (parentId is { } id && _nodes.FirstOrDefault(n => n.Id == id) is { Name: var name } && name == FailListChildrenForFolderName)
+            throw new IOException($"Simulated listing failure for '{name}'.");
+
         IReadOnlyDictionary<string, FileNode> result =
             _nodes.Where(n => n.ParentId == parentId).ToDictionary(n => n.Name);
         return Task.FromResult(result);
@@ -31,6 +43,9 @@ public sealed class FakeZdriveApiClient : IZdriveApiClient
 
     public Task<FileNode> CreateFolderAsync(Guid? parentId, string name, CancellationToken ct)
     {
+        if (name == FailFolderName)
+            throw new IOException($"Simulated folder creation failure for '{name}'.");
+
         var node = new FileNode(Guid.NewGuid(), name, true, null, null, parentId, DateTime.UtcNow, DateTime.UtcNow, false);
         _nodes.Add(node);
         return Task.FromResult(node);
@@ -38,6 +53,9 @@ public sealed class FakeZdriveApiClient : IZdriveApiClient
 
     public Task<FileNode> CreateFileNodeAsync(Guid? parentId, string name, long sizeBytes, CancellationToken ct)
     {
+        if (name == FailFileName)
+            throw new IOException($"Simulated file upload failure for '{name}'.");
+
         CreateFileNodeCalls++;
         var node = new FileNode(Guid.NewGuid(), name, false, sizeBytes, null, parentId, DateTime.UtcNow, DateTime.UtcNow, false);
         _nodes.Add(node);

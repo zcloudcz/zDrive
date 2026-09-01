@@ -120,6 +120,67 @@ public sealed class BackupRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_OneFileFailsToUpload_OthersStillUploadAndExitCodeReflectsFailure()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "bad.txt"), "will fail");
+        await File.WriteAllTextAsync(Path.Combine(_root, "good.txt"), "will succeed");
+        _api.FailFileName = "bad.txt";
+
+        var exitCode = await Runner.RunAsync(_root, null, CancellationToken.None);
+
+        exitCode.Should().Be(1, "one file failed, so the run must report failure");
+        var children = await _api.ListChildrenAsync(null, CancellationToken.None);
+        children.Should().NotContainKey("bad.txt");
+        children.Should().ContainKey("good.txt", "a failure in one file must not stop the rest of the run");
+        Encoding.UTF8.GetString(_api.GetUploadedContent(children["good.txt"].Id)).Should().Be("will succeed");
+        _stderr.ToString().Should().Contain("bad.txt");
+    }
+
+    [Fact]
+    public async Task RunAsync_OneFolderFailsToCreate_SiblingsStillBackedUpAndExitCodeReflectsFailure()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "bad-folder"));
+        Directory.CreateDirectory(Path.Combine(_root, "good-folder"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "bad-folder", "unreachable.txt"), "never uploaded");
+        await File.WriteAllTextAsync(Path.Combine(_root, "good-folder", "reachable.txt"), "uploaded fine");
+        await File.WriteAllTextAsync(Path.Combine(_root, "top.txt"), "top level");
+        _api.FailFolderName = "bad-folder";
+
+        var exitCode = await Runner.RunAsync(_root, null, CancellationToken.None);
+
+        exitCode.Should().Be(1, "one folder failed, so the run must report failure");
+        var rootChildren = await _api.ListChildrenAsync(null, CancellationToken.None);
+        rootChildren.Should().NotContainKey("bad-folder");
+        rootChildren.Should().ContainKey("good-folder", "a failure in one folder must not stop sibling folders/files");
+        rootChildren.Should().ContainKey("top.txt");
+        var goodChildren = await _api.ListChildrenAsync(rootChildren["good-folder"].Id, CancellationToken.None);
+        goodChildren.Should().ContainKey("reachable.txt");
+        _stderr.ToString().Should().Contain("bad-folder");
+    }
+
+    [Fact]
+    public async Task RunAsync_ListChildrenFailsForOneFolder_SiblingsStillBackedUpAndExitCodeReflectsFailure()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "bad-folder"));
+        Directory.CreateDirectory(Path.Combine(_root, "good-folder"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "bad-folder", "unreachable.txt"), "never uploaded");
+        await File.WriteAllTextAsync(Path.Combine(_root, "good-folder", "reachable.txt"), "uploaded fine");
+        await File.WriteAllTextAsync(Path.Combine(_root, "top.txt"), "top level");
+        _api.FailListChildrenForFolderName = "bad-folder";
+
+        var exitCode = await Runner.RunAsync(_root, null, CancellationToken.None);
+
+        exitCode.Should().Be(1, "listing one folder's contents failed, so the run must report failure");
+        var rootChildren = await _api.ListChildrenAsync(null, CancellationToken.None);
+        rootChildren.Should().ContainKey("bad-folder", "the folder node itself was created fine, only listing its children failed");
+        rootChildren.Should().ContainKey("good-folder", "a listing failure in one folder must not stop sibling folders/files");
+        rootChildren.Should().ContainKey("top.txt");
+        var goodChildren = await _api.ListChildrenAsync(rootChildren["good-folder"].Id, CancellationToken.None);
+        goodChildren.Should().ContainKey("reachable.txt");
+        _stderr.ToString().Should().Contain("bad-folder");
+    }
+
+    [Fact]
     public async Task RunAsync_DestPath_CreatesNestedRemoteFolders()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "photo.jpg"), "binary-ish content");
