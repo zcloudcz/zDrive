@@ -80,7 +80,9 @@ var app = builder.Build();
 // Create the database schema on startup, in every environment. There are no
 // EF migrations yet — a migration job will replace this once the schema
 // stabilizes; until then a fresh database (dev, test or prod) provisions
-// itself this way.
+// itself this way. Assumes a single replica per service (true for the
+// current compose/deploy setup); EnsureCreatedAsync is not safe to run
+// concurrently from multiple instances against the same fresh schema.
 using (var scope = app.Services.CreateScope())
 {
     await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();

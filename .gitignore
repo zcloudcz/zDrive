@@ -37,6 +37,7 @@ pubspec.lock
 .env
 .env.*
 !.env.example
+!.env.auth-secrets.example
 appsettings.*.local.json
 secrets/
 

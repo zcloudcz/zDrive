@@ -6,12 +6,13 @@ version: "3.8"
 # reachable — every secret must come from the environment.
 #
 # Usage:
-#   cp .env.example .env   # fill in JWT_RSA_*_KEY_PEM (see CLAUDE.md "JWT dev keys")
+#   cp .env.example .env                             # public key + connection overrides
+#   cp .env.auth-secrets.example .env.auth-secrets    # private key — auth-service only
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
 #
-# ponytail: all services share one .env for secrets (private key ends up in
-# every container's env, unused outside auth-service). Fine for local
-# verification; Agent 2's Key Vault wiring will scope per-service secrets.
+# The JWT private key lives in .env.auth-secrets, loaded only by auth-service:
+# every other service only ever validates tokens, so it only gets the public
+# key from .env. Agent 2's Key Vault wiring will scope this further per service.
 
 services:
   auth-service:
@@ -22,6 +23,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - .env.auth-secrets
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__AuthDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=auth
