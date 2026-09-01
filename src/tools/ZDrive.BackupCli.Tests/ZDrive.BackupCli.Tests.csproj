@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>ZDrive.BackupCli.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="6.12.2" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="Testcontainers" Version="3.10.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ZDrive.BackupCli\ZDrive.BackupCli.csproj" />
+
+    <!-- Integration tests host all three services the backup flow touches
+         in-process (real Postgres + Azurite via Testcontainers), the same
+         WebApplicationFactory pattern as StorageService.Tests/FileService.Tests. -->
+    <!-- Aliased: each service's Api project declares its own top-level
+         "Program" class in the global namespace (needed for
+         WebApplicationFactory<Program>). Referencing all three unaliased
+         would make "Program" ambiguous — see Integration/BackupCliEnvironment.cs. -->
+    <ProjectReference Include="..\..\services\AuthService\ZDrive.AuthService.Api\ZDrive.AuthService.Api.csproj" />
+    <ProjectReference Include="..\..\services\FileService\ZDrive.FileService.Api\ZDrive.FileService.Api.csproj" Aliases="FileApi" />
+    <ProjectReference Include="..\..\services\StorageService\ZDrive.StorageService.Api\ZDrive.StorageService.Api.csproj" Aliases="StorageApi" />
+    <ProjectReference Include="..\..\services\StorageService\ZDrive.StorageService.Infrastructure\ZDrive.StorageService.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\services\FileService\ZDrive.FileService.Infrastructure\ZDrive.FileService.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\services\AuthService\ZDrive.AuthService.Infrastructure\ZDrive.AuthService.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
