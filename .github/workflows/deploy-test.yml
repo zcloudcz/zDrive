@@ -1,0 +1,135 @@
+# Deploys all 7 zDrive services to the Azure Container Apps TEST environment
+# (see docs/release-test-deploy.md and infra/terraform/container-apps/).
+#
+# Manual trigger only (workflow_dispatch) — this is a test environment, not
+# meant to redeploy on every push to main.
+#
+# Prerequisites (a human must do this once, outside this workflow):
+#   1. `terraform apply` the stack in infra/terraform/container-apps/
+#      (see infra/terraform/README.md).
+#   2. Create an Azure AD app registration with a federated credential for
+#      OIDC login from this repo (subject: this workflow's `environment: test`,
+#      or `repo:<org>/<repo>:ref:refs/heads/master` if no environment gate is
+#      used). Grant it `AcrPush` on the ACR and `Contributor` on the resource
+#      group (or a narrower Container Apps role) from Terraform's output.
+#   3. Configure a GitHub Environment named "test" with:
+#
+#      Secrets (Azure OIDC login — never long-lived credentials):
+#        AZURE_CLIENT_ID       — app registration (federated credential) client ID
+#        AZURE_TENANT_ID       — Entra tenant ID
+#        AZURE_SUBSCRIPTION_ID — target subscription ID
+#
+#      Variables (non-secret, copied from `terraform output` after apply):
+#        RESOURCE_GROUP        <- terraform output -raw resource_group_name
+#        ACR_LOGIN_SERVER      <- terraform output -raw acr_login_server
+#        GATEWAY_FQDN          <- terraform output -raw gateway_fqdn
+#        CONTAINERAPP_NAMES_JSON <- terraform output -json container_app_names
+#                                   (map: gateway/auth/file/storage/sync/photo/notification -> Container App name)
+#
+# Manual run: Actions tab -> "Deploy Test (Container Apps)" -> Run workflow.
+
+name: Deploy Test (Container Apps)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # required for azure/login OIDC federation
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: test
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { key: gateway, dir: ApiGateway }
+          - { key: auth, dir: AuthService }
+          - { key: file, dir: FileService }
+          - { key: storage, dir: StorageService }
+          - { key: sync, dir: SyncService }
+          - { key: photo, dir: PhotoService }
+          - { key: notification, dir: NotificationService }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Allow az to auto-install the containerapp extension
+        run: az config set extension.use_dynamic_install=yes_without_prompt
+
+      # `az acr build` submits the Dockerfile + context to ACR Tasks, which
+      # builds and pushes remotely — no local docker daemon/login needed.
+      - name: Build and push image
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          SERVICE_DIR: ${{ matrix.service.dir }}
+          SERVICE_KEY: ${{ matrix.service.key }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          acr_name="${ACR_LOGIN_SERVER%%.*}"
+          az acr build \
+            --registry "$acr_name" \
+            --image "zdrive-${SERVICE_KEY}:${IMAGE_TAG}" \
+            --file "src/services/${SERVICE_DIR}/Dockerfile" \
+            .
+
+      - name: Update Container App
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          CONTAINERAPP_NAMES_JSON: ${{ vars.CONTAINERAPP_NAMES_JSON }}
+          SERVICE_KEY: ${{ matrix.service.key }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          app_name=$(echo "$CONTAINERAPP_NAMES_JSON" | jq -r --arg key "$SERVICE_KEY" '.[$key]')
+          if [ -z "$app_name" ] || [ "$app_name" = "null" ]; then
+            echo "No Container App name found for service key '$SERVICE_KEY' in CONTAINERAPP_NAMES_JSON" >&2
+            exit 1
+          fi
+          az containerapp update \
+            --name "$app_name" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${ACR_LOGIN_SERVER}/zdrive-${SERVICE_KEY}:${IMAGE_TAG}"
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build-and-deploy
+    environment: test
+    steps:
+      # New Container App revisions take a moment to become ready, so retry
+      # a few times before failing the pipeline.
+      - name: Wait for gateway /health/ready
+        env:
+          GATEWAY_FQDN: ${{ vars.GATEWAY_FQDN }}
+        run: |
+          set -euo pipefail
+          url="https://${GATEWAY_FQDN}/health/ready"
+          for attempt in $(seq 1 10); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "$url" || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "Gateway healthy (attempt $attempt): $url"
+              exit 0
+            fi
+            echo "Attempt $attempt: gateway returned $status, retrying in 15s..."
+            sleep 15
+          done
+          echo "Gateway did not become healthy at $url" >&2
+          exit 1
