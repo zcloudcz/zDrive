@@ -22,10 +22,12 @@ public class PhotosController : ControllerBase
     [HttpPost("ingest")]
     public async Task<IActionResult> Ingest([FromBody] IngestPhotoCommand command, CancellationToken ct)
     {
+        var userId = User.GetUserId();
         var enriched = command with
         {
-            UserId = User.GetUserId(),
-            TenantId = User.GetTenantId()
+            UserId = userId,
+            // Implicit single-user tenant when no tenant claim is present (see CLAUDE.md).
+            TenantId = User.GetTenantId() ?? userId
         };
         var result = await _mediator.Send(enriched, ct);
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
@@ -39,15 +41,19 @@ public class PhotosController : ControllerBase
         [FromQuery] int offset = 0,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
         var result = await _mediator.Send(new GetTimelineQuery(
-            User.GetUserId(), User.GetTenantId(), from, to, limit, offset), ct);
+            userId, tenantId, from?.UtcDateTime, to?.UtcDateTime, limit, offset), ct);
         return Ok(result);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
-        var result = await _mediator.Send(new GetPhotoQuery(User.GetUserId(), User.GetTenantId(), id), ct);
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var result = await _mediator.Send(new GetPhotoQuery(userId, tenantId, id), ct);
         return Ok(result);
     }
 
@@ -58,15 +64,18 @@ public class PhotosController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
         var result = await _mediator.Send(new SearchPhotosQuery(
-            User.GetUserId(), User.GetTenantId(), q, page, pageSize), ct);
+            userId, tenantId, q, page, pageSize), ct);
         return Ok(result);
     }
 
     [HttpPost("{id:guid}/tags")]
     public async Task<IActionResult> AddTag(Guid id, [FromBody] AddTagCommand command, CancellationToken ct)
     {
-        var enriched = command with { PhotoId = id };
+        var userId = User.GetUserId();
+        var enriched = command with { UserId = userId, TenantId = User.GetTenantId() ?? userId, PhotoId = id };
         var result = await _mediator.Send(enriched, ct);
         return Ok(result);
     }
