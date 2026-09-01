@@ -15,7 +15,11 @@ public sealed class AddTagCommandHandler : IRequestHandler<AddTagCommand, PhotoT
 
     public async Task<PhotoTagDto> Handle(AddTagCommand request, CancellationToken cancellationToken)
     {
-        var photoExists = await _db.Photos.AnyAsync(p => p.Id == request.PhotoId, cancellationToken);
+        // Owner/tenant filter is part of the lookup, not a separate check, so a
+        // photo belonging to another user looks identical to a missing one (404).
+        var photoExists = await _db.Photos.AnyAsync(
+            p => p.Id == request.PhotoId && p.UserId == request.UserId && p.TenantId == request.TenantId,
+            cancellationToken);
         if (!photoExists)
             throw new NotFoundException("Photo", request.PhotoId);
 

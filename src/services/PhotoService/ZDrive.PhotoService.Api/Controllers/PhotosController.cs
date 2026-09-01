@@ -26,6 +26,7 @@ public class PhotosController : ControllerBase
         var enriched = command with
         {
             UserId = userId,
+            // Implicit single-user tenant when no tenant claim is present (see CLAUDE.md).
             TenantId = User.GetTenantId() ?? userId
         };
         var result = await _mediator.Send(enriched, ct);
@@ -41,8 +42,9 @@ public class PhotosController : ControllerBase
         CancellationToken ct = default)
     {
         var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
         var result = await _mediator.Send(new GetTimelineQuery(
-            userId, User.GetTenantId() ?? userId, from?.UtcDateTime, to?.UtcDateTime, limit, offset), ct);
+            userId, tenantId, from?.UtcDateTime, to?.UtcDateTime, limit, offset), ct);
         return Ok(result);
     }
 
@@ -50,7 +52,8 @@ public class PhotosController : ControllerBase
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
         var userId = User.GetUserId();
-        var result = await _mediator.Send(new GetPhotoQuery(userId, User.GetTenantId() ?? userId, id), ct);
+        var tenantId = User.GetTenantId() ?? userId;
+        var result = await _mediator.Send(new GetPhotoQuery(userId, tenantId, id), ct);
         return Ok(result);
     }
 
@@ -62,15 +65,17 @@ public class PhotosController : ControllerBase
         CancellationToken ct = default)
     {
         var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
         var result = await _mediator.Send(new SearchPhotosQuery(
-            userId, User.GetTenantId() ?? userId, q, page, pageSize), ct);
+            userId, tenantId, q, page, pageSize), ct);
         return Ok(result);
     }
 
     [HttpPost("{id:guid}/tags")]
     public async Task<IActionResult> AddTag(Guid id, [FromBody] AddTagCommand command, CancellationToken ct)
     {
-        var enriched = command with { PhotoId = id };
+        var userId = User.GetUserId();
+        var enriched = command with { UserId = userId, TenantId = User.GetTenantId() ?? userId, PhotoId = id };
         var result = await _mediator.Send(enriched, ct);
         return Ok(result);
     }
