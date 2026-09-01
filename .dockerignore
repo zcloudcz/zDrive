@@ -1,0 +1,41 @@
+# Build context for every service Dockerfile is the repo root (context: .
+# in docker-compose.prod.yml), so anything listed here is never sent to the
+# build daemon for ANY service — including secrets that must never end up
+# baked into an image layer or cached in the daemon.
+
+# Environment / secrets — .env.auth-secrets holds the JWT signing key
+.env
+.env.*
+!.env.example
+!.env.auth-secrets.example
+
+# .NET build artifacts (rebuilt inside the image anyway)
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Flutter client — not needed by any backend service image
+src/client/
+
+# VCS / tooling
+.git/
+.github/
+.claude/
+.vs/
+.vscode/
+.idea/
+
+# Docs / infra not needed at build time
+docs/
+infra/
+*.md
+
+# Terraform state / plans (belt and suspenders, also in .gitignore)
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+*.auto.tfvars
+*.auto.tfvars.json
+secrets.tfvars

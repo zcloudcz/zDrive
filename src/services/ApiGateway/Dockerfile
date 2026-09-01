@@ -6,10 +6,10 @@ COPY src/shared/ shared/
 COPY src/services/ApiGateway/ services/ApiGateway/
 
 # Restore dependencies
-RUN dotnet restore services/ApiGateway/ApiGateway.csproj
+RUN dotnet restore services/ApiGateway/ZDrive.ApiGateway.csproj
 
 # Build
-RUN dotnet publish services/ApiGateway/ApiGateway.csproj \
+RUN dotnet publish services/ApiGateway/ZDrive.ApiGateway.csproj \
     --configuration Release \
     --no-restore \
     --output /app/publish
@@ -26,4 +26,7 @@ COPY --from=build /app/publish .
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 
-ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health/live || exit 1
+
+ENTRYPOINT ["dotnet", "ZDrive.ApiGateway.dll"]

@@ -13,6 +13,7 @@ public sealed class StorageDbContext : DbContext, IStorageDbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasDefaultSchema("storage");
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(StorageDbContext).Assembly);
     }
 }
