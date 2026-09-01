@@ -1,0 +1,161 @@
+version: "3.8"
+
+# Production-like overlay for the 7 zDrive microservices. Builds each service
+# from its Dockerfile and runs it with ASPNETCORE_ENVIRONMENT=Production, so
+# none of the Development-only fallbacks (dev JWT keys, Azurite default) are
+# reachable — every secret must come from the environment.
+#
+# Usage:
+#   cp .env.example .env   # fill in JWT_RSA_*_KEY_PEM (see CLAUDE.md "JWT dev keys")
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+#
+# ponytail: all services share one .env for secrets (private key ends up in
+# every container's env, unused outside auth-service). Fine for local
+# verification; Agent 2's Key Vault wiring will scope per-service secrets.
+
+services:
+  auth-service:
+    build:
+      context: .
+      dockerfile: src/services/AuthService/Dockerfile
+    container_name: zdrive-auth-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__AuthDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=auth
+      Jwt__Issuer: zdrive
+      Jwt__Audience: zdrive-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zdrive-network
+
+  file-service:
+    build:
+      context: .
+      dockerfile: src/services/FileService/Dockerfile
+    container_name: zdrive-file-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__FileDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=files
+      Jwt__Issuer: zdrive
+      Jwt__Audience: zdrive-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zdrive-network
+
+  storage-service:
+    build:
+      context: .
+      dockerfile: src/services/StorageService/Dockerfile
+    container_name: zdrive-storage-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__StorageDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=storage
+      AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1
+      Jwt__Issuer: zdrive
+      Jwt__Audience: zdrive-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+    networks:
+      - zdrive-network
+
+  sync-service:
+    build:
+      context: .
+      dockerfile: src/services/SyncService/Dockerfile
+    container_name: zdrive-sync-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__SyncDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=sync
+      Jwt__Issuer: zdrive
+      Jwt__Audience: zdrive-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zdrive-network
+
+  photo-service:
+    build:
+      context: .
+      dockerfile: src/services/PhotoService/Dockerfile
+    container_name: zdrive-photo-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__PhotoDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=photos
+      Jwt__Issuer: zdrive
+      Jwt__Audience: zdrive-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zdrive-network
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: src/services/NotificationService/Dockerfile
+    container_name: zdrive-notification-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__NotificationDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=notifications
+      Jwt__Issuer: zdrive
+      Jwt__Audience: zdrive-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - zdrive-network
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: src/services/ApiGateway/Dockerfile
+    container_name: zdrive-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Jwt__Issuer: zdrive
+      Jwt__Audience: zdrive-api
+      Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:-http://localhost:5173}
+      ReverseProxy__Clusters__auth-cluster__Destinations__auth-service__Address: http://auth-service:8080
+      ReverseProxy__Clusters__file-cluster__Destinations__file-service__Address: http://file-service:8080
+      ReverseProxy__Clusters__storage-cluster__Destinations__storage-service__Address: http://storage-service:8080
+      ReverseProxy__Clusters__sync-cluster__Destinations__sync-service__Address: http://sync-service:8080
+      ReverseProxy__Clusters__photo-cluster__Destinations__photo-service__Address: http://photo-service:8080
+    depends_on:
+      - auth-service
+      - file-service
+      - storage-service
+      - sync-service
+      - photo-service
+    networks:
+      - zdrive-network

@@ -71,12 +71,12 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Create the database schema on first run in Development. There are no EF
-// migrations yet — production deployments will introduce them once the schema
-// stabilizes; until then a fresh dev database is provisioned automatically.
-if (app.Environment.IsDevelopment())
+// Create the database schema on startup, in every environment. There are no
+// EF migrations yet — a migration job will replace this once the schema
+// stabilizes; until then a fresh database (dev, test or prod) provisions
+// itself this way.
+using (var scope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
     await scope.ServiceProvider.GetRequiredService<PhotoDbContext>().Database.EnsureCreatedAsync();
 }
 
@@ -99,7 +99,7 @@ app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthC
     Predicate = _ => false
 });
 
-app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthCheckOptions
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready")
 });

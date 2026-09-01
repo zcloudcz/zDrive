@@ -28,10 +28,21 @@ public static class DependencyInjection
 
         services.AddScoped<IStorageDbContext>(sp => sp.GetRequiredService<StorageDbContext>());
 
-        // Azure Blob Storage
+        // Azure Blob Storage — same fail-fast policy as the JWT key below: the
+        // Azurite fallback only applies in Development, never silently in prod.
         var blobConnectionString = configuration.GetConnectionString("AzureBlobStorage")
-            ?? configuration["AZURE_STORAGE_CONNECTION_STRING"]
-            ?? "UseDevelopmentStorage=true";
+            ?? configuration["AZURE_STORAGE_CONNECTION_STRING"];
+
+        if (string.IsNullOrWhiteSpace(blobConnectionString))
+        {
+            if (!isDevelopment)
+            {
+                throw new InvalidOperationException(
+                    "ConnectionStrings:AzureBlobStorage (or AZURE_STORAGE_CONNECTION_STRING) must be configured outside Development.");
+            }
+
+            blobConnectionString = "UseDevelopmentStorage=true";
+        }
 
         var blobServiceClient = new BlobServiceClient(blobConnectionString);
         services.AddSingleton(blobServiceClient);

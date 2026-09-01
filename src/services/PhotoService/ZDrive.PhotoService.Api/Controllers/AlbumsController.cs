@@ -24,7 +24,8 @@ public class AlbumsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateAlbumCommand command, CancellationToken ct)
     {
-        var enriched = command with { UserId = User.GetUserId(), TenantId = User.GetTenantId() };
+        var userId = User.GetUserId();
+        var enriched = command with { UserId = userId, TenantId = User.GetTenantId() ?? userId };
         var result = await _mediator.Send(enriched, ct);
         return CreatedAtAction(nameof(GetPhotos), new { id = result.Id }, result);
     }
@@ -32,14 +33,16 @@ public class AlbumsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
-        var result = await _mediator.Send(new GetAlbumsQuery(User.GetUserId(), User.GetTenantId()), ct);
+        var userId = User.GetUserId();
+        var result = await _mediator.Send(new GetAlbumsQuery(userId, User.GetTenantId() ?? userId), ct);
         return Ok(result);
     }
 
     [HttpGet("{id:guid}/photos")]
     public async Task<IActionResult> GetPhotos(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
     {
-        var result = await _mediator.Send(new GetAlbumPhotosQuery(User.GetUserId(), User.GetTenantId(), id, page, pageSize), ct);
+        var userId = User.GetUserId();
+        var result = await _mediator.Send(new GetAlbumPhotosQuery(userId, User.GetTenantId() ?? userId, id, page, pageSize), ct);
         return Ok(result);
     }
 

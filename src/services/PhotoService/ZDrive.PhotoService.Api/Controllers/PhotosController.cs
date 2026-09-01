@@ -22,10 +22,11 @@ public class PhotosController : ControllerBase
     [HttpPost("ingest")]
     public async Task<IActionResult> Ingest([FromBody] IngestPhotoCommand command, CancellationToken ct)
     {
+        var userId = User.GetUserId();
         var enriched = command with
         {
-            UserId = User.GetUserId(),
-            TenantId = User.GetTenantId()
+            UserId = userId,
+            TenantId = User.GetTenantId() ?? userId
         };
         var result = await _mediator.Send(enriched, ct);
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
@@ -39,15 +40,17 @@ public class PhotosController : ControllerBase
         [FromQuery] int offset = 0,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
         var result = await _mediator.Send(new GetTimelineQuery(
-            User.GetUserId(), User.GetTenantId(), from, to, limit, offset), ct);
+            userId, User.GetTenantId() ?? userId, from?.UtcDateTime, to?.UtcDateTime, limit, offset), ct);
         return Ok(result);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
     {
-        var result = await _mediator.Send(new GetPhotoQuery(User.GetUserId(), User.GetTenantId(), id), ct);
+        var userId = User.GetUserId();
+        var result = await _mediator.Send(new GetPhotoQuery(userId, User.GetTenantId() ?? userId, id), ct);
         return Ok(result);
     }
 
@@ -58,8 +61,9 @@ public class PhotosController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
+        var userId = User.GetUserId();
         var result = await _mediator.Send(new SearchPhotosQuery(
-            User.GetUserId(), User.GetTenantId(), q, page, pageSize), ct);
+            userId, User.GetTenantId() ?? userId, q, page, pageSize), ct);
         return Ok(result);
     }
 
