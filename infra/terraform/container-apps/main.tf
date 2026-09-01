@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 3.90"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
+    }
   }
 
   # backend "azurerm" {
@@ -48,6 +52,7 @@ module "redis" {
   location            = var.location
   prefix              = var.prefix
   resource_group_name = azurerm_resource_group.main.name
+  sku_name            = var.redis_sku_name
 }
 
 module "storage" {
@@ -139,4 +144,5 @@ module "container_apps" {
 
   image_tag            = var.image_tag
   cors_allowed_origins = var.cors_allowed_origins
+  enable_health_probes = var.enable_health_probes
 }

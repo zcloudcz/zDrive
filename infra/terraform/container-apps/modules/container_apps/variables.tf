@@ -42,9 +42,17 @@ variable "placeholder_image" {
     creation time; the deploy pipeline (Agent 3) then flips each app to its
     real image via `az containerapp update`, which Terraform is told to
     ignore afterwards (see lifecycle.ignore_changes below).
+
+    Must listen on port 8080 (target_port, hardcoded below) — when
+    enable_health_probes is false, Container Apps still runs its own
+    default TCP startup/liveness probe against target_port (omitting an
+    explicit probe block does not disable probing), so a placeholder that
+    doesn't listen there fails to come up. mcr.microsoft.com/dotnet/samples
+    is the official .NET sample app; .NET 8+ container images default to
+    port 8080.
   EOT
   type        = string
-  default     = "mcr.microsoft.com/k8se/quickstart:latest"
+  default     = "mcr.microsoft.com/dotnet/samples:aspnetapp"
 }
 
 variable "image_tag" {
@@ -57,4 +65,18 @@ variable "cors_allowed_origins" {
   description = "Origins the gateway allows via CORS (test client URL(s))."
   type        = list(string)
   default     = ["http://localhost:3000"]
+}
+
+variable "enable_health_probes" {
+  description = <<-EOT
+    Whether Container Apps run explicit HTTP liveness/readiness probes
+    against /health/live and /health/ready on port 8080. Default false
+    because placeholder_image doesn't serve those paths — the bootstrap
+    apply relies on Container Apps' default TCP probe against
+    target_port instead (which the placeholder does satisfy, see
+    placeholder_image). Set true and re-apply once the deploy pipeline
+    has flipped every app to its real service image.
+  EOT
+  type        = bool
+  default     = false
 }

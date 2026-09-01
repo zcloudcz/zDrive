@@ -49,13 +49,23 @@ terraform apply -var-file=environments/test.tfvars
 ### Bootstrapping order (why the first apply looks odd)
 
 Every Container App is created with a public placeholder image
-(`mcr.microsoft.com/k8se/quickstart:latest`) because Container Apps needs a
-pullable image at creation time, and on a brand-new environment nothing has
-been pushed to the ACR yet. Terraform is told to ignore further changes to
-the image (`lifecycle.ignore_changes`), so it never fights the deploy
-pipeline, which flips each app to its real image via `az containerapp
-update`. In short: `terraform apply` creates the skeleton, the deploy
-pipeline (Agent 3) fills in the real images.
+(`mcr.microsoft.com/dotnet/samples:aspnetapp`, listening on port 8080 like
+every real service image) because Container Apps needs a pullable image at
+creation time, and on a brand-new environment nothing has been pushed to
+the ACR yet. Terraform is told to ignore further changes to the image
+(`lifecycle.ignore_changes`), so it never fights the deploy pipeline, which
+flips each app to its real image via `az containerapp update`. In short:
+`terraform apply` creates the skeleton, the deploy pipeline (Agent 3) fills
+in the real images.
+
+For the same reason, explicit HTTP liveness/readiness probes
+(`/health/live`, `/health/ready` on port 8080) are **off** by default
+(`enable_health_probes = false`) — the placeholder image doesn't serve
+those paths. Container Apps still runs its default TCP probe against
+target_port 8080 in the meantime, which the placeholder does satisfy, so
+the gateway (`min_replicas = 1`) can come up. Once every app runs its real
+image, re-apply with `-var enable_health_probes=true` to turn the HTTP
+probes on.
 
 ### Outputs the deploy pipeline needs
 
@@ -91,6 +101,17 @@ terraform output -raw gateway_fqdn
   no service currently reads `REDIS_CONNECTION_STRING` /
   `SERVICE_BUS_CONNECTION_STRING`. Wire them into the relevant app's `secret`
   + `env` blocks in `modules/container_apps` when that changes.
+- **Azure Cache for Redis (classic) retirement.** Since 2026-04-01,
+  Microsoft blocks *new* Basic/Standard/Premium (classic) Azure Cache for
+  Redis creation for new customers — only tenants that already had such
+  resources are grandfathered, until the tiers fully retire on
+  2028-09-30. `modules/redis` still defaults to Basic C0 (this test env's
+  original scope) and the SKU is a variable (`-var='redis_sku_name=...'`
+  for grandfathered tenants who want Standard's replication SLA), but if
+  `apply` rejects Basic in your subscription because it's not
+  grandfathered, no classic-tier `sku_name` override fixes that — you'd
+  need to provision Azure Managed Redis instead, which is a different
+  resource type and out of scope for this module.
 - **Gateway → service routing env var names are a best-effort guess.**
   They mirror `ApiGateway/appsettings.json`'s current `ReverseProxy:Clusters`
   keys verbatim (`auth-cluster`/`auth-service`, etc.) turned into

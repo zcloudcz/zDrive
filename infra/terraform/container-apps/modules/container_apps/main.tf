@@ -42,6 +42,23 @@ resource "azurerm_role_assignment" "kv_secrets_user" {
   principal_id         = azurerm_user_assigned_identity.apps.principal_id
 }
 
+# depends_on only orders resource creation — it does not wait for Azure
+# RBAC to actually propagate the role assignment. Without this gap, the
+# first apply can have Container Apps try to read Key Vault secrets via
+# the identity's brand-new role before it's authorized, and fail with a
+# 403. 30s clears propagation in practice; bump if that's still flaky.
+# triggers re-runs the sleep if the role assignment is ever replaced
+# (e.g. the identity is recreated) — without it, the sleep only fires
+# once, on the very first apply.
+resource "time_sleep" "kv_role_propagation" {
+  depends_on      = [azurerm_role_assignment.kv_secrets_user]
+  create_duration = "30s"
+
+  triggers = {
+    role_assignment_id = azurerm_role_assignment.kv_secrets_user.id
+  }
+}
+
 # The 6 non-gateway services. Shape is identical (public JWT key + own DB
 # connection string); AuthService additionally needs the private key,
 # StorageService additionally needs the blob connection string.
@@ -150,16 +167,24 @@ resource "azurerm_container_app" "worker" {
         }
       }
 
-      liveness_probe {
-        transport = "HTTP"
-        path      = "/health/live"
-        port      = 8080
+      # Gated by enable_health_probes — see that variable's description for
+      # why (placeholder_image doesn't serve these paths at bootstrap).
+      dynamic "liveness_probe" {
+        for_each = var.enable_health_probes ? [1] : []
+        content {
+          transport = "HTTP"
+          path      = "/health/live"
+          port      = 8080
+        }
       }
 
-      readiness_probe {
-        transport = "HTTP"
-        path      = "/health/ready"
-        port      = 8080
+      dynamic "readiness_probe" {
+        for_each = var.enable_health_probes ? [1] : []
+        content {
+          transport = "HTTP"
+          path      = "/health/ready"
+          port      = 8080
+        }
       }
     }
   }
@@ -184,7 +209,7 @@ resource "azurerm_container_app" "worker" {
 
   depends_on = [
     azurerm_role_assignment.acr_pull,
-    azurerm_role_assignment.kv_secrets_user,
+    time_sleep.kv_role_propagation,
   ]
 }
 
@@ -248,8 +273,15 @@ resource "azurerm_container_app" "gateway" {
       dynamic "env" {
         for_each = local.gateway_clusters
         content {
-          name  = "ReverseProxy__Clusters__${env.value.cluster_id}__Destinations__${env.value.destination_id}__Address"
-          value = "http://${azurerm_container_app.worker[env.key].latest_revision_fqdn}"
+          name = "ReverseProxy__Clusters__${env.value.cluster_id}__Destinations__${env.value.destination_id}__Address"
+          # ingress[0].fqdn is the app's stable FQDN — unlike
+          # latest_revision_fqdn it does not change on every `az
+          # containerapp update` the deploy pipeline runs, so the gateway
+          # never routes to a since-replaced revision. https:// because
+          # Container Apps ingress (internal or external) only accepts TLS
+          # unless allow_insecure_connections is set — plain http:// gets
+          # redirected, which YARP would forward as-is instead of proxying.
+          value = "https://${azurerm_container_app.worker[env.key].ingress[0].fqdn}"
         }
       }
 
@@ -261,16 +293,24 @@ resource "azurerm_container_app" "gateway" {
         }
       }
 
-      liveness_probe {
-        transport = "HTTP"
-        path      = "/health/live"
-        port      = 8080
+      # Gated by enable_health_probes — see that variable's description for
+      # why (placeholder_image doesn't serve these paths at bootstrap).
+      dynamic "liveness_probe" {
+        for_each = var.enable_health_probes ? [1] : []
+        content {
+          transport = "HTTP"
+          path      = "/health/live"
+          port      = 8080
+        }
       }
 
-      readiness_probe {
-        transport = "HTTP"
-        path      = "/health/ready"
-        port      = 8080
+      dynamic "readiness_probe" {
+        for_each = var.enable_health_probes ? [1] : []
+        content {
+          transport = "HTTP"
+          path      = "/health/ready"
+          port      = 8080
+        }
       }
     }
   }
@@ -292,6 +332,6 @@ resource "azurerm_container_app" "gateway" {
 
   depends_on = [
     azurerm_role_assignment.acr_pull,
-    azurerm_role_assignment.kv_secrets_user,
+    time_sleep.kv_role_propagation,
   ]
 }

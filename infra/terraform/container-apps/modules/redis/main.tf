@@ -1,5 +1,8 @@
-# Azure Cache for Redis, Basic C0 — smallest SKU, no replication/SLA.
-# Sufficient for a test environment.
+# Azure Cache for Redis C0 — smallest SKU, no replication/SLA. Sufficient
+# for a test environment. sku_name is a variable (not hardcoded "Basic")
+# because Microsoft blocks new classic-tier Azure Cache for Redis creation
+# for non-grandfathered tenants as of 2026-04-01 — see README "Known gaps"
+# for what that means for `apply` in your subscription.
 resource "azurerm_redis_cache" "main" {
   name                = "redis-${var.prefix}-${var.environment}"
   resource_group_name = var.resource_group_name
@@ -7,8 +10,10 @@ resource "azurerm_redis_cache" "main" {
 
   capacity = 0
   family   = "C"
-  sku_name = "Basic"
+  sku_name = var.sku_name
 
-  non_ssl_port_enabled = false
-  minimum_tls_version  = "1.2"
+  # Arg name pinned to azurerm ~> 3.90 — non_ssl_port_enabled only exists
+  # from azurerm 4.x onward.
+  enable_non_ssl_port = false
+  minimum_tls_version = "1.2"
 }

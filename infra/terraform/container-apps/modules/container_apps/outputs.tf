@@ -3,7 +3,10 @@ output "acr_login_server" {
 }
 
 output "gateway_fqdn" {
-  value = azurerm_container_app.gateway.latest_revision_fqdn
+  # Stable FQDN, not latest_revision_fqdn — the latter changes on every
+  # `az containerapp update` and would break the deploy pipeline's smoke
+  # test / any client pointed at this output after the first real deploy.
+  value = azurerm_container_app.gateway.ingress[0].fqdn
 }
 
 output "container_app_names" {

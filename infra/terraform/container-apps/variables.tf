@@ -45,3 +45,15 @@ variable "cors_allowed_origins" {
   type        = list(string)
   default     = ["http://localhost:3000"]
 }
+
+variable "redis_sku_name" {
+  description = "Azure Cache for Redis SKU (Basic/Standard/Premium). All classic tiers are blocked for non-grandfathered tenants since 2026-04-01 — see infra/terraform/README.md."
+  type        = string
+  default     = "Basic"
+}
+
+variable "enable_health_probes" {
+  description = "Enable liveness/readiness probes on the Container Apps. Keep false for the bootstrap apply (placeholder image doesn't serve /health/*); set true and re-apply once real service images are deployed. See infra/terraform/README.md."
+  type        = bool
+  default     = false
+}

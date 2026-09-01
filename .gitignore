@@ -23,7 +23,6 @@ pubspec.lock
 *.tfstate
 *.tfstate.backup
 *.tfplan
-.terraform.lock.hcl
 *.auto.tfvars
 *.auto.tfvars.json
 secrets.tfvars
