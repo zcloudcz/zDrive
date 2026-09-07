@@ -8,10 +8,15 @@
 #   1. `terraform apply` the stack in infra/terraform/container-apps/
 #      (see infra/terraform/README.md).
 #   2. Create an Azure AD app registration with a federated credential for
-#      OIDC login from this repo (subject: this workflow's `environment: test`,
-#      or `repo:<org>/<repo>:ref:refs/heads/master` if no environment gate is
-#      used). Grant it `AcrPush` on the ACR and `Contributor` on the resource
-#      group (or a narrower Container Apps role) from Terraform's output.
+#      OIDC login from this repo. Both jobs below declare `environment: test`,
+#      so the subject is always
+#        repo:<org>/<repo>:environment:test
+#      — a `ref:refs/heads/...` subject will never match and fails with
+#      AADSTS70021. Grant the app `AcrPush` AND `Container Registry Tasks
+#      Contributor` on the ACR (`az acr build` runs a control-plane quick
+#      build, which AcrPush alone does not authorize), plus `Contributor` on
+#      the resource group (or a narrower Container Apps role) from Terraform's
+#      output.
 #   3. Configure a GitHub Environment named "test" with:
 #
 #      Secrets (Azure OIDC login — never long-lived credentials):
@@ -48,6 +53,9 @@ jobs:
     environment: test
     strategy:
       fail-fast: false
+      # Basic-tier ACR runs quick builds on a small shared pool; firing all 7
+      # at once queues them anyway and risks the 25-minute job timeout.
+      max-parallel: 3
       matrix:
         service:
           - { key: gateway, dir: ApiGateway }
@@ -61,6 +69,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # `vars.*` that were never configured expand to an empty string rather
+      # than failing, so `set -u` cannot catch them — check explicitly.
+      - name: Validate required configuration
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          CONTAINERAPP_NAMES_JSON: ${{ vars.CONTAINERAPP_NAMES_JSON }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in ACR_LOGIN_SERVER RESOURCE_GROUP CONTAINERAPP_NAMES_JSON; do
+            if [ -z "${!name:-}" ]; then
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Missing GitHub Environment variables:${missing}" >&2
+            echo "Populate them from 'terraform output' — see the header of this workflow." >&2
+            exit 1
+          fi
 
       - name: Azure login (OIDC)
         uses: azure/login@v2
@@ -112,6 +141,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: build-and-deploy
+    # `fail-fast: false` lets the other services finish, but the matrix job as
+    # a whole then reports failure — and a plain `needs:` would SKIP this job,
+    # i.e. skip verification in exactly the case it exists for. Run always,
+    # probe the gateway, and only then fail on a partial deploy.
+    if: always()
     environment: test
     steps:
       # New Container App revisions take a moment to become ready, so retry
@@ -121,9 +155,15 @@ jobs:
           GATEWAY_FQDN: ${{ vars.GATEWAY_FQDN }}
         run: |
           set -euo pipefail
+          if [ -z "${GATEWAY_FQDN:-}" ]; then
+            echo "Missing GitHub Environment variable: GATEWAY_FQDN" >&2
+            echo "Populate it from 'terraform output -raw gateway_fqdn'." >&2
+            exit 1
+          fi
           url="https://${GATEWAY_FQDN}/health/ready"
           for attempt in $(seq 1 10); do
-            status=$(curl -s -o /dev/null -w '%{http_code}' "$url" || echo "000")
+            # --max-time keeps one hung request from eating the job timeout.
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
             if [ "$status" = "200" ]; then
               echo "Gateway healthy (attempt $attempt): $url"
               exit 0
@@ -132,4 +172,15 @@ jobs:
             sleep 15
           done
           echo "Gateway did not become healthy at $url" >&2
+          exit 1
+
+      # Reached only when the gateway is healthy: a healthy gateway in front of
+      # services that were never updated is still a failed deploy, and on a
+      # first deploy the un-updated ones are still running the Terraform
+      # placeholder image.
+      - name: Fail on partial deploy
+        if: needs.build-and-deploy.result != 'success'
+        run: |
+          echo "build-and-deploy finished with result '${{ needs.build-and-deploy.result }}'." >&2
+          echo "At least one service was not updated — this deploy is partial, not green." >&2
           exit 1
