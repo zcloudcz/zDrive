@@ -2,10 +2,8 @@ using System.Security.Cryptography;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
-using Yarp.ReverseProxy.Configuration;
 using ZDrive.Shared.Extensions;
 using ZDrive.Shared.Middleware;
 
@@ -85,15 +83,8 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
-// Health checks. The gateway owns no database, so "ready" means the proxy has
-// somewhere to send traffic: every cluster must carry at least one destination
-// with a non-empty address. Outside Development those addresses come from the
-// environment (Container Apps internal FQDNs); a missing one would otherwise
-// start a gateway that 502s every request while reporting itself healthy.
-// We deliberately do NOT probe the downstream services from here — one sick
-// service must not mark the whole gateway unready and take the rest with it.
-builder.Services.AddHealthChecks()
-    .AddCheck<ProxyConfigHealthCheck>("proxy-config", tags: ["ready"]);
+// Health checks
+builder.Services.AddHealthChecks();
 
 // CORS
 builder.Services.AddCors(options =>
@@ -131,36 +122,3 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 });
 
 app.Run();
-
-/// <summary>
-/// Readiness check asserting YARP loaded a usable route table: at least one
-/// cluster, and every cluster with a destination we could actually forward to.
-/// </summary>
-internal sealed class ProxyConfigHealthCheck(IProxyConfigProvider configProvider) : IHealthCheck
-{
-    public Task<HealthCheckResult> CheckHealthAsync(
-        HealthCheckContext context,
-        CancellationToken cancellationToken = default)
-    {
-        var config = configProvider.GetConfig();
-
-        if (config.Clusters.Count == 0)
-        {
-            return Task.FromResult(HealthCheckResult.Unhealthy(
-                "YARP loaded no clusters - check the ReverseProxy configuration."));
-        }
-
-        // An empty Destinations dictionary fails this the same way a blank
-        // address does: All() over an empty sequence is true.
-        var unreachable = config.Clusters
-            .Where(cluster => cluster.Destinations is null ||
-                              cluster.Destinations.Values.All(d => string.IsNullOrWhiteSpace(d.Address)))
-            .Select(cluster => cluster.ClusterId)
-            .ToList();
-
-        return Task.FromResult(unreachable.Count == 0
-            ? HealthCheckResult.Healthy()
-            : HealthCheckResult.Unhealthy(
-                $"Clusters without a usable destination address: {string.Join(", ", unreachable)}"));
-    }
-}

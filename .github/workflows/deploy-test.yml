@@ -150,6 +150,10 @@ jobs:
     steps:
       # New Container App revisions take a moment to become ready, so retry
       # a few times before failing the pipeline.
+      #
+      # This only proves the gateway process is serving: it registers no
+      # health checks, so /health/ready is Healthy by construction. The
+      # routing check below is what proves the deploy actually works.
       - name: Wait for gateway /health/ready
         env:
           GATEWAY_FQDN: ${{ vars.GATEWAY_FQDN }}
@@ -173,6 +177,38 @@ jobs:
           done
           echo "Gateway did not become healthy at $url" >&2
           exit 1
+
+      # Drive one request all the way through to a service. `/api/v1/auth/**`
+      # is the only route the gateway forwards unauthenticated, and invalid
+      # credentials are rejected by AuthService itself — so any 4xx means
+      # "the gateway routed and a service answered", while 5xx or a timeout
+      # means the destination is unreachable (e.g. a Container App env var
+      # for the cluster address was never set). A 429 from the auth rate
+      # limiter is just as good a proof of routing.
+      #
+      # Known gap: this covers the auth cluster only, and `az containerapp
+      # update` returns once ARM accepts the PUT, not once the new revision
+      # is serving — with revision_mode "Single" a revision that fails to
+      # start leaves the previous one answering, and these checks would pass.
+      # Verifying the running revision carries this commit's tag is tracked
+      # separately.
+      - name: Verify the gateway reaches a downstream service
+        env:
+          GATEWAY_FQDN: ${{ vars.GATEWAY_FQDN }}
+        run: |
+          set -euo pipefail
+          url="https://${GATEWAY_FQDN}/api/v1/auth/login"
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15             -X POST "$url"             -H 'Content-Type: application/json'             -d '{"email":"deploy-smoke@invalid.test","password":"not-a-real-password"}'             || echo "000")
+          case "$status" in
+            4??)
+              echo "AuthService answered through the gateway (HTTP $status)."
+              ;;
+            *)
+              echo "Expected a 4xx from AuthService, got HTTP $status." >&2
+              echo "The gateway is serving but cannot reach its destinations." >&2
+              exit 1
+              ;;
+          esac
 
       # Reached only when the gateway is healthy: a healthy gateway in front of
       # services that were never updated is still a failed deploy, and on a
