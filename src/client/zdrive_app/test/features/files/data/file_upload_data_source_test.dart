@@ -26,14 +26,14 @@ void main() {
   });
 
   test('initUpload posts fileId/fileName/totalChunks to /storage/upload/init', () async {
-    when(() => dio.post(ApiInit, data: any(named: 'data'))).thenAnswer((_) async =>
-        ok({'sessionId': 's1', 'sasUploadUrl': 'http://blob/upload'}, ApiInit));
+    when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer((_) async =>
+        ok({'sessionId': 's1', 'sasUploadUrl': 'http://blob/upload'}, apiInit));
 
     final session = await ds.initUpload('f1', 'doc.txt', 1);
 
     expect(session.sessionId, 's1');
     expect(session.sasUploadUrl, 'http://blob/upload');
-    verify(() => dio.post(ApiInit,
+    verify(() => dio.post(apiInit,
         data: {'fileId': 'f1', 'fileName': 'doc.txt', 'totalChunks': 1})).called(1);
   });
 
@@ -84,4 +84,4 @@ void main() {
   });
 }
 
-const ApiInit = '/storage/upload/init';
+const apiInit = '/storage/upload/init';
