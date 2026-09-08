@@ -30,8 +30,13 @@ public sealed class AuthServiceFactory : WebApplicationFactory<Program>, IAsyncL
                 services.Remove(descriptor);
 
             // Register DbContext pointing to testcontainer
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // DependencyInjection.cs) — otherwise it falls back to the connection's
+            // search_path, which points at a schema that doesn't exist until the
+            // first migration creates it, and Migrate() fails before it gets there.
             services.AddDbContext<AuthDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=auth"));
+                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=auth",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
         });
     }
 
@@ -42,7 +47,7 @@ public sealed class AuthServiceFactory : WebApplicationFactory<Program>, IAsyncL
         // Apply migrations
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
