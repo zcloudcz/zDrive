@@ -153,11 +153,13 @@ services:
       ReverseProxy__Clusters__storage-cluster__Destinations__storage-service__Address: http://storage-service:8080
       ReverseProxy__Clusters__sync-cluster__Destinations__sync-service__Address: http://sync-service:8080
       ReverseProxy__Clusters__photo-cluster__Destinations__photo-service__Address: http://photo-service:8080
+      ReverseProxy__Clusters__notification-cluster__Destinations__notification-service__Address: http://notification-service:8080
     depends_on:
       - auth-service
       - file-service
       - storage-service
       - sync-service
       - photo-service
+      - notification-service
     networks:
       - zdrive-network
