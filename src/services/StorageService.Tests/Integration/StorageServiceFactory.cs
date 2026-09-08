@@ -125,7 +125,7 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
         // Apply migrations / create schema
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StorageDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
