@@ -23,10 +23,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned, and pinned together with pubspec.lock. The SDK bundles its own
+      # versions of test, test_api, test_core and vector_math, so a floating
+      # `stable` resolves different packages than the committed lock and
+      # --enforce-lockfile below rejects the run. Bumping Flutter is therefore a
+      # deliberate change: raise this version and regenerate the lock in the
+      # same commit.
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.41.2
 
       # --enforce-lockfile is the Flutter counterpart of terraform's
       # -lockfile=readonly: resolve exactly what pubspec.lock pins, and fail if
