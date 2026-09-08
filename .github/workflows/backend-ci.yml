@@ -5,10 +5,23 @@ on:
     paths:
       - "src/services/**"
       - "src/shared/**"
+      # src/tools is in the solution and ZDrive.BackupCli.Tests has its own
+      # Testcontainers integration suite, so changes there must build and test.
+      - "src/tools/**"
+      # The solution decides what `dotnet build`/`dotnet test` even see, so a
+      # commit that drops a project from it must run this job — otherwise
+      # coverage silently disappears with no failing build to show for it.
+      - "zDrive.sln"
+      # Editing this workflow must run it, or a change to the pipeline ships
+      # unexercised.
+      - ".github/workflows/backend-ci.yml"
   pull_request:
     paths:
       - "src/services/**"
       - "src/shared/**"
+      - "src/tools/**"
+      - "zDrive.sln"
+      - ".github/workflows/backend-ci.yml"
 
 env:
   DOTNET_VERSION: "8.0.x"
@@ -37,41 +50,15 @@ jobs:
       - name: Unit tests
         run: dotnet test --no-build --configuration Release --filter Category!=Integration --verbosity normal
 
+  # Every integration test starts its own Postgres (and Azurite, for
+  # StorageService) through Testcontainers and points the service under test at
+  # that container, so this job needs nothing but a Docker daemon — which the
+  # ubuntu runner already provides. It used to declare postgres/redis/azurite
+  # service containers, seed schemas with psql, and pass three connection-string
+  # env vars; nothing read any of it.
   integration-test:
     runs-on: ubuntu-latest
     needs: build-and-test
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: zdrive
-          POSTGRES_PASSWORD: zdrive_dev
-          POSTGRES_DB: zdrive
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U zdrive -d zdrive"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7
-        ports:
-          - 6380:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      azurite:
-        image: mcr.microsoft.com/azure-storage/azurite
-        ports:
-          - 10010:10000
-          - 10011:10001
-          - 10012:10002
 
     steps:
       - name: Checkout
@@ -82,10 +69,6 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Initialize test database schemas
-        run: |
-          PGPASSWORD=zdrive_dev psql -h localhost -p 5433 -U zdrive -d zdrive -f infra/docker/init-db.sql
-
       - name: Restore dependencies
         run: dotnet restore
 
@@ -94,7 +77,3 @@ jobs:
 
       - name: Integration tests
         run: dotnet test --no-build --configuration Release --filter Category=Integration --verbosity normal
-        env:
-          DATABASE_CONNECTION_STRING: "Host=localhost;Port=5433;Database=zdrive;Username=zdrive;Password=zdrive_dev"
-          REDIS_CONNECTION_STRING: "localhost:6380"
-          AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10010/devstoreaccount1"

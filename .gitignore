@@ -16,7 +16,8 @@ build/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-pubspec.lock
+# pubspec.lock is committed: zdrive_app is an application, not a package, so
+# every build (CI included) must resolve the same dependency versions.
 
 # Terraform
 .terraform/

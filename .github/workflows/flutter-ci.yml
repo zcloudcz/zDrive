@@ -4,9 +4,13 @@ on:
   push:
     paths:
       - "src/client/**"
+      # Editing this workflow must run it, or a change to the pipeline ships
+      # unexercised.
+      - ".github/workflows/flutter-ci.yml"
   pull_request:
     paths:
       - "src/client/**"
+      - ".github/workflows/flutter-ci.yml"
 
 jobs:
   build-and-test:
@@ -19,13 +23,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned, and pinned together with pubspec.lock. The SDK bundles its own
+      # versions of test, test_api, test_core and vector_math, so a floating
+      # `stable` resolves different packages than the committed lock and
+      # --enforce-lockfile below rejects the run. Bumping Flutter is therefore a
+      # deliberate change: raise this version and regenerate the lock in the
+      # same commit.
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: "3.41.2"
 
+      # --enforce-lockfile is the Flutter counterpart of terraform's
+      # -lockfile=readonly: resolve exactly what pubspec.lock pins, and fail if
+      # pubspec.yaml has drifted from it. Without it a PR that changes
+      # pubspec.yaml and forgets the lock would re-resolve, pass green, and
+      # leave the committed lock stale — which would make committing it
+      # pointless.
       - name: Get dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze
         run: flutter analyze --fatal-infos

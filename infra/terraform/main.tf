@@ -31,10 +31,11 @@ module "networking" {
 module "database" {
   source = "./modules/database"
 
-  environment = var.environment
-  location    = var.location
-  prefix      = var.prefix
-  subnet_id   = module.networking.database_subnet_id
+  environment            = var.environment
+  location               = var.location
+  prefix                 = var.prefix
+  subnet_id              = module.networking.database_subnet_id
+  administrator_password = var.postgres_administrator_password
 }
 
 module "storage" {

@@ -15,6 +15,14 @@ variable "subnet_id" {
   type        = string
 }
 
+variable "administrator_password" {
+  description = "PostgreSQL administrator password. Supply from Key Vault or a CI secret — never a tfvars file in the repo."
+  type        = string
+  sensitive   = true
+  # No default on purpose: a placeholder default is a known password that
+  # reaches a real server the first time someone runs apply without noticing.
+}
+
 resource "azurerm_resource_group" "database" {
   name     = "rg-${var.prefix}-${var.environment}-db"
   location = var.location
@@ -32,16 +40,15 @@ resource "azurerm_postgresql_flexible_server" "main" {
   resource_group_name = azurerm_resource_group.database.name
   location            = azurerm_resource_group.database.location
 
-  version                = "16"
-  sku_name               = var.environment == "production" ? "GP_Standard_D4s_v3" : "B_Standard_B2s"
-  storage_mb             = var.environment == "production" ? 131072 : 32768
-  delegated_subnet_id    = var.subnet_id
-  private_dns_zone_id    = azurerm_private_dns_zone.postgres.id
-  zone                   = "1"
+  version             = "16"
+  sku_name            = var.environment == "production" ? "GP_Standard_D4s_v3" : "B_Standard_B2s"
+  storage_mb          = var.environment == "production" ? 131072 : 32768
+  delegated_subnet_id = var.subnet_id
+  private_dns_zone_id = azurerm_private_dns_zone.postgres.id
+  zone                = "1"
 
-  # Administrator credentials — use Key Vault in real deployment
   administrator_login    = "zdrive_admin"
-  administrator_password = "CHANGE_ME_USE_KEYVAULT" # TODO: pull from Key Vault
+  administrator_password = var.administrator_password
 
   backup_retention_days        = var.environment == "production" ? 35 : 7
   geo_redundant_backup_enabled = var.environment == "production" ? true : false
@@ -57,6 +64,6 @@ resource "azurerm_postgresql_flexible_server_database" "zdrive" {
 
 output "connection_string" {
   description = "PostgreSQL connection string"
-  value       = "Host=${azurerm_postgresql_flexible_server.main.fqdn};Database=zdrive;Username=zdrive_admin;Password=CHANGE_ME_USE_KEYVAULT"
+  value       = "Host=${azurerm_postgresql_flexible_server.main.fqdn};Database=zdrive;Username=zdrive_admin;Password=${var.administrator_password}"
   sensitive   = true
 }
