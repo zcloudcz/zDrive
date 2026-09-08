@@ -5,6 +5,9 @@ on:
     paths:
       - "src/services/**"
       - "src/shared/**"
+      # src/tools is in the solution and ZDrive.BackupCli.Tests has its own
+      # Testcontainers integration suite, so changes there must build and test.
+      - "src/tools/**"
       # Editing this workflow must run it, or a change to the pipeline ships
       # unexercised.
       - ".github/workflows/backend-ci.yml"
@@ -12,6 +15,7 @@ on:
     paths:
       - "src/services/**"
       - "src/shared/**"
+      - "src/tools/**"
       - ".github/workflows/backend-ci.yml"
 
 env:

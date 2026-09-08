@@ -39,8 +39,10 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          # Matches the version the committed .terraform.lock.hcl files were
-          # generated with; bump both together.
+          # A lock file records provider versions, not the CLI version, so this
+          # pin is separate from it: it keeps CI on one known CLI rather than
+          # whatever `latest` becomes. The stacks declare `required_version >=
+          # 1.5`, so a developer on any 1.5+ is fine.
           terraform_version: "1.15.8"
 
       - name: Format check
@@ -68,5 +70,13 @@ jobs:
         with:
           version: "v3.16.3"
 
+      # Each values file is linted separately: they override different keys, so
+      # a template that only breaks under the production overrides would pass a
+      # lint of the defaults alone.
       - name: Lint chart
-        run: helm lint infra/helm/zdrive --values infra/helm/zdrive/values.yaml
+        run: |
+          for values in values.yaml values-staging.yaml values-production.yaml; do
+            echo "::group::helm lint --values $values"
+            helm lint infra/helm/zdrive --values "infra/helm/zdrive/$values"
+            echo "::endgroup::"
+          done

@@ -28,8 +28,14 @@ jobs:
         with:
           channel: stable
 
+      # --enforce-lockfile is the Flutter counterpart of terraform's
+      # -lockfile=readonly: resolve exactly what pubspec.lock pins, and fail if
+      # pubspec.yaml has drifted from it. Without it a PR that changes
+      # pubspec.yaml and forgets the lock would re-resolve, pass green, and
+      # leave the committed lock stale — which would make committing it
+      # pointless.
       - name: Get dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze
         run: flutter analyze --fatal-infos
