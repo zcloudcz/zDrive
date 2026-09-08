@@ -5,10 +5,14 @@ on:
     paths:
       - "src/services/**"
       - "src/shared/**"
+      # Editing this workflow must run it, or a change to the pipeline ships
+      # unexercised.
+      - ".github/workflows/backend-ci.yml"
   pull_request:
     paths:
       - "src/services/**"
       - "src/shared/**"
+      - ".github/workflows/backend-ci.yml"
 
 env:
   DOTNET_VERSION: "8.0.x"

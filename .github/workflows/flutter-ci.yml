@@ -4,9 +4,13 @@ on:
   push:
     paths:
       - "src/client/**"
+      # Editing this workflow must run it, or a change to the pipeline ships
+      # unexercised.
+      - ".github/workflows/flutter-ci.yml"
   pull_request:
     paths:
       - "src/client/**"
+      - ".github/workflows/flutter-ci.yml"
 
 jobs:
   build-and-test:
