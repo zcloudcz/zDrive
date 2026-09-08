@@ -87,11 +87,11 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
             _azurite.StartAsync());
 
         await using (var scope = AuthFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();
+            await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
         await using (var scope = FileFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<FileDbContext>().Database.EnsureCreatedAsync();
+            await scope.ServiceProvider.GetRequiredService<FileDbContext>().Database.MigrateAsync();
         await using (var scope = StorageFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<StorageDbContext>().Database.EnsureCreatedAsync();
+            await scope.ServiceProvider.GetRequiredService<StorageDbContext>().Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
@@ -113,8 +113,14 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
         builder.ConfigureServices(services =>
         {
             Replace<DbContextOptions<AuthDbContext>>(services);
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // AuthService's DependencyInjection.cs) — otherwise it falls back to
+            // the connection's search_path, which points at a schema that doesn't
+            // exist until the first migration creates it, and Migrate() fails
+            // before it gets there.
             services.AddDbContext<AuthDbContext>(o =>
-                o.UseNpgsql(_authPostgres.GetConnectionString() + ";Search Path=auth"));
+                o.UseNpgsql(_authPostgres.GetConnectionString() + ";Search Path=auth",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
         });
     }
 
@@ -124,8 +130,15 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
         builder.ConfigureServices(services =>
         {
             Replace<DbContextOptions<FileDbContext>>(services);
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // FileService's DependencyInjection.cs) — otherwise it falls back to
+            // the connection's search_path, which points at a schema that doesn't
+            // exist until the first migration creates it, and Migrate() fails
+            // before it gets there.
             services.AddDbContext<FileDbContext>(o =>
-                o.UseNpgsql(_filePostgres.GetConnectionString() + ";Search Path=files").UseSnakeCaseNamingConvention());
+                o.UseNpgsql(_filePostgres.GetConnectionString() + ";Search Path=files",
+                        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
+                    .UseSnakeCaseNamingConvention());
         });
     }
 
