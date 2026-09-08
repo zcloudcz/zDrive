@@ -1,6 +1,8 @@
 using System.Net;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Yarp.ReverseProxy.Configuration;
 
 namespace ZDrive.ApiGateway.Tests.Integration;
 
@@ -54,24 +56,31 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
     }
 
     /// <summary>
-    /// The SignalR hub route deliberately carries no AuthorizationPolicy: the
-    /// browser WebSocket transport cannot send an Authorization header, so
-    /// gating it at the gateway would reject the very transport the hub exists
-    /// for. SyncHub is marked [Authorize], so NotificationService still
-    /// enforces authentication once the request arrives.
+    /// The SignalR hub route deliberately carries no AuthorizationPolicy.
+    /// SignalR passes its token in the <c>access_token</c> query string
+    /// because the browser WebSocket transport cannot send an Authorization
+    /// header, and NotificationService reads it there
+    /// (<c>NotificationService.Infrastructure.DependencyInjection</c> installs
+    /// an <c>OnMessageReceived</c> handler scoped to /hubs/sync). The gateway
+    /// has no such handler, so applying its default policy would 401 a request
+    /// the destination can authenticate perfectly well.
     /// </summary>
+    /// <remarks>
+    /// Asserted against the route table rather than by issuing a request: a
+    /// developer running NotificationService locally on :5106 would get a real
+    /// 401 from the hub's [Authorize] and turn a status-code assertion red.
+    /// </remarks>
     [Fact]
-    public async Task SyncHubRoute_WithoutToken_IsForwardedInsteadOfRejected()
+    public void SyncHubRoute_IsRoutedWithoutAuthorizationPolicy()
     {
-        var client = _factory.CreateClient();
+        var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();
 
-        var response = await client.GetAsync("/hubs/sync");
+        var hubRoute = config.Routes.Should().ContainSingle(
+            route => route.Match.Path == "/hubs/sync/{**catch-all}",
+            "the SignalR hub must be routed").Subject;
 
-        response.StatusCode.Should().NotBe(
-            HttpStatusCode.Unauthorized,
-            "the gateway must not reject the hub handshake — the WebSocket transport cannot carry an Authorization header");
-        response.StatusCode.Should().NotBe(
-            HttpStatusCode.NotFound,
-            "the hub path must be routed to NotificationService");
+        hubRoute.ClusterId.Should().Be("notification-cluster");
+        hubRoute.AuthorizationPolicy.Should().BeNull(
+            "the hub authenticates from the access_token query string, which the gateway does not read");
     }
 }
