@@ -48,8 +48,13 @@ public sealed class SyncServiceFactory : WebApplicationFactory<Program>, IAsyncL
                 services.Remove(descriptor);
 
             // Register DbContext pointing to testcontainer
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // DependencyInjection.cs) — otherwise it falls back to the connection's
+            // search_path, which points at a schema that doesn't exist until the
+            // first migration creates it, and Migrate() fails before it gets there.
             services.AddDbContext<SyncDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=sync"));
+                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=sync",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "sync")));
         });
     }
 
@@ -60,7 +65,7 @@ public sealed class SyncServiceFactory : WebApplicationFactory<Program>, IAsyncL
         // Apply migrations / ensure schema
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
