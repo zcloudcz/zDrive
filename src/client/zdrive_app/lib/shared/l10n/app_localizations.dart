@@ -458,6 +458,30 @@ abstract class AppLocalizations {
   /// **'Your files are up to date across all devices.'**
   String get syncDescription;
 
+  /// No description provided for @syncDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'Devices'**
+  String get syncDevices;
+
+  /// No description provided for @syncConflicts.
+  ///
+  /// In en, this message translates to:
+  /// **'Conflicts'**
+  String get syncConflicts;
+
+  /// No description provided for @syncNoDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'No devices registered'**
+  String get syncNoDevices;
+
+  /// No description provided for @syncNeverSynced.
+  ///
+  /// In en, this message translates to:
+  /// **'Never synced'**
+  String get syncNeverSynced;
+
   /// No description provided for @versionHistory.
   ///
   /// In en, this message translates to:

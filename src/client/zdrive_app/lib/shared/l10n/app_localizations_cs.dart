@@ -192,6 +192,18 @@ class AppLocalizationsCs extends AppLocalizations {
       'Vaše soubory jsou aktuální na všech zařízeních.';
 
   @override
+  String get syncDevices => 'Zařízení';
+
+  @override
+  String get syncConflicts => 'Konflikty';
+
+  @override
+  String get syncNoDevices => 'Žádná zaregistrovaná zařízení';
+
+  @override
+  String get syncNeverSynced => 'Nikdy nesynchronizováno';
+
+  @override
   String get versionHistory => 'Historie verzí';
 
   @override

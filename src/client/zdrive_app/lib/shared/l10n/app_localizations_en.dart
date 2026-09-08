@@ -191,6 +191,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncDescription => 'Your files are up to date across all devices.';
 
   @override
+  String get syncDevices => 'Devices';
+
+  @override
+  String get syncConflicts => 'Conflicts';
+
+  @override
+  String get syncNoDevices => 'No devices registered';
+
+  @override
+  String get syncNeverSynced => 'Never synced';
+
+  @override
   String get versionHistory => 'Version history';
 
   @override
