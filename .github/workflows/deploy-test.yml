@@ -1,0 +1,272 @@
+# Deploys all 7 zDrive services to the Azure Container Apps TEST environment
+# (see docs/release-test-deploy.md and infra/terraform/container-apps/).
+#
+# Manual trigger only (workflow_dispatch) — this is a test environment, not
+# meant to redeploy on every push to main.
+#
+# Prerequisites (a human must do this once, outside this workflow):
+#   1. `terraform apply` the stack in infra/terraform/container-apps/
+#      (see infra/terraform/README.md).
+#   2. Create an Azure AD app registration with a federated credential for
+#      OIDC login from this repo. Both jobs below declare `environment: test`,
+#      so the subject is always
+#        repo:<org>/<repo>:environment:test
+#      — a `ref:refs/heads/...` subject will never match and fails with
+#      AADSTS70021. Grant the app `AcrPush` AND `Container Registry Tasks
+#      Contributor` on the ACR (`az acr build` runs a control-plane quick
+#      build, which AcrPush alone does not authorize), plus `Contributor` on
+#      the resource group (or a narrower Container Apps role) from Terraform's
+#      output.
+#   3. Configure a GitHub Environment named "test" with:
+#
+#      Secrets (Azure OIDC login — never long-lived credentials):
+#        AZURE_CLIENT_ID       — app registration (federated credential) client ID
+#        AZURE_TENANT_ID       — Entra tenant ID
+#        AZURE_SUBSCRIPTION_ID — target subscription ID
+#
+#      Variables (non-secret, copied from `terraform output` after apply):
+#        RESOURCE_GROUP        <- terraform output -raw resource_group_name
+#        ACR_LOGIN_SERVER      <- terraform output -raw acr_login_server
+#        GATEWAY_FQDN          <- terraform output -raw gateway_fqdn
+#        CONTAINERAPP_NAMES_JSON <- terraform output -json container_app_names
+#                                   (map: gateway/auth/file/storage/sync/photo/notification -> Container App name)
+#
+# Manual run: Actions tab -> "Deploy Test (Container Apps)" -> Run workflow.
+
+name: Deploy Test (Container Apps)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # required for azure/login OIDC federation
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: test
+    strategy:
+      fail-fast: false
+      # Basic-tier ACR runs quick builds on a small shared pool; firing all 7
+      # at once queues them anyway and risks the 25-minute job timeout.
+      max-parallel: 3
+      matrix:
+        service:
+          - { key: gateway, dir: ApiGateway }
+          - { key: auth, dir: AuthService }
+          - { key: file, dir: FileService }
+          - { key: storage, dir: StorageService }
+          - { key: sync, dir: SyncService }
+          - { key: photo, dir: PhotoService }
+          - { key: notification, dir: NotificationService }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # `vars.*` that were never configured expand to an empty string rather
+      # than failing, so `set -u` cannot catch them — check explicitly.
+      - name: Validate required configuration
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          CONTAINERAPP_NAMES_JSON: ${{ vars.CONTAINERAPP_NAMES_JSON }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in ACR_LOGIN_SERVER RESOURCE_GROUP CONTAINERAPP_NAMES_JSON; do
+            if [ -z "${!name:-}" ]; then
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Missing GitHub Environment variables:${missing}" >&2
+            echo "Populate them from 'terraform output' — see the header of this workflow." >&2
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Allow az to auto-install the containerapp extension
+        run: az config set extension.use_dynamic_install=yes_without_prompt
+
+      # `az acr build` submits the Dockerfile + context to ACR Tasks, which
+      # builds and pushes remotely — no local docker daemon/login needed.
+      - name: Build and push image
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          SERVICE_DIR: ${{ matrix.service.dir }}
+          SERVICE_KEY: ${{ matrix.service.key }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          acr_name="${ACR_LOGIN_SERVER%%.*}"
+          az acr build \
+            --registry "$acr_name" \
+            --image "zdrive-${SERVICE_KEY}:${IMAGE_TAG}" \
+            --file "src/services/${SERVICE_DIR}/Dockerfile" \
+            .
+
+      - name: Update Container App
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          CONTAINERAPP_NAMES_JSON: ${{ vars.CONTAINERAPP_NAMES_JSON }}
+          SERVICE_KEY: ${{ matrix.service.key }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          app_name=$(echo "$CONTAINERAPP_NAMES_JSON" | jq -r --arg key "$SERVICE_KEY" '.[$key]')
+          if [ -z "$app_name" ] || [ "$app_name" = "null" ]; then
+            echo "No Container App name found for service key '$SERVICE_KEY' in CONTAINERAPP_NAMES_JSON" >&2
+            exit 1
+          fi
+          az containerapp update \
+            --name "$app_name" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${ACR_LOGIN_SERVER}/zdrive-${SERVICE_KEY}:${IMAGE_TAG}"
+
+          # The update above returns once ARM accepts the PUT, not once the new
+          # revision serves traffic. With revision_mode "Single" a revision that
+          # fails to start leaves the previous one active and answering, so
+          # without this check the pipeline would report a green deploy while
+          # the old image keeps running.
+          expected_image="${ACR_LOGIN_SERVER}/zdrive-${SERVICE_KEY}:${IMAGE_TAG}"
+          for attempt in $(seq 1 20); do
+            state=$(az containerapp revision list \
+              --name "$app_name" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "[?properties.active] | [?properties.template.containers[0].image=='${expected_image}'] | [0].properties.runningState" \
+              -o tsv || true)
+            # No match yet, or a transient az/ARM hiccup — both mean "retry",
+            # not "kill the deploy", so neither is allowed to trip `set -e`.
+            state="${state:-Unknown}"
+
+            case "$state" in
+              Running|Stopped)
+                # Six of the seven apps run min_replicas = 0, so an active
+                # revision that has scaled to zero reports Stopped. The
+                # assertion that matters is which image the ACTIVE revision
+                # carries; a revision that never came up does not become
+                # active in Single mode.
+                echo "$app_name active revision is $expected_image, runningState=$state (attempt $attempt)."
+                exit 0
+                ;;
+              Failed|Degraded)
+                echo "$app_name revision for $expected_image reported runningState=$state." >&2
+                az containerapp logs show --name "$app_name" --resource-group "$RESOURCE_GROUP" --tail 50 >&2 || true
+                exit 1
+                ;;
+            esac
+
+            echo "Attempt $attempt: active revision for $expected_image is '$state', retrying in 15s..."
+            sleep 15
+          done
+
+          echo "$app_name never activated a revision running $expected_image." >&2
+          az containerapp revision list --name "$app_name" --resource-group "$RESOURCE_GROUP" \
+            --query "[?properties.active].{name:name,image:properties.template.containers[0].image,state:properties.runningState}" \
+            -o table >&2 || true
+          exit 1
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build-and-deploy
+    # `fail-fast: false` lets the other services finish, but the matrix job as
+    # a whole then reports failure — and a plain `needs:` would SKIP this job,
+    # i.e. skip verification in exactly the case it exists for. Run after a
+    # failure but not after a cancellation, probe the gateway, and only then
+    # fail on a partial deploy.
+    if: ${{ !cancelled() }}
+    environment: test
+    steps:
+      # New Container App revisions take a moment to become ready, so retry
+      # a few times before failing the pipeline.
+      #
+      # This only proves the gateway process is serving: it registers no
+      # health checks, so /health/ready is Healthy by construction. The
+      # routing check below is what proves the deploy actually works.
+      - name: Wait for gateway /health/ready
+        env:
+          GATEWAY_FQDN: ${{ vars.GATEWAY_FQDN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GATEWAY_FQDN:-}" ]; then
+            echo "Missing GitHub Environment variable: GATEWAY_FQDN" >&2
+            echo "Populate it from 'terraform output -raw gateway_fqdn'." >&2
+            exit 1
+          fi
+          url="https://${GATEWAY_FQDN}/health/ready"
+          for attempt in $(seq 1 10); do
+            # --max-time keeps one hung request from eating the job timeout.
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "Gateway healthy (attempt $attempt): $url"
+              exit 0
+            fi
+            echo "Attempt $attempt: gateway returned $status, retrying in 15s..."
+            sleep 15
+          done
+          echo "Gateway did not become healthy at $url" >&2
+          exit 1
+
+      # Drive one request all the way through to a service. `/api/v1/auth/**`
+      # is the only route the gateway forwards unauthenticated, and invalid
+      # credentials are rejected by AuthService itself — so any 4xx means
+      # "the gateway routed and a service answered", while 5xx or a timeout
+      # means the destination is unreachable (e.g. a Container App env var
+      # for the cluster address was never set). Note 429 is NOT such a proof:
+      # the auth route carries a rate limiter policy and UseRateLimiter runs
+      # before MapReverseProxy, so a 429 comes from the gateway itself. One
+      # request against a 20/min limit will not hit it.
+      #
+      # This covers the auth cluster only; the per-service revision check in
+      # the deploy job is what proves the other six actually rolled over.
+      - name: Verify the gateway reaches a downstream service
+        env:
+          GATEWAY_FQDN: ${{ vars.GATEWAY_FQDN }}
+        run: |
+          set -euo pipefail
+          url="https://${GATEWAY_FQDN}/api/v1/auth/login"
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            -X POST "$url" \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"deploy-smoke@invalid.test","password":"not-a-real-password"}' \
+            || echo "000")
+          case "$status" in
+            429)
+              echo "Rate limited by the gateway (HTTP 429) — this proves nothing about routing." >&2
+              exit 1
+              ;;
+            4??)
+              echo "AuthService answered through the gateway (HTTP $status)."
+              ;;
+            *)
+              echo "Expected a 4xx from AuthService, got HTTP $status." >&2
+              echo "The gateway is serving but cannot reach its destinations." >&2
+              exit 1
+              ;;
+          esac
+
+      # Reached only when the gateway is healthy: a healthy gateway in front of
+      # services that were never updated is still a failed deploy, and on a
+      # first deploy the un-updated ones are still running the Terraform
+      # placeholder image.
+      - name: Fail on partial deploy
+        if: needs.build-and-deploy.result != 'success'
+        run: |
+          echo "build-and-deploy finished with result '${{ needs.build-and-deploy.result }}'." >&2
+          echo "At least one service was not updated — this deploy is partial, not green." >&2
+          exit 1
