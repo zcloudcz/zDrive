@@ -42,7 +42,7 @@ jobs:
           # A lock file records provider versions, not the CLI version, so this
           # pin is separate from it: it keeps CI on one known CLI rather than
           # whatever `latest` becomes. The stacks declare `required_version >=
-          # 1.5`, so a developer on any 1.5+ is fine.
+          # 1.5`, but this is the only CLI version anything verifies.
           terraform_version: "1.15.8"
 
       - name: Format check

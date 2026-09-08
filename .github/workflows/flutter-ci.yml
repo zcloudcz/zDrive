@@ -33,7 +33,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.41.2
+          flutter-version: "3.41.2"
 
       # --enforce-lockfile is the Flutter counterpart of terraform's
       # -lockfile=readonly: resolve exactly what pubspec.lock pins, and fail if

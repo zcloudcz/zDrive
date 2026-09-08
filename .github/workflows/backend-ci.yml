@@ -8,6 +8,10 @@ on:
       # src/tools is in the solution and ZDrive.BackupCli.Tests has its own
       # Testcontainers integration suite, so changes there must build and test.
       - "src/tools/**"
+      # The solution decides what `dotnet build`/`dotnet test` even see, so a
+      # commit that drops a project from it must run this job — otherwise
+      # coverage silently disappears with no failing build to show for it.
+      - "zDrive.sln"
       # Editing this workflow must run it, or a change to the pipeline ships
       # unexercised.
       - ".github/workflows/backend-ci.yml"
@@ -16,6 +20,7 @@ on:
       - "src/services/**"
       - "src/shared/**"
       - "src/tools/**"
+      - "zDrive.sln"
       - ".github/workflows/backend-ci.yml"
 
 env:
