@@ -154,8 +154,13 @@ jobs:
             state="${state:-Unknown}"
 
             case "$state" in
-              Running)
-                echo "$app_name is serving $expected_image (attempt $attempt)."
+              Running|Stopped)
+                # Six of the seven apps run min_replicas = 0, so an active
+                # revision that has scaled to zero reports Stopped. The
+                # assertion that matters is which image the ACTIVE revision
+                # carries; a revision that never came up does not become
+                # active in Single mode.
+                echo "$app_name active revision is $expected_image, runningState=$state (attempt $attempt)."
                 exit 0
                 ;;
               Failed|Degraded)
@@ -222,8 +227,10 @@ jobs:
       # credentials are rejected by AuthService itself — so any 4xx means
       # "the gateway routed and a service answered", while 5xx or a timeout
       # means the destination is unreachable (e.g. a Container App env var
-      # for the cluster address was never set). A 429 from the auth rate
-      # limiter is just as good a proof of routing.
+      # for the cluster address was never set). Note 429 is NOT such a proof:
+      # the auth route carries a rate limiter policy and UseRateLimiter runs
+      # before MapReverseProxy, so a 429 comes from the gateway itself. One
+      # request against a 20/min limit will not hit it.
       #
       # This covers the auth cluster only; the per-service revision check in
       # the deploy job is what proves the other six actually rolled over.
@@ -233,8 +240,16 @@ jobs:
         run: |
           set -euo pipefail
           url="https://${GATEWAY_FQDN}/api/v1/auth/login"
-          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15             -X POST "$url"             -H 'Content-Type: application/json'             -d '{"email":"deploy-smoke@invalid.test","password":"not-a-real-password"}'             || echo "000")
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            -X POST "$url" \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"deploy-smoke@invalid.test","password":"not-a-real-password"}' \
+            || echo "000")
           case "$status" in
+            429)
+              echo "Rate limited by the gateway (HTTP 429) — this proves nothing about routing." >&2
+              exit 1
+              ;;
             4??)
               echo "AuthService answered through the gateway (HTTP $status)."
               ;;
