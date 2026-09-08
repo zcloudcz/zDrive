@@ -225,6 +225,8 @@ locals {
     storage = { cluster_id = "storage-cluster", destination_id = "storage-service" }
     sync    = { cluster_id = "sync-cluster", destination_id = "sync-service" }
     photo   = { cluster_id = "photo-cluster", destination_id = "photo-service" }
+    # Carries both /api/v1/notifications and the SignalR hub at /hubs/**.
+    notification = { cluster_id = "notification-cluster", destination_id = "notification-service" }
   }
 }
 
