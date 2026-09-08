@@ -137,15 +137,54 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --image "${ACR_LOGIN_SERVER}/zdrive-${SERVICE_KEY}:${IMAGE_TAG}"
 
+          # The update above returns once ARM accepts the PUT, not once the new
+          # revision serves traffic. With revision_mode "Single" a revision that
+          # fails to start leaves the previous one active and answering, so
+          # without this check the pipeline would report a green deploy while
+          # the old image keeps running.
+          expected_image="${ACR_LOGIN_SERVER}/zdrive-${SERVICE_KEY}:${IMAGE_TAG}"
+          for attempt in $(seq 1 20); do
+            state=$(az containerapp revision list \
+              --name "$app_name" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "[?properties.active] | [?properties.template.containers[0].image=='${expected_image}'] | [0].properties.runningState" \
+              -o tsv || true)
+            # No match yet, or a transient az/ARM hiccup — both mean "retry",
+            # not "kill the deploy", so neither is allowed to trip `set -e`.
+            state="${state:-Unknown}"
+
+            case "$state" in
+              Running)
+                echo "$app_name is serving $expected_image (attempt $attempt)."
+                exit 0
+                ;;
+              Failed|Degraded)
+                echo "$app_name revision for $expected_image reported runningState=$state." >&2
+                az containerapp logs show --name "$app_name" --resource-group "$RESOURCE_GROUP" --tail 50 >&2 || true
+                exit 1
+                ;;
+            esac
+
+            echo "Attempt $attempt: active revision for $expected_image is '$state', retrying in 15s..."
+            sleep 15
+          done
+
+          echo "$app_name never activated a revision running $expected_image." >&2
+          az containerapp revision list --name "$app_name" --resource-group "$RESOURCE_GROUP" \
+            --query "[?properties.active].{name:name,image:properties.template.containers[0].image,state:properties.runningState}" \
+            -o table >&2 || true
+          exit 1
+
   smoke-test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: build-and-deploy
     # `fail-fast: false` lets the other services finish, but the matrix job as
     # a whole then reports failure — and a plain `needs:` would SKIP this job,
-    # i.e. skip verification in exactly the case it exists for. Run always,
-    # probe the gateway, and only then fail on a partial deploy.
-    if: always()
+    # i.e. skip verification in exactly the case it exists for. Run after a
+    # failure but not after a cancellation, probe the gateway, and only then
+    # fail on a partial deploy.
+    if: ${{ !cancelled() }}
     environment: test
     steps:
       # New Container App revisions take a moment to become ready, so retry
@@ -186,12 +225,8 @@ jobs:
       # for the cluster address was never set). A 429 from the auth rate
       # limiter is just as good a proof of routing.
       #
-      # Known gap: this covers the auth cluster only, and `az containerapp
-      # update` returns once ARM accepts the PUT, not once the new revision
-      # is serving — with revision_mode "Single" a revision that fails to
-      # start leaves the previous one answering, and these checks would pass.
-      # Verifying the running revision carries this commit's tag is tracked
-      # separately.
+      # This covers the auth cluster only; the per-service revision check in
+      # the deploy job is what proves the other six actually rolled over.
       - name: Verify the gateway reaches a downstream service
         env:
           GATEWAY_FQDN: ${{ vars.GATEWAY_FQDN }}
