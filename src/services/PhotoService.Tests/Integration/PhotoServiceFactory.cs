@@ -63,10 +63,10 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
     {
         await _postgres.StartAsync();
 
-        // Create the schema. No EF migrations yet (see PhotoService Program.cs).
+        // Apply migrations / create schema
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PhotoDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
