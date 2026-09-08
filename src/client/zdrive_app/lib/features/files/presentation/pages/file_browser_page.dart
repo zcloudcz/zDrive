@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
@@ -262,8 +263,18 @@ class _FileBrowserView extends StatelessWidget {
   void _onFileTap(BuildContext context, FileItem file) {
     if (file.isFolder) {
       context.go('/home/files/folder/${file.id}');
+      return;
     }
-    // For regular files, no action in MVP (download comes later)
+    _downloadFile(context, file);
+  }
+
+  Future<void> _downloadFile(BuildContext context, FileItem file) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await downloadFile(file, getIt<FileRepository>());
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+    }
   }
 
   Future<void> _showCreateFolderDialog(BuildContext context) async {
@@ -390,5 +401,25 @@ class _FileBrowserView extends StatelessWidget {
         SnackBar(content: Text(e.toString())),
       );
     }
+  }
+}
+
+/// Downloads [file] by handing its (SAS) URL to the OS/browser via
+/// [launch] — StorageService returns a direct link to the blob, so there is
+/// nothing for the client to stream itself.
+///
+/// A top-level function (rather than inlined in [_FileBrowserView]) so it
+/// can be unit tested without a full widget/DI/router harness; [launch]
+/// defaults to the real `launchUrl` and is overridden in tests.
+@visibleForTesting
+Future<void> downloadFile(
+  FileItem file,
+  FileRepository repository, {
+  Future<bool> Function(Uri url, {LaunchMode mode}) launch = launchUrl,
+}) async {
+  final url = await repository.getDownloadUrl(file.id);
+  final launched = await launch(Uri.parse(url), mode: LaunchMode.externalApplication);
+  if (!launched) {
+    throw Exception('Could not open download link');
   }
 }

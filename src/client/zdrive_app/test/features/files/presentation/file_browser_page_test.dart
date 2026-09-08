@@ -4,13 +4,18 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:zdrive_app/features/files/domain/file_item.dart';
+import 'package:zdrive_app/features/files/domain/file_repository.dart';
 import 'package:zdrive_app/features/files/presentation/file_browser_bloc.dart';
+import 'package:zdrive_app/features/files/presentation/pages/file_browser_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 class MockFileBrowserBloc
     extends MockBloc<FileBrowserEvent, FileBrowserState>
     implements FileBrowserBloc {}
+
+class MockFileRepository extends Mock implements FileRepository {}
 
 void main() {
   late MockFileBrowserBloc mockBloc;
@@ -120,6 +125,70 @@ void main() {
       // We verify the tile is tappable.
       await tester.tap(find.text('Documents'));
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('downloadFile', () {
+    late MockFileRepository mockRepository;
+
+    setUp(() {
+      mockRepository = MockFileRepository();
+    });
+
+    test('fetches the download URL and hands it to the launcher', () async {
+      when(() => mockRepository.getDownloadUrl('file-1'))
+          .thenAnswer((_) async => 'https://blob.example/file-1?sas=token');
+
+      Uri? launchedUri;
+      LaunchMode? launchedMode;
+
+      await downloadFile(
+        testFile,
+        mockRepository,
+        launch: (url, {mode = LaunchMode.platformDefault}) async {
+          launchedUri = url;
+          launchedMode = mode;
+          return true;
+        },
+      );
+
+      verify(() => mockRepository.getDownloadUrl('file-1')).called(1);
+      expect(launchedUri, Uri.parse('https://blob.example/file-1?sas=token'));
+      expect(launchedMode, LaunchMode.externalApplication);
+    });
+
+    test('throws when the launcher reports it could not open the URL', () async {
+      when(() => mockRepository.getDownloadUrl('file-1'))
+          .thenAnswer((_) async => 'https://blob.example/file-1');
+
+      expect(
+        () => downloadFile(
+          testFile,
+          mockRepository,
+          launch: (url, {mode = LaunchMode.platformDefault}) async => false,
+        ),
+        throwsA(isException),
+      );
+    });
+
+    test('propagates a failure fetching the download URL without launching', () async {
+      when(() => mockRepository.getDownloadUrl('file-1'))
+          .thenThrow(Exception('network down'));
+
+      var launcherCalled = false;
+
+      await expectLater(
+        () => downloadFile(
+          testFile,
+          mockRepository,
+          launch: (url, {mode = LaunchMode.platformDefault}) async {
+            launcherCalled = true;
+            return true;
+          },
+        ),
+        throwsA(isException),
+      );
+      expect(launcherCalled, isFalse);
     });
   });
 }
