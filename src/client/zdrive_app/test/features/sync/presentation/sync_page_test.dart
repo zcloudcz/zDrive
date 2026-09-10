@@ -42,7 +42,7 @@ void main() {
             {
               'id': 'c-1',
               'fileId': 'file-1',
-              'status': 'pending',
+              'status': 'Pending',
               'createdAt': '2024-06-02T08:00:00Z',
             },
           ]);
@@ -52,11 +52,12 @@ void main() {
 
       expect(find.text('Laptop'), findsOneWidget);
       expect(find.text('file-1'), findsOneWidget);
-      expect(find.textContaining('pending'), findsOneWidget);
+      expect(find.textContaining('Pending'), findsOneWidget);
     });
 
-    testWidgets('shows the all-synced empty state when devices exist with no conflicts',
-        (tester) async {
+    testWidgets(
+        'shows the all-synced empty state when devices exist with no conflicts, '
+        'and keeps the device list visible', (tester) async {
       when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
             {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
           ]);
@@ -66,6 +67,32 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Everything is synced'), findsOneWidget);
+      // The commonest state (a registered device, no conflicts) must still
+      // list the device — this regressed in round 2 when the empty-state
+      // gate was widened to `conflicts.isEmpty` alone.
+      expect(find.text('Laptop'), findsOneWidget);
+    });
+
+    testWidgets('resolved conflicts do not block the all-synced state',
+        (tester) async {
+      when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
+            {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
+          ]);
+      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => [
+            {
+              'id': 'c-1',
+              'fileId': 'file-1',
+              'status': 'ResolvedLocal',
+              'createdAt': '2024-06-02T08:00:00Z',
+            },
+          ]);
+
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Everything is synced'), findsOneWidget);
+      expect(find.text('Laptop'), findsOneWidget);
+      expect(find.text('file-1'), findsNothing);
     });
 
     testWidgets('shows the no-devices state when nothing has ever synced',
@@ -89,7 +116,7 @@ void main() {
             {
               'id': 'c-1',
               'fileId': 'file-1',
-              'status': 'pending',
+              'status': 'Pending',
               'createdAt': '2024-06-02T08:00:00Z',
             },
           ]);
@@ -117,6 +144,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Everything is synced'), findsOneWidget);
+      expect(find.text('Laptop'), findsOneWidget);
     });
   });
 }

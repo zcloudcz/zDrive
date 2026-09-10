@@ -33,7 +33,7 @@ void main() {
               {
                 'id': 'c-1',
                 'fileId': 'file-1',
-                'status': 'pending',
+                'status': 'Pending',
                 'createdAt': '2024-06-02T08:00:00Z',
               },
             ]);
@@ -54,7 +54,44 @@ void main() {
             SyncConflict(
               id: 'c-1',
               fileId: 'file-1',
-              status: 'pending',
+              status: 'Pending',
+              createdAt: DateTime.parse('2024-06-02T08:00:00Z'),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'filters out resolved conflicts, keeping only pending ones',
+      build: buildBloc,
+      setUp: () {
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => [
+              {
+                'id': 'c-1',
+                'fileId': 'file-1',
+                'status': 'Pending',
+                'createdAt': '2024-06-02T08:00:00Z',
+              },
+              {
+                'id': 'c-2',
+                'fileId': 'file-2',
+                'status': 'ResolvedLocal',
+                'createdAt': '2024-06-02T09:00:00Z',
+              },
+            ]);
+      },
+      act: (bloc) => bloc.add(const LoadSyncStatus()),
+      expect: () => [
+        const SyncLoading(),
+        SyncLoaded(
+          devices: const [],
+          conflicts: [
+            SyncConflict(
+              id: 'c-1',
+              fileId: 'file-1',
+              status: 'Pending',
               createdAt: DateTime.parse('2024-06-02T08:00:00Z'),
             ),
           ],

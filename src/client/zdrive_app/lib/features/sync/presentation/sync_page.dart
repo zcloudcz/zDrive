@@ -73,41 +73,37 @@ class _SyncLoadedBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
-    // Nothing to list. Which empty state applies depends on *why* there is
-    // nothing: zero registered devices means sync has never happened (not
-    // "up to date" — a fresh account must not be told everything is fine
-    // before anything has happened), whereas devices with zero conflicts
-    // really is the synced-and-happy case.
-    if (state.conflicts.isEmpty) {
+    // Nothing has ever synced: no registered devices AND no conflicts. This
+    // is the only case with nothing to list, so it is the only case that
+    // gets a full-page message instead of the device/conflict list below —
+    // a fresh account must not be told "up to date" before anything has
+    // happened.
+    if (state.devices.isEmpty && state.conflicts.isEmpty) {
       return Center(
-        child: state.devices.isEmpty
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.devices_other,
-                      size: 64, color: Theme.of(context).colorScheme.outline),
-                  const SizedBox(height: 16),
-                  Text(l10n.syncNoDevices, style: Theme.of(context).textTheme.titleMedium),
-                ],
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.sync, size: 64, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(height: 16),
-                  Text(l10n.allSynced, style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Text(l10n.syncDescription, style: Theme.of(context).textTheme.bodyMedium,
-                      textAlign: TextAlign.center),
-                ],
-              ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.devices_other,
+                size: 64, color: Theme.of(context).colorScheme.outline),
+            const SizedBox(height: 16),
+            Text(l10n.syncNoDevices, style: Theme.of(context).textTheme.titleMedium),
+          ],
+        ),
       );
     }
 
     return ListView(
       children: [
-        _SectionHeader(title: l10n.syncConflicts),
-        for (final conflict in state.conflicts) _ConflictTile(conflict: conflict),
+        if (state.conflicts.isEmpty)
+          ListTile(
+            leading: Icon(Icons.sync, color: Theme.of(context).colorScheme.primary),
+            title: Text(l10n.allSynced),
+            subtitle: Text(l10n.syncDescription),
+          )
+        else ...[
+          _SectionHeader(title: l10n.syncConflicts),
+          for (final conflict in state.conflicts) _ConflictTile(conflict: conflict),
+        ],
         _SectionHeader(title: l10n.syncDevices),
         if (state.devices.isEmpty)
           Padding(

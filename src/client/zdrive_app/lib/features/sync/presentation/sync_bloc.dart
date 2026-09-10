@@ -78,7 +78,16 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       ]);
       emit(SyncLoaded(
         devices: results[0].map(SyncDevice.fromJson).toList(),
-        conflicts: results[1].map(SyncConflict.fromJson).toList(),
+        // GetConflictsQueryHandler (SyncService) filters only on user, not
+        // status, because the same endpoint backs a resolved-conflict
+        // integration check (SyncFlowTests.ResolveConflict_StatusUpdated).
+        // This page only cares about conflicts still needing action, so the
+        // filter lives here instead of narrowing the shared query. Wire
+        // value is "Pending" (ConflictStatus.ToString()), not lowercase.
+        conflicts: results[1]
+            .map(SyncConflict.fromJson)
+            .where((c) => c.status == 'Pending')
+            .toList(),
       ));
     } catch (e) {
       emit(SyncError(e.toString()));
