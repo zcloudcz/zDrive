@@ -32,9 +32,10 @@ namespace ZDrive.BackupCli.Tests.Integration;
 /// creation, real chunked upload.
 ///
 /// Each service gets its own Postgres container rather than one shared
-/// database — EF Core's EnsureCreatedAsync only creates tables the first
-/// time a physical database has none at all, so sharing one database across
-/// three DbContexts would silently skip creating two of the three schemas.
+/// database. This predates the switch to real EF migrations (each context
+/// now tracks its own applied migrations in its own schema's
+/// __EFMigrationsHistory table, so three contexts could safely share one
+/// database) but is kept for test isolation between the three services.
 ///
 /// There is no real API Gateway here — BackupCliGatewayHandler (see that
 /// file) routes by URL path prefix instead, which is enough to reproduce the
@@ -87,11 +88,11 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
             _azurite.StartAsync());
 
         await using (var scope = AuthFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.EnsureCreatedAsync();
+            await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
         await using (var scope = FileFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<FileDbContext>().Database.EnsureCreatedAsync();
+            await scope.ServiceProvider.GetRequiredService<FileDbContext>().Database.MigrateAsync();
         await using (var scope = StorageFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<StorageDbContext>().Database.EnsureCreatedAsync();
+            await scope.ServiceProvider.GetRequiredService<StorageDbContext>().Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
@@ -113,8 +114,14 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
         builder.ConfigureServices(services =>
         {
             Replace<DbContextOptions<AuthDbContext>>(services);
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // AuthService's DependencyInjection.cs) — otherwise it falls back to
+            // the connection's search_path, which points at a schema that doesn't
+            // exist until the first migration creates it, and Migrate() fails
+            // before it gets there.
             services.AddDbContext<AuthDbContext>(o =>
-                o.UseNpgsql(_authPostgres.GetConnectionString() + ";Search Path=auth"));
+                o.UseNpgsql(_authPostgres.GetConnectionString() + ";Search Path=auth",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
         });
     }
 
@@ -124,8 +131,15 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
         builder.ConfigureServices(services =>
         {
             Replace<DbContextOptions<FileDbContext>>(services);
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // FileService's DependencyInjection.cs) — otherwise it falls back to
+            // the connection's search_path, which points at a schema that doesn't
+            // exist until the first migration creates it, and Migrate() fails
+            // before it gets there.
             services.AddDbContext<FileDbContext>(o =>
-                o.UseNpgsql(_filePostgres.GetConnectionString() + ";Search Path=files").UseSnakeCaseNamingConvention());
+                o.UseNpgsql(_filePostgres.GetConnectionString() + ";Search Path=files",
+                        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
+                    .UseSnakeCaseNamingConvention());
         });
     }
 
@@ -134,13 +148,15 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
         builder.UseEnvironment("Development");
         builder.ConfigureServices(services =>
         {
-            // Unlike Auth/File, StorageDbContext has no HasDefaultSchema —
-            // it relies on the connection's search_path, which must already
-            // exist. A fresh test database only has "public" (matches
-            // StorageService.Tests' own factory), so no override here.
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // StorageService's DependencyInjection.cs) — otherwise it falls back to
+            // the connection's search_path, which points at a schema that doesn't
+            // exist until the first migration creates it, and Migrate() fails
+            // before it gets there.
             Replace<DbContextOptions<StorageDbContext>>(services);
             services.AddDbContext<StorageDbContext>(o =>
-                o.UseNpgsql(_storagePostgres.GetConnectionString()));
+                o.UseNpgsql(_storagePostgres.GetConnectionString() + ";Search Path=storage",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "storage")));
 
             Replace<BlobServiceClient>(services);
             Replace<StorageSharedKeyCredential>(services);

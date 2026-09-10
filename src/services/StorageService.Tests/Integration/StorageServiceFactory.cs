@@ -63,8 +63,13 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
             if (dbDescriptor is not null)
                 services.Remove(dbDescriptor);
 
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // DependencyInjection.cs) — otherwise it falls back to the connection's
+            // search_path, which points at a schema that doesn't exist until the
+            // first migration creates it, and Migrate() fails before it gets there.
             services.AddDbContext<StorageDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString()));
+                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=storage",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "storage")));
 
             // Remove real blob storage services
             RemoveService<BlobServiceClient>(services);
@@ -125,7 +130,7 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
         // Apply migrations / create schema
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StorageDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()

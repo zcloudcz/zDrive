@@ -1,12 +1,11 @@
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
-using Npgsql;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using ZDrive.SyncService.Application;
 using ZDrive.SyncService.Infrastructure;
 using ZDrive.SyncService.Infrastructure.Persistence;
 using ZDrive.Shared.Extensions;
 using ZDrive.Shared.Middleware;
+using ZDrive.Shared.Persistence;
 using ZDrive.SyncService.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -80,46 +79,25 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Create this service's own schema + tables on startup, in every environment.
-// There are no EF migrations yet — a migration job will replace this once the
-// schema stabilizes; until then a fresh database (dev, test or prod)
-// provisions itself this way. All services share one physical "zdrive"
-// database with one schema per service (Search Path in the connection
-// string), so Database.EnsureCreatedAsync() (a DB-level check: "does the
-// database have any tables at all?") must NOT be used here — the first
-// service to start would create its schema and every later service would
-// see "database already has tables" and skip creating its own schema
-// entirely. CreateTablesAsync() only touches this context's own
-// tables/schema, so every service safely creates its own. Assumes a single
-// replica per service (true for the current compose/deploy setup).
+// Apply this service's own pending EF migrations on startup, in every
+// environment. The "zdrive" database itself must already exist — docker-
+// compose, Terraform and Testcontainers all provision it — this helper
+// connects straight into it and does not create it. It applies only pending
+// migrations tracked in this context's own __EFMigrationsHistory table
+// (scoped to the "sync" schema via MigrationsHistoryTable in
+// DependencyInjection.cs) — so it is safe for every service to run this
+// against the shared "zdrive" database: each context only ever touches its
+// own schema and its own history table. Unlike the old EnsureCreated-based
+// workaround this replaced, later deploys that add tables/columns apply
+// cleanly instead of silently no-op'ing. If a schema has tables left over
+// from that old workaround (no history row), it aborts loudly instead of
+// guessing at what happened, and it takes a per-schema advisory lock so
+// concurrent replicas don't race the same migration — see
+// DatabaseMigrationExtensions for both.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
-    var creator = (RelationalDatabaseCreator)db.Database.GetService<IRelationalDatabaseCreator>();
-    try
-    {
-        if (!await creator.ExistsAsync())
-            await creator.CreateAsync(); // physical "zdrive" database, if it doesn't exist yet
-        await creator.CreateTablesAsync(); // only this context's schema + tables
-    }
-    catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.DuplicateTable
-                                     || ex.SqlState == PostgresErrorCodes.DuplicateObject
-                                     || ex.SqlState == PostgresErrorCodes.DuplicateSchema
-                                     || ex.SqlState == PostgresErrorCodes.DuplicateDatabase)
-    {
-        // Already created by a previous run, or by another service racing to
-        // create the shared "zdrive" database on first boot — idempotent no-op
-        // either way.
-        Log.Warning("Schema init for {DbContext} skipped, already exists ({SqlState}): {Message}",
-            db.GetType().Name, ex.SqlState, ex.MessageText);
-        // ponytail: this assumes one duplicate object means the whole schema
-        // is up to date. CreateTablesAsync has no migration history, so if
-        // this context's model gains a table on a later deploy, the DDL
-        // transaction fails on the first pre-existing table, rolls back, and
-        // the new table never gets created — the Log.Warning above fires, but
-        // nothing else surfaces this. Real fix is EF migrations, which track
-        // what's already applied per context.
-    }
+    await db.MigrateWithBaselineAsync("sync");
 }
 
 // Middleware pipeline

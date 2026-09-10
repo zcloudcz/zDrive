@@ -75,8 +75,13 @@ public sealed class NotificationServiceFactory : WebApplicationFactory<Program>,
                 services.Remove(descriptor);
 
             // Register DbContext pointing to testcontainer
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // DependencyInjection.cs) — otherwise it falls back to the connection's
+            // search_path, which points at a schema that doesn't exist until the
+            // first migration creates it, and Migrate() fails before it gets there.
             services.AddDbContext<NotificationDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=notifications"));
+                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=notifications",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "notifications")));
         });
     }
 
@@ -87,7 +92,7 @@ public sealed class NotificationServiceFactory : WebApplicationFactory<Program>,
         // Apply migrations
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()

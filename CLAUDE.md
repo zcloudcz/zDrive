@@ -198,6 +198,64 @@ service that starts generates an RSA key pair into `~/.zdrive/dev-keys/`
 AuthService validate everywhere. Outside Development a missing
 `Jwt:RsaPrivateKeyPem` / `Jwt:RsaPublicKeyPem` is a hard startup failure.
 
+### Recovering a database from before EF migrations existed
+
+Every service migrates its own schema on startup via `MigrateWithBaselineAsync`
+(`ZDrive.Shared/Persistence/DatabaseMigrationExtensions.cs`). If a schema has
+tables but no `__EFMigrationsHistory` table, it refuses to guess whether
+that's an install from the old `EnsureCreated`-based workaround, a
+partially-created schema, or something unrelated, and aborts the service
+with an `InvalidOperationException` instead of silently marking migrations
+as applied against a schema that might not actually match them — an earlier
+version tried to baseline automatically from matching table names and could
+mark a migration as applied when the schema was actually missing one of its
+columns, which is unrecoverable (EF never revisits a migration it believes
+already ran).
+
+If a service fails to start with that error:
+
+- **Throwaway dev database** (docker-compose): drop the Postgres volume and
+  restart — `MigrateAsync()` recreates the schema from scratch. Compose
+  prefixes volume names with the project, so it is `zdrive_postgres-data`,
+  not `postgres-data`:
+
+  ```bash
+  docker compose down && docker volume rm zdrive_postgres-data
+  ```
+
+  `docker compose down -v` also works but removes **every** volume in the
+  file, `azurite-data` included — that is every uploaded blob.
+
+- **Real database**: reconcile the schema against the current EF model by
+  hand (`dotnet ef migrations script` for that service shows what the model
+  expects), then record the migration as applied. Both statements are
+  required, in one transaction — creating the table without inserting the
+  row leaves the guard passing and the next start replaying the DDL:
+
+  ```sql
+  BEGIN;
+  CREATE TABLE IF NOT EXISTS "<schema>"."__EFMigrationsHistory" (
+      "MigrationId"    character varying(150) NOT NULL,
+      "ProductVersion" character varying(32)  NOT NULL,
+      CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+  );
+  INSERT INTO "<schema>"."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+  VALUES ('<migration id>', '8.0.11');
+  COMMIT;
+  ```
+
+  `ProductVersion` is `NOT NULL` with no default, so inserting only the id
+  fails with `23502`. `<migration id>` is the **timestamped** name, not
+  `InitialCreate` — it differs per service, and is the file name under that
+  service's `Migrations/` folder (e.g. `20260908185942_InitialCreate` for
+  AuthService). Take `ProductVersion` from the
+  `Microsoft.EntityFrameworkCore.Design` version in that service's
+  `.csproj`.
+
+  Nothing in the codebase automates this, and it is per migration: if more
+  than `InitialCreate` is already reflected in the schema, insert a row for
+  each.
+
 ### Local substitutes for Azure services
 
 The production design targets Azure managed services; local development

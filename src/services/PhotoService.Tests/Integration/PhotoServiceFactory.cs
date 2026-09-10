@@ -53,9 +53,14 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
             if (descriptor is not null)
                 services.Remove(descriptor);
 
-            // Register DbContext pointing to testcontainer
+            // Register DbContext pointing to testcontainer.
+            // MigrationsHistoryTable must be schema-qualified here too (matching
+            // DependencyInjection.cs) — otherwise it falls back to the connection's
+            // search_path, which points at a schema that doesn't exist until the
+            // first migration creates it, and Migrate() fails before it gets there.
             services.AddDbContext<PhotoDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString()));
+                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=photos",
+                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "photos")));
         });
     }
 
@@ -63,10 +68,10 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
     {
         await _postgres.StartAsync();
 
-        // Create the schema. No EF migrations yet (see PhotoService Program.cs).
+        // Apply migrations / create schema
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PhotoDbContext>();
-        await db.Database.EnsureCreatedAsync();
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
