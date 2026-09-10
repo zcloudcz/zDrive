@@ -67,10 +67,14 @@ class LocalConflictException implements Exception {
 /// overwrite) does not get the "block until it succeeds" treatment above:
 /// it is quarantined instead — recorded via
 /// [SyncMirrorRepository.recordFailedEvent], with the cursor still advancing
-/// past it — because retrying it would fail the same way forever and block
-/// every event behind it. Anything else (a network error, an exception we
-/// don't recognise) still blocks the cursor, since those usually do resolve
-/// on a later retry.
+/// past it — because retrying it immediately would fail the same way and
+/// block every event behind it. It is not abandoned, though: [pullOnce]
+/// retries every quarantined entry on each call, before draining the event
+/// log (see the retry loop there) — so a cause that clears up on its own
+/// (a locked file gets closed, a removable drive comes back) recovers on
+/// the next poll instead of staying stuck forever. Anything else (a network
+/// error, an exception we don't recognise) still blocks the cursor, since
+/// those usually do resolve on a later retry.
 @lazySingleton
 class PullSyncService {
   final SyncRemoteDataSource _syncDataSource;
@@ -85,6 +89,16 @@ class PullSyncService {
     this._fileRepository,
   );
 
+  // Guards pullOnce against concurrent invocations on this singleton. The
+  // bloc already has its own isPulling check (sync_bloc.dart), but that only
+  // protects calls that go through the bloc — PullSyncService is injected
+  // and callable from anywhere (a background task, another route), and two
+  // overlapping pullOnce calls would each read the same starting cursor and
+  // could commit it out of order. Memoizing the in-flight future makes a
+  // second caller await the first call's result instead of starting its own
+  // (see PR #12 review round 2, R6/F4).
+  Future<int>? _inFlight;
+
   /// Pulls and applies everything pending for this device, draining
   /// multiple pages if the server reports more than fit in one. On this
   /// device's first ever sync, also backfills the designated folder from
@@ -93,8 +107,34 @@ class PullSyncService {
   /// raised for them, so a file nobody has touched since before this
   /// feature shipped would otherwise never arrive. Returns the number of
   /// events applied (the backfill is not counted — it is not an event).
-  Future<int> pullOnce(String syncFolderPath) async {
+  Future<int> pullOnce(String syncFolderPath) {
+    return _inFlight ??= _pullOnce(syncFolderPath).whenComplete(() => _inFlight = null);
+  }
+
+  Future<int> _pullOnce(String syncFolderPath) async {
     final deviceId = await _deviceRegistration.ensureRegistered();
+
+    // A quarantined entry's cause may no longer hold by the next poll (the
+    // file that was locked is closed now, the drive is back). _applyUpsert
+    // and _applyDelete are keyed on fileId and fetch current server state,
+    // not on the original event — so a failed row is already re-appliable
+    // without replaying anything from the event log. _applyUpsert alone
+    // covers both directions: if the file is now gone server-side, its
+    // internal 404 handling falls through to _applyDelete itself. Runs
+    // before the drain below so a fix picked up here does not race a fresh
+    // failure for the same file later in this same call.
+    for (final failed in await _mirror.getFailedEvents()) {
+      try {
+        await _applyUpsert(failed.fileId, syncFolderPath);
+        await _mirror.clearFailedEvent(failed.fileId);
+      } on UnsafeRemoteNameException {
+        // Still an unsafe name — stays quarantined.
+      } on LocalConflictException {
+        // Still conflicts with an untracked local change — stays quarantined.
+      } on FileSystemException {
+        // Still failing at the OS level — try again on the next poll.
+      }
+    }
 
     var applied = 0;
     while (true) {
@@ -159,13 +199,12 @@ class PullSyncService {
       await _mirror.recordFailedEvent(fileId, eventId, e.toString());
     } on FileSystemException catch (e) {
       // A name Windows can't represent, a path past MAX_PATH, a locked
-      // file — quarantined on the assumption that the filesystem's answer
-      // will not change. ponytail: that assumption is wrong for a handful
-      // of genuinely transient FileSystemExceptions (disk full, a removable
-      // drive unplugged mid-write) — those get quarantined too instead of
-      // retried. Telling them apart needs an OS-error-code allowlist, which
-      // is more machinery than one un-writable name is worth right now; add
-      // it if a transient case like that actually shows up.
+      // file, a disk that is briefly full or unplugged — quarantined
+      // without trying to tell a permanent cause from a transient one (that
+      // would need an OS-error-code allowlist, more machinery than this is
+      // worth). The retry loop at the top of pullOnce re-attempts every
+      // quarantined entry on each poll, so a transient cause clears itself
+      // on its own; a genuinely permanent one just stays listed.
       await _mirror.recordFailedEvent(fileId, eventId, e.message);
     }
 
@@ -307,10 +346,22 @@ class PullSyncService {
     }
   }
 
+  /// Bootstrap has no event log to quarantine a skipped item against — there
+  /// is no real eventId behind it — so skips are recorded with this sentinel
+  /// instead. [pullOnce]'s retry loop does not care whether an eventId is
+  /// real or this placeholder; it always retries by fileId (see R3/F5),
+  /// which is what actually gets a bootstrap skip out of quarantine later.
+  static const _bootstrapEventId = 0;
+
   /// Backfills [syncFolderPath] and the mirror from FileService's current
   /// tree — see [pullOnce] for why and when this runs. Resumable: a folder
   /// already known to the mirror is still walked (there may be new children
   /// under it since the last attempt), but a file already known is skipped.
+  /// An item bootstrap cannot safely write is recorded via
+  /// [SyncMirrorRepository.recordFailedEvent] rather than dropped silently —
+  /// the same Skipped-items list the delta path (F1/F3/F5) surfaces through,
+  /// so the promise in the non-empty-folder dialog ("listed as skipped
+  /// instead") holds for backfilled files too, not just delta ones.
   Future<void> _bootstrap(String syncFolderPath) async {
     await _bootstrapFolder(null, syncFolderPath, syncFolderPath);
   }
@@ -346,8 +397,12 @@ class PullSyncService {
       } else {
         try {
           localPath = _safeChildPath(syncFolderPath, dirPath, item.name);
-        } on UnsafeRemoteNameException {
-          return; // Skip this one branch; siblings still need walking.
+        } on UnsafeRemoteNameException catch (e) {
+          // The whole subtree under an unsafe folder name would otherwise be
+          // invisible: not synced, not listed, and never revisited (siblings
+          // still need walking, so this returns rather than rethrows).
+          await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
+          return;
         }
         await Directory(localPath).create(recursive: true);
         await _mirror.upsert(SyncMirrorEntry(
@@ -367,11 +422,15 @@ class PullSyncService {
     try {
       final localPath = _safeChildPath(syncFolderPath, dirPath, item.name);
       // Same untracked-file guard as delta apply (F3): backfill must not
-      // clobber a file the user already has. Unlike a delta event, there is
-      // no eventId to quarantine this against, and bootstrap only ever runs
-      // once (see [pullOnce]) — so a conflicting file found here is skipped
-      // for good rather than retried.
-      if (await File(localPath).exists()) return;
+      // clobber a file the user already has.
+      if (await File(localPath).exists()) {
+        await _mirror.recordFailedEvent(
+          item.id,
+          _bootstrapEventId,
+          'local conflict: local file differs from what was last synced: $localPath',
+        );
+        return;
+      }
 
       final bytes = await _fileRepository.downloadFile(item.id);
       await File(localPath).parent.create(recursive: true);
@@ -385,23 +444,30 @@ class PullSyncService {
         updatedAt: item.updatedAt,
         syncedAt: DateTime.now(),
       ));
-    } on UnsafeRemoteNameException {
-      // Skip this one item; the rest of the tree still needs walking.
-    } on FileSystemException {
-      // Same reasoning as _applyEvent's FileSystemException catch — not
-      // retryable, and bootstrap has no per-item retry mechanism anyway.
+    } on UnsafeRemoteNameException catch (e) {
+      await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
+    } on FileSystemException catch (e) {
+      await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.message);
     }
   }
 }
 
 /// Windows and POSIX both forbid `/`; Windows additionally forbids `\` and
 /// `:` (drive letters), and treats a bare `.`/`..` as a directory reference
-/// rather than a real entry. A server-supplied name has to be exactly one
-/// plain path segment for `p.join` to be safe.
+/// rather than a real entry. That second point is broader than just those
+/// two literals: Win32 trims trailing dots and spaces off a path component
+/// before resolving it, so `".. "`, `"..."`, `". "` and `"   "` all resolve
+/// the *same way* `.`/`..` do even though none of them equal those literals
+/// as strings — verified directly against this app's own path handling
+/// (`Directory(p.join(root, '.. ')).delete(recursive: true)` deletes `root`
+/// itself, and `p.canonicalize`/`p.isWithin` do not catch it, because they
+/// only special-case the exact strings `.`/`..`; see PR #12 review round 2,
+/// R1). Rejecting anything that is *only* dots and spaces closes that
+/// without needing the two literal checks separately. A server-supplied
+/// name has to be exactly one plain path segment for `p.join` to be safe.
 bool _isPlainSegment(String name) =>
     name.isNotEmpty &&
-    name != '.' &&
-    name != '..' &&
+    !RegExp(r'^[. ]+$').hasMatch(name) &&
     !name.contains('/') &&
     !name.contains('\\') &&
     !name.contains(':');

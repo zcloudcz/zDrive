@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -57,9 +58,18 @@ void main() {
     // itself override this to false.
     when(() => mockMirror.isBootstrapped(any())).thenAnswer((_) async => true);
     when(() => mockMirror.markBootstrapped(any())).thenAnswer((_) async {});
+    // The retry loop at the top of pullOnce (R3/F5) always calls this now —
+    // empty by default so existing tests don't also have to stub it; tests
+    // that care about quarantine/retry override it.
+    when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => []);
   });
 
-  tearDown(() => tempDir.deleteSync(recursive: true));
+  tearDown(() {
+    // The R1 traversal test below deliberately lets a reverted fix delete
+    // tempDir itself as part of proving the bug — guard against that so
+    // teeth-checking doesn't also throw here.
+    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+  });
 
   Map<String, dynamic> page(List<Map<String, dynamic>> events, int newCursor) =>
       {'events': events, 'newCursor': newCursor};
@@ -200,6 +210,62 @@ void main() {
         )).called(1);
     // Quarantined, not blocked: the cursor still advances past it.
     verify(() => mockMirror.setCursor('dev-1', 1)).called(1);
+  });
+
+  test('rejects a dots-and-spaces folder name: Win32 trims the trailing '
+      'space so it resolves back onto the sync root itself, not merely '
+      'outside it, and a real Delete for it must not reach the root (R1 '
+      'round 2)', () async {
+    final now = DateTime.utc(2026, 1, 1);
+    final marker = File(p.join(tempDir.path, 'important.txt'))
+      ..writeAsStringSync('do not delete me');
+
+    // A minimal stateful stand-in for the mirror row this fileId would get,
+    // so the Delete event below sees whatever the Create event actually
+    // stored — exactly like the real sqflite-backed repository would, and
+    // unlike a bare stub that can't reflect that without this.
+    SyncMirrorEntry? stored;
+    when(() => mockMirror.getByServerId('evil-2')).thenAnswer((_) async => stored);
+    when(() => mockMirror.upsert(any())).thenAnswer((invocation) async {
+      final entry = invocation.positionalArguments[0] as SyncMirrorEntry;
+      if (entry.serverId == 'evil-2') stored = entry;
+    });
+    when(() => mockMirror.deleteByServerId('evil-2')).thenAnswer((_) async {
+      stored = null;
+    });
+
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'evil-2', 'eventType': 'Create', 'metadata': null},
+          {'id': 2, 'fileId': 'evil-2', 'eventType': 'Delete', 'metadata': null},
+        ], 2));
+    // ".. " is not the literal ".." this app already rejected — it is a
+    // folder Win32 treats the same way once trailing dots/spaces are
+    // trimmed, and p.canonicalize/p.isWithin do not catch that (see
+    // _isPlainSegment's doc comment).
+    when(() => mockFileRepository.getFile('evil-2')).thenAnswer((_) async => FileItem(
+          id: 'evil-2',
+          name: '.. ',
+          isFolder: true,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
+
+    final applied = await service.pullOnce(tempDir.path);
+
+    expect(applied, 2);
+    // The Create was quarantined before any mirror row was ever recorded
+    // for it, so the Delete that followed had nothing to act on — the sync
+    // folder and everything already in it are untouched.
+    verify(() => mockMirror.recordFailedEvent(
+          'evil-2',
+          1,
+          any(that: contains('unsafe remote name')),
+        )).called(1);
+    expect(tempDir.existsSync(), isTrue);
+    expect(marker.existsSync(), isTrue);
+    expect(marker.readAsStringSync(), 'do not delete me');
   });
 
   test('renames a folder in place instead of recreating it, preserving '
@@ -365,6 +431,115 @@ void main() {
     verify(() => mockMirror.setCursor('dev-1', 2)).called(1);
   });
 
+  test('a quarantined event recovers on a later poll once its cause clears, '
+      'instead of staying stuck forever (R3)', () async {
+    final now = DateTime.utc(2026, 1, 1);
+    final bytes = Uint8List.fromList(utf8.encode('now available'));
+    var downloadAttempts = 0;
+
+    // A tiny stand-in for the failed_events table, wired to
+    // recordFailedEvent/clearFailedEvent exactly like the real
+    // sqflite-backed repository, so pullOnce's own retry loop has something
+    // real to read back on the second call.
+    final quarantine = <String, SyncFailedEvent>{};
+    when(() => mockMirror.recordFailedEvent(any(), any(), any())).thenAnswer((invocation) async {
+      final fileId = invocation.positionalArguments[0] as String;
+      quarantine[fileId] = SyncFailedEvent(
+        fileId: fileId,
+        eventId: invocation.positionalArguments[1] as int,
+        reason: invocation.positionalArguments[2] as String,
+        failedAt: now,
+      );
+    });
+    when(() => mockMirror.clearFailedEvent(any())).thenAnswer((invocation) async {
+      quarantine.remove(invocation.positionalArguments[0] as String);
+    });
+    when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => quarantine.values.toList());
+
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'locked-1', 'eventType': 'Create', 'metadata': null},
+        ], 1));
+    when(() => mockFileRepository.getFile('locked-1')).thenAnswer((_) async => FileItem(
+          id: 'locked-1',
+          name: 'busy.txt',
+          isFolder: false,
+          sizeBytes: bytes.length,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
+    when(() => mockMirror.getByServerId('locked-1')).thenAnswer((_) async => null);
+    when(() => mockFileRepository.downloadFile('locked-1')).thenAnswer((_) async {
+      downloadAttempts++;
+      if (downloadAttempts == 1) {
+        // Simulates the file being open elsewhere (e.g. in Word) on the
+        // first attempt — a transient FileSystemException, not a permanent
+        // one like F5's reserved name.
+        throw const FileSystemException('sharing violation', 'busy.txt');
+      }
+      return bytes;
+    });
+
+    final firstApplied = await service.pullOnce(tempDir.path);
+    expect(firstApplied, 1);
+    expect(File(p.join(tempDir.path, 'busy.txt')).existsSync(), isFalse);
+    expect(quarantine.containsKey('locked-1'), isTrue);
+
+    // Second poll: nothing new on the wire, but the retry loop at the top
+    // of pullOnce re-applies the quarantined entry by fileId — and this
+    // time the write succeeds.
+    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+    final secondApplied = await service.pullOnce(tempDir.path);
+
+    // Not counted as an "applied event" — it never came from the event log,
+    // it came from the retry loop.
+    expect(secondApplied, 0);
+    expect(File(p.join(tempDir.path, 'busy.txt')).readAsBytesSync(), bytes);
+    expect(quarantine.containsKey('locked-1'), isFalse);
+  });
+
+  test('pullOnce is re-entrancy safe at the service level: a second '
+      'concurrent call awaits the first instead of racing the cursor '
+      '(F4/R6)', () async {
+    final now = DateTime.utc(2026, 1, 1);
+    final bytes = Uint8List.fromList(utf8.encode('content'));
+    final gate = Completer<void>();
+
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async {
+      // Held open until the test releases it, so both pullOnce calls are
+      // guaranteed to overlap in time before either completes.
+      await gate.future;
+      return page([
+        {'id': 1, 'fileId': 'file-1', 'eventType': 'Create', 'metadata': null},
+      ], 1);
+    });
+    when(() => mockFileRepository.getFile('file-1')).thenAnswer((_) async => FileItem(
+          id: 'file-1',
+          name: 'doc.txt',
+          isFolder: false,
+          sizeBytes: bytes.length,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
+    when(() => mockMirror.getByServerId('file-1')).thenAnswer((_) async => null);
+    when(() => mockFileRepository.downloadFile('file-1')).thenAnswer((_) async => bytes);
+
+    final first = service.pullOnce(tempDir.path);
+    final second = service.pullOnce(tempDir.path);
+
+    gate.complete();
+    final results = await Future.wait([first, second]);
+
+    expect(results, [1, 1]);
+    // If the second call had started its own pull cycle instead of awaiting
+    // the first's in-flight future, the wire call below would have happened
+    // twice against the same starting cursor.
+    verify(() => mockSyncDataSource.pull('dev-1', 0)).called(1);
+  });
+
   group('bootstrap', () {
     test('backfills the designated folder and the mirror from FileService '
         'on this device\'s first sync', () async {
@@ -414,6 +589,68 @@ void main() {
 
       verifyNever(() => mockFileRepository.listChildren(any(), page: any(named: 'page')));
       verifyNever(() => mockMirror.markBootstrapped(any()));
+    });
+
+    test('a file bootstrap cannot safely write (an untracked local file '
+        'already there) is recorded as a failed event, not dropped '
+        'silently (R2)', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final untrackedFile = File(p.join(tempDir.path, 'report.pdf'))
+        ..writeAsStringSync('the user already had this');
+
+      when(() => mockMirror.isBootstrapped('dev-1')).thenAnswer((_) async => false);
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFileRepository.listChildren(null, page: 1)).thenAnswer((_) async => PagedResult(
+            items: [
+              FileItem(
+                id: 'legacy-2',
+                name: 'report.pdf',
+                isFolder: false,
+                parentId: null,
+                createdAt: now,
+                updatedAt: now,
+              ),
+            ],
+            totalCount: 1,
+            page: 1,
+            pageSize: 50,
+          ));
+      when(() => mockMirror.getByServerId('legacy-2')).thenAnswer((_) async => null);
+
+      final quarantine = <String, SyncFailedEvent>{};
+      when(() => mockMirror.recordFailedEvent(any(), any(), any())).thenAnswer((invocation) async {
+        final fileId = invocation.positionalArguments[0] as String;
+        quarantine[fileId] = SyncFailedEvent(
+          fileId: fileId,
+          eventId: invocation.positionalArguments[1] as int,
+          reason: invocation.positionalArguments[2] as String,
+          failedAt: now,
+        );
+      });
+      when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => quarantine.values.toList());
+
+      await service.pullOnce(tempDir.path);
+
+      // The pre-existing file was left alone, not overwritten...
+      expect(untrackedFile.readAsStringSync(), 'the user already had this');
+      verifyNever(() => mockFileRepository.downloadFile('legacy-2'));
+      // ...but unlike a plain silent skip, it is recorded and surfaced
+      // through the same list the delta path (F1/F3/F5) uses — closing the
+      // gap where the non-empty-folder dialog promised "listed as skipped
+      // instead" but bootstrap skips never actually were (PR #12 review R2).
+      verify(() => mockMirror.recordFailedEvent(
+            'legacy-2',
+            any(),
+            any(that: contains('local conflict')),
+          )).called(1);
+      final surfaced = await service.getFailedEvents();
+      expect(surfaced.map((f) => f.fileId), contains('legacy-2'));
+      // The skip does not block bootstrap from completing and being marked
+      // done — there is no per-item retry inside bootstrap itself; recovery
+      // comes from the same R3 retry loop that picks up any quarantined
+      // entry on a later poll.
+      verify(() => mockMirror.markBootstrapped('dev-1')).called(1);
     });
   });
 }
