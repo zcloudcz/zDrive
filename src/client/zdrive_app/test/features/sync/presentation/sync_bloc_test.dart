@@ -96,5 +96,22 @@ void main() {
         isA<SyncError>(),
       ],
     );
+
+    blocTest<SyncBloc, SyncState>(
+      'emits [SyncLoading, SyncError] when a device has a malformed field, '
+      'instead of crashing with a raw type-cast error',
+      build: buildBloc,
+      setUp: () {
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
+              {'id': 'dev-1', 'name': null, 'platform': 'windows'},
+            ]);
+        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
+      },
+      act: (bloc) => bloc.add(const LoadSyncStatus()),
+      expect: () => [
+        const SyncLoading(),
+        isA<SyncError>(),
+      ],
+    );
   });
 }

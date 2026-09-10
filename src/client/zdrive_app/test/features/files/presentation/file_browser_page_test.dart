@@ -1,10 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:zdrive_app/features/files/domain/file_item.dart';
 import 'package:zdrive_app/features/files/domain/file_repository.dart';
 import 'package:zdrive_app/features/files/presentation/file_browser_bloc.dart';
@@ -135,60 +136,59 @@ void main() {
       mockRepository = MockFileRepository();
     });
 
-    test('fetches the download URL and hands it to the launcher', () async {
-      when(() => mockRepository.getDownloadUrl('file-1'))
-          .thenAnswer((_) async => 'https://blob.example/file-1?sas=token');
+    test('fetches the reassembled bytes and hands them to the platform saver', () async {
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      when(() => mockRepository.downloadFile('file-1'))
+          .thenAnswer((_) async => bytes);
 
-      Uri? launchedUri;
-      LaunchMode? launchedMode;
+      String? savedName;
+      Uint8List? savedBytes;
 
       await downloadFile(
         testFile,
         mockRepository,
-        launch: (url, {mode = LaunchMode.platformDefault}) async {
-          launchedUri = url;
-          launchedMode = mode;
-          return true;
+        save: (fileName, data) async {
+          savedName = fileName;
+          savedBytes = data;
         },
       );
 
-      verify(() => mockRepository.getDownloadUrl('file-1')).called(1);
-      expect(launchedUri, Uri.parse('https://blob.example/file-1?sas=token'));
-      expect(launchedMode, LaunchMode.externalApplication);
+      verify(() => mockRepository.downloadFile('file-1')).called(1);
+      expect(savedName, 'readme.txt');
+      expect(savedBytes, bytes);
     });
 
-    test('throws when the launcher reports it could not open the URL', () async {
-      when(() => mockRepository.getDownloadUrl('file-1'))
-          .thenAnswer((_) async => 'https://blob.example/file-1');
+    test('propagates a failure reassembling the file without saving', () async {
+      when(() => mockRepository.downloadFile('file-1'))
+          .thenThrow(Exception('chunk hash mismatch'));
 
-      expect(
-        () => downloadFile(
-          testFile,
-          mockRepository,
-          launch: (url, {mode = LaunchMode.platformDefault}) async => false,
-        ),
-        throwsA(isException),
-      );
-    });
-
-    test('propagates a failure fetching the download URL without launching', () async {
-      when(() => mockRepository.getDownloadUrl('file-1'))
-          .thenThrow(Exception('network down'));
-
-      var launcherCalled = false;
+      var saverCalled = false;
 
       await expectLater(
         () => downloadFile(
           testFile,
           mockRepository,
-          launch: (url, {mode = LaunchMode.platformDefault}) async {
-            launcherCalled = true;
-            return true;
+          save: (fileName, data) async {
+            saverCalled = true;
           },
         ),
         throwsA(isException),
       );
-      expect(launcherCalled, isFalse);
+      expect(saverCalled, isFalse);
+    });
+
+    test('propagates a failure from the platform saver', () async {
+      when(() => mockRepository.downloadFile('file-1'))
+          .thenAnswer((_) async => Uint8List.fromList([1]));
+
+      await expectLater(
+        () => downloadFile(
+          testFile,
+          mockRepository,
+          save: (fileName, data) async => throw Exception('save cancelled'),
+        ),
+        throwsA(isException),
+      );
     });
   });
 }

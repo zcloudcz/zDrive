@@ -167,6 +167,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get ok => 'OK';
 
   @override
+  String get retry => 'Retry';
+
+  @override
   String get noPhotos => 'No photos yet';
 
   @override

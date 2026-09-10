@@ -123,3 +123,39 @@ class DownloadUrlDto {
 
   Map<String, dynamic> toJson() => _$DownloadUrlDtoToJson(this);
 }
+
+/// The chunk manifest StorageService writes to `manifest.json`. Unlike the
+/// other DTOs in this file (which arrive through the ASP.NET controller
+/// envelope, camelCase by default), this JSON is written straight to blob
+/// storage via a bare `JsonSerializer.Serialize(manifest)` with no naming
+/// policy — see `ChunkManifest`/`AzureBlobStorageService.UploadManifestAsync`
+/// in StorageService — so the wire format is PascalCase.
+@JsonSerializable()
+class ManifestDto {
+  @JsonKey(name: 'TotalSize')
+  final int totalSize;
+  @JsonKey(name: 'Chunks')
+  final List<ManifestChunkDto> chunks;
+
+  const ManifestDto({required this.totalSize, required this.chunks});
+
+  factory ManifestDto.fromJson(Map<String, dynamic> json) =>
+      _$ManifestDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$ManifestDtoToJson(this);
+}
+
+@JsonSerializable()
+class ManifestChunkDto {
+  @JsonKey(name: 'Hash')
+  final String hash;
+  @JsonKey(name: 'Index')
+  final int index;
+
+  const ManifestChunkDto({required this.hash, required this.index});
+
+  factory ManifestChunkDto.fromJson(Map<String, dynamic> json) =>
+      _$ManifestChunkDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$ManifestChunkDtoToJson(this);
+}

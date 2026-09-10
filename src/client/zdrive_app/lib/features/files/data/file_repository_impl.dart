@@ -166,8 +166,8 @@ class FileRepositoryImpl implements FileRepository {
   }
 
   @override
-  Future<String> getDownloadUrl(String fileId) {
-    return _uploadDataSource.getDownloadUrl(fileId);
+  Future<Uint8List> downloadFile(String fileId) {
+    return _uploadDataSource.downloadFile(fileId);
   }
 
   @override

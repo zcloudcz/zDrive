@@ -1,11 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../data/file_saver.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
 import '../../domain/use_cases/create_folder_use_case.dart';
@@ -404,22 +406,20 @@ class _FileBrowserView extends StatelessWidget {
   }
 }
 
-/// Downloads [file] by handing its (SAS) URL to the OS/browser via
-/// [launch] — StorageService returns a direct link to the blob, so there is
-/// nothing for the client to stream itself.
+/// Downloads [file]'s complete content (reassembled from its chunks by
+/// [repository]) and saves it via the platform-appropriate mechanism in
+/// [save] — file_picker + dart:io on native platforms, a Blob download on
+/// web (see `file_saver.dart`).
 ///
 /// A top-level function (rather than inlined in [_FileBrowserView]) so it
-/// can be unit tested without a full widget/DI/router harness; [launch]
-/// defaults to the real `launchUrl` and is overridden in tests.
+/// can be unit tested without a full widget/DI/router harness; [save]
+/// defaults to the real platform saver and is overridden in tests.
 @visibleForTesting
 Future<void> downloadFile(
   FileItem file,
   FileRepository repository, {
-  Future<bool> Function(Uri url, {LaunchMode mode}) launch = launchUrl,
+  Future<void> Function(String fileName, Uint8List bytes) save = saveFile,
 }) async {
-  final url = await repository.getDownloadUrl(file.id);
-  final launched = await launch(Uri.parse(url), mode: LaunchMode.externalApplication);
-  if (!launched) {
-    throw Exception('Could not open download link');
-  }
+  final bytes = await repository.downloadFile(file.id);
+  await save(file.name, bytes);
 }

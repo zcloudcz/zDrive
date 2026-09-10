@@ -101,3 +101,25 @@ Map<String, dynamic> _$DownloadUrlDtoToJson(DownloadUrlDto instance) =>
       'sasUrl': instance.sasUrl,
       'expiresAt': instance.expiresAt.toIso8601String(),
     };
+
+ManifestDto _$ManifestDtoFromJson(Map<String, dynamic> json) => ManifestDto(
+  totalSize: (json['TotalSize'] as num).toInt(),
+  chunks: (json['Chunks'] as List<dynamic>)
+      .map((e) => ManifestChunkDto.fromJson(e as Map<String, dynamic>))
+      .toList(),
+);
+
+Map<String, dynamic> _$ManifestDtoToJson(ManifestDto instance) =>
+    <String, dynamic>{
+      'TotalSize': instance.totalSize,
+      'Chunks': instance.chunks,
+    };
+
+ManifestChunkDto _$ManifestChunkDtoFromJson(Map<String, dynamic> json) =>
+    ManifestChunkDto(
+      hash: json['Hash'] as String,
+      index: (json['Index'] as num).toInt(),
+    );
+
+Map<String, dynamic> _$ManifestChunkDtoToJson(ManifestChunkDto instance) =>
+    <String, dynamic>{'Hash': instance.hash, 'Index': instance.index};

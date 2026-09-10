@@ -77,27 +77,11 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         _dataSource.getConflicts(),
       ]);
       emit(SyncLoaded(
-        devices: results[0].map(_mapDevice).toList(),
-        conflicts: results[1].map(_mapConflict).toList(),
+        devices: results[0].map(SyncDevice.fromJson).toList(),
+        conflicts: results[1].map(SyncConflict.fromJson).toList(),
       ));
     } catch (e) {
       emit(SyncError(e.toString()));
     }
   }
-
-  SyncDevice _mapDevice(Map<String, dynamic> json) => SyncDevice(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        platform: json['platform'] as String,
-        lastSyncAt: json['lastSyncAt'] != null
-            ? DateTime.tryParse(json['lastSyncAt'] as String)
-            : null,
-      );
-
-  SyncConflict _mapConflict(Map<String, dynamic> json) => SyncConflict(
-        id: json['id'] as String,
-        fileId: json['fileId'] as String,
-        status: json['status'] as String,
-        createdAt: DateTime.parse(json['createdAt'] as String),
-      );
 }
