@@ -3,11 +3,17 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/core/di/injection.dart';
+import 'package:zdrive_app/core/storage/app_preferences.dart';
+import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 class MockSyncRemoteDataSource extends Mock implements SyncRemoteDataSource {}
+
+class MockPullSyncService extends Mock implements PullSyncService {}
+
+class MockAppPreferences extends Mock implements AppPreferences {}
 
 void main() {
   late MockSyncRemoteDataSource mockDataSource;
@@ -15,6 +21,11 @@ void main() {
   setUp(() {
     mockDataSource = MockSyncRemoteDataSource();
     getIt.registerLazySingleton<SyncRemoteDataSource>(() => mockDataSource);
+    getIt.registerLazySingleton<PullSyncService>(() => MockPullSyncService());
+    // No stubbing of syncFolderPath: mocktail returns null for an unstubbed
+    // nullable getter, matching "no folder chosen yet" — the state every
+    // existing scenario below assumes, since none of them are about pulling.
+    getIt.registerLazySingleton<AppPreferences>(() => MockAppPreferences());
   });
 
   tearDown(() => getIt.reset());

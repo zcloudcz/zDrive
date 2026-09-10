@@ -488,6 +488,30 @@ abstract class AppLocalizations {
   /// **'Never synced'**
   String get syncNeverSynced;
 
+  /// No description provided for @syncChooseFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose sync folder'**
+  String get syncChooseFolder;
+
+  /// No description provided for @syncFolderNotConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a local folder to start syncing this device.'**
+  String get syncFolderNotConfigured;
+
+  /// No description provided for @syncPulling.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing…'**
+  String get syncPulling;
+
+  /// No description provided for @syncDeviceUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'This device is up to date.'**
+  String get syncDeviceUpToDate;
+
   /// No description provided for @versionHistory.
   ///
   /// In en, this message translates to:

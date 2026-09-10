@@ -47,8 +47,18 @@ import 'package:zdrive_app/features/photos/data/photo_repository_impl.dart'
     as _i826;
 import 'package:zdrive_app/features/photos/domain/photo_repository.dart'
     as _i328;
+import 'package:zdrive_app/features/sync/data/current_device_platform.dart'
+    as _i191;
+import 'package:zdrive_app/features/sync/data/device_id_storage.dart' as _i918;
+import 'package:zdrive_app/features/sync/data/device_registration_service.dart'
+    as _i318;
+import 'package:zdrive_app/features/sync/data/pull_sync_service.dart' as _i827;
+import 'package:zdrive_app/features/sync/data/sqflite_sync_mirror_repository.dart'
+    as _i294;
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart'
     as _i319;
+import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart'
+    as _i500;
 
 extension GetItInjectableX on _i174.GetIt {
   // initializes the registration of main-scope dependencies inside of GetIt
@@ -63,6 +73,13 @@ extension GetItInjectableX on _i174.GetIt {
       final i = _i736.AppPreferences();
       return i.init().then((_) => i);
     }, preResolve: true);
+    gh.lazySingleton<_i191.CurrentDevicePlatform>(
+      () => _i191.CurrentDevicePlatform(),
+    );
+    gh.lazySingleton<_i918.DeviceIdStorage>(() => _i918.DeviceIdStorage());
+    gh.lazySingleton<_i500.SyncMirrorRepository>(
+      () => _i294.SqfliteSyncMirrorRepository(),
+    );
     gh.lazySingleton<_i248.AuthInterceptor>(
       () => _i248.AuthInterceptor(gh<_i323.TokenStorage>()),
     );
@@ -114,8 +131,23 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i323.TokenStorage>(),
       ),
     );
+    gh.lazySingleton<_i318.DeviceRegistrationService>(
+      () => _i318.DeviceRegistrationService(
+        gh<_i319.SyncRemoteDataSource>(),
+        gh<_i918.DeviceIdStorage>(),
+        gh<_i191.CurrentDevicePlatform>(),
+      ),
+    );
     gh.lazySingleton<_i328.PhotoRepository>(
       () => _i826.PhotoRepositoryImpl(gh<_i5.PhotoRemoteDataSource>()),
+    );
+    gh.lazySingleton<_i827.PullSyncService>(
+      () => _i827.PullSyncService(
+        gh<_i319.SyncRemoteDataSource>(),
+        gh<_i318.DeviceRegistrationService>(),
+        gh<_i500.SyncMirrorRepository>(),
+        gh<_i1043.FileRepository>(),
+      ),
     );
     return this;
   }

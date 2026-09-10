@@ -207,6 +207,19 @@ class AppLocalizationsCs extends AppLocalizations {
   String get syncNeverSynced => 'Nikdy nesynchronizováno';
 
   @override
+  String get syncChooseFolder => 'Vybrat synchronizovanou složku';
+
+  @override
+  String get syncFolderNotConfigured =>
+      'Vyberte místní složku, aby se toto zařízení začalo synchronizovat.';
+
+  @override
+  String get syncPulling => 'Synchronizuji…';
+
+  @override
+  String get syncDeviceUpToDate => 'Toto zařízení je aktuální.';
+
+  @override
   String get versionHistory => 'Historie verzí';
 
   @override

@@ -206,6 +206,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncNeverSynced => 'Never synced';
 
   @override
+  String get syncChooseFolder => 'Choose sync folder';
+
+  @override
+  String get syncFolderNotConfigured =>
+      'Pick a local folder to start syncing this device.';
+
+  @override
+  String get syncPulling => 'Syncing…';
+
+  @override
+  String get syncDeviceUpToDate => 'This device is up to date.';
+
+  @override
   String get versionHistory => 'Version history';
 
   @override
