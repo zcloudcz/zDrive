@@ -72,4 +72,11 @@ public interface IBlobStorageService
     /// Gets the size of a temp chunk in bytes.
     /// </summary>
     Task<long> GetTempChunkSizeAsync(Guid sessionId, int chunkIndex, CancellationToken ct = default);
+
+    /// <summary>
+    /// Opens a read stream for a final chunk's content, so the API can proxy
+    /// the bytes to clients that cannot fetch a SAS URL directly (web has no
+    /// blob CORS configured). Null when the chunk does not exist.
+    /// </summary>
+    Task<Stream?> DownloadChunkAsync(Guid tenantId, Guid userId, Guid fileId, string chunkHash, CancellationToken ct = default);
 }

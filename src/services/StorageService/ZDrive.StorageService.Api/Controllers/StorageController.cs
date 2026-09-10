@@ -9,8 +9,10 @@ using ZDrive.StorageService.Application.Commands.InitUpload;
 using ZDrive.StorageService.Application.Commands.RestoreManifest;
 using ZDrive.StorageService.Application.Commands.UploadChunk;
 using ZDrive.StorageService.Application.DTOs;
+using ZDrive.StorageService.Application.Queries.DownloadChunk;
 using ZDrive.StorageService.Application.Queries.GetChunkDownloadUrl;
 using ZDrive.StorageService.Application.Queries.GetDownloadUrl;
+using ZDrive.StorageService.Application.Queries.GetManifest;
 using ZDrive.StorageService.Application.Queries.GetThumbnailUrl;
 
 namespace ZDrive.StorageService.Api.Controllers;
@@ -86,6 +88,41 @@ public sealed class StorageController : ControllerBase
         var query = new GetChunkDownloadUrlQuery(tenantId, userId, fileId, hash);
         var result = await _mediator.Send(query, ct);
         return Ok(ApiResponse<DownloadUrlDto>.Ok(result));
+    }
+
+    // The two endpoints below proxy manifest/chunk bytes through this API
+    // instead of handing out a SAS URL: a SAS token authorises the request
+    // but does not exempt it from CORS, and Azure Blob Storage CORS is not
+    // configured (nor does Azurite support it locally), so a browser client
+    // could never complete a direct cross-origin fetch. The gateway this app
+    // already talks to has CORS configured. GetDownloadUrl/GetChunkDownloadUrl
+    // above stay as-is — ZDrive.BackupCli still calls GetDownloadUrl and reads
+    // the manifest straight off blob storage via the returned SAS URL.
+
+    [HttpGet("download/{fileId:guid}/manifest")]
+    [ProducesResponseType(typeof(ApiResponse<ManifestDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetManifest(Guid fileId, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+
+        var query = new GetManifestQuery(tenantId, userId, fileId);
+        var result = await _mediator.Send(query, ct);
+        return Ok(ApiResponse<ManifestDto>.Ok(result));
+    }
+
+    [HttpGet("download/{fileId:guid}/chunk/{hash}/bytes")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadChunk(Guid fileId, string hash, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+
+        var query = new DownloadChunkQuery(tenantId, userId, fileId, hash);
+        var stream = await _mediator.Send(query, ct);
+        return File(stream, "application/octet-stream");
     }
 
     [HttpGet("thumbnail/{photoId:guid}")]
