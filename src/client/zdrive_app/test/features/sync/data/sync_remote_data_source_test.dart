@@ -98,6 +98,20 @@ void main() {
     verify(() => dio.post('/sync/pull', data: {'deviceId': 'dev-1', 'cursor': 0})).called(1);
   });
 
+  test('push posts deviceId and the events, eventType as the ordinal', () async {
+    final events = [
+      {'fileId': 'f-1', 'eventType': 0, 'metadata': null},
+    ];
+    when(() => dio.post('/sync/push', data: {'deviceId': 'dev-1', 'events': events}))
+        .thenAnswer((_) async => response({'newCursor': 9, 'conflicts': []}, '/sync/push'));
+
+    final result = await dataSource.push('dev-1', events);
+
+    expect(result['newCursor'], 9);
+    verify(() => dio.post('/sync/push', data: {'deviceId': 'dev-1', 'events': events}))
+        .called(1);
+  });
+
   test('propagates DioException from the HTTP layer', () async {
     when(() => dio.get('/sync/devices')).thenThrow(
       DioException(
