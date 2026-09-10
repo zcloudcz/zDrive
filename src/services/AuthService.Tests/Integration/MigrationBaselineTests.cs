@@ -9,9 +9,9 @@ namespace ZDrive.AuthService.Tests.Integration;
 /// <summary>
 /// Exercises DatabaseMigrationExtensions.MigrateWithBaselineAsync directly
 /// against a throwaway Postgres container — the two scenarios plain
-/// Migrate() cannot handle on its own (see that class's remarks):
-/// baselining an installation left over from the old EnsureCreated-based
-/// workaround, and serializing concurrent migrators racing the same schema.
+/// Migrate() cannot handle on its own (see that class's remarks): aborting
+/// loudly instead of guessing when a schema has tables but no migration
+/// history, and serializing concurrent migrators racing the same schema.
 /// AuthDbContext stands in for any of the six services here; the extension
 /// method itself is DbContext-agnostic.
 /// </summary>
@@ -35,34 +35,35 @@ public sealed class MigrationBaselineTests : IAsyncLifetime
         .Options);
 
     [Fact]
-    public async Task MigrateWithBaselineAsync_SchemaFromOldEnsureCreatedWorkaround_BaselinesInsteadOfReplaying()
+    public async Task MigrateWithBaselineAsync_SchemaFromOldEnsureCreatedWorkaround_ThrowsInsteadOfGuessing()
     {
         // Simulate the old CreateTablesAsync() workaround this PR replaced: it
         // built the schema/tables straight from the current model, with no
         // migration ever recorded. EnsureCreatedAsync() does exactly that.
+        //
+        // Note this can only prove the "has tables, no history" branch is
+        // reached — it cannot exercise the false positive an earlier version
+        // of this helper had (baselining a schema that merely had matching
+        // table names but was missing a column), because EnsureCreatedAsync()
+        // generates DDL from the *current* model, so drift from that model is
+        // impossible by construction. That case is exactly why baselining was
+        // removed instead of made more precise.
         await using (var oldStyleDb = CreateContext())
         {
             await oldStyleDb.Database.EnsureCreatedAsync();
         }
 
-        // Plain MigrateAsync() would see InitialCreate as pending and replay its
-        // CREATE TABLE statements onto these already-existing tables, crashing
-        // with 42P07 (finding 1). MigrateWithBaselineAsync must not do that.
         await using var db = CreateContext();
-        await db.MigrateWithBaselineAsync("auth");
-
-        var applied = await db.Database.GetAppliedMigrationsAsync();
-        Assert.Single(applied);
-
-        // The baselined schema is actually usable afterward.
-        Assert.Empty(await db.Tenants.ToListAsync());
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.MigrateWithBaselineAsync("auth"));
+        Assert.Contains("no __EFMigrationsHistory table", ex.Message);
     }
 
     [Fact]
     public async Task MigrateWithBaselineAsync_PartiallyMatchingSchema_ThrowsInsteadOfGuessing()
     {
         // Only one of the three tables the model expects — not a full old-style
-        // install, not a fresh one either. Baselining this would risk recording
+        // install, not a fresh one either. Guessing here would risk recording
         // migrations as applied against a schema that doesn't actually match.
         await using (var conn = new Npgsql.NpgsqlConnection(_postgres.GetConnectionString()))
         {
@@ -75,7 +76,7 @@ public sealed class MigrationBaselineTests : IAsyncLifetime
         await using var db = CreateContext();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => db.MigrateWithBaselineAsync("auth"));
-        Assert.Contains("partially-created", ex.Message);
+        Assert.Contains("no __EFMigrationsHistory table", ex.Message);
     }
 
     [Fact]
