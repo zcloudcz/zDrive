@@ -24,7 +24,7 @@ public static class DependencyInjection
         services.AddDbContext<StorageDbContext>(options =>
             options.UseNpgsql(
                 configuration.GetConnectionString("StorageDb"),
-                npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory")));
+                npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "storage")));
 
         services.AddScoped<IStorageDbContext>(sp => sp.GetRequiredService<StorageDbContext>());
 

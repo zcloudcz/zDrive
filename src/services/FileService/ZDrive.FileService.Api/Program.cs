@@ -5,6 +5,7 @@ using ZDrive.FileService.Infrastructure;
 using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.Shared.Extensions;
 using ZDrive.Shared.Middleware;
+using ZDrive.Shared.Persistence;
 using ZDrive.FileService.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -83,18 +84,22 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // Apply this service's own pending EF migrations on startup, in every
-// environment. Migrate() creates the physical database if missing, then
-// applies only pending migrations tracked in this context's own
-// __EFMigrationsHistory table (scoped to the "files" schema via
+// environment. MigrateWithBaselineAsync creates the physical database if
+// missing, then applies only pending migrations tracked in this context's
+// own __EFMigrationsHistory table (scoped to the "files" schema via
 // MigrationsHistoryTable in DependencyInjection.cs) — so it is safe for
 // every service to run this against the shared "zdrive" database: each
 // context only ever touches its own schema and its own history table.
 // Unlike the old EnsureCreated-based workaround this replaced, later
 // deploys that add tables/columns apply cleanly instead of silently no-op'ing.
+// It also baselines installations left over from that old workaround (tables
+// exist, no history row) instead of replaying DDL onto them, and takes a
+// per-schema advisory lock so concurrent replicas don't race the same
+// migration — see DatabaseMigrationExtensions for both.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<FileDbContext>();
-    await db.Database.MigrateAsync();
+    await db.MigrateWithBaselineAsync("files");
 }
 
 // Middleware pipeline
