@@ -51,6 +51,12 @@ class ManifestChunkIndexException implements Exception {
 /// (creating the file node, recording the version) lives in the repository.
 @lazySingleton
 class FileUploadDataSource {
+  /// Matches `ZDrive.BackupCli/Backup/Chunking.cs`'s `ChunkSize` — not
+  /// because the server enforces a particular chunk size (it doesn't; each
+  /// chunk's actual byte count is recorded as uploaded), but so uploads from
+  /// this client and from the backup CLI produce comparably-shaped manifests.
+  static const chunkSize = 4 * 1024 * 1024;
+
   final Dio _dio;
 
   FileUploadDataSource(this._dio);
@@ -104,12 +110,100 @@ class FileUploadDataSource {
     return UploadCompleteDto.fromJson(unwrapMap(response));
   }
 
+  /// Uploads [content] for [fileId] as a real multi-chunk session: splits it
+  /// into [chunkSize] windows and streams each one from [content] straight
+  /// into a PUT, without ever holding more than one chunk in memory — the
+  /// counterpart to [downloadFile] below, which reassembles the same shape
+  /// back. [sizeBytes] must be the exact byte count [content] will produce;
+  /// it is only used to compute totalChunks up front (required by
+  /// [initUpload] before any chunk is sent) — if the stream turns out
+  /// shorter or longer, the chunk-index/completeness checks StorageService
+  /// already does ([UploadChunkCommandHandler], [CompleteUploadCommandHandler])
+  /// fail the upload loudly rather than silently storing a truncated file.
+  Future<UploadCompleteDto> uploadFile(
+    String fileId,
+    String fileName,
+    Stream<List<int>> content,
+    int sizeBytes, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final totalChunks = sizeBytes == 0 ? 1 : (sizeBytes / chunkSize).ceil();
+    final session = await initUpload(fileId, fileName, totalChunks);
+
+    var index = 0;
+    var uploadedBytes = 0;
+    await for (final chunk in splitIntoChunks(content)) {
+      await uploadChunk(
+        session.sessionId,
+        index,
+        chunk,
+        onProgress: onProgress == null
+            ? null
+            : (sent, total) {
+                if (sizeBytes > 0) {
+                  onProgress((uploadedBytes + sent) / sizeBytes);
+                }
+              },
+      );
+      uploadedBytes += chunk.length;
+      index++;
+    }
+
+    return completeUpload(session.sessionId);
+  }
+
+  /// Buffers [source] into exactly [chunkSize]-byte windows (the last one
+  /// may be shorter), regardless of how the underlying platform stream
+  /// happens to deliver bytes — file_picker reads web files in 1 MB windows
+  /// and native files via dart:io's own buffer size, neither of which lines
+  /// up with chunkSize on its own. A source that yields nothing produces one
+  /// empty chunk, matching Chunking.cs's handling of zero-byte files (a
+  /// session needs totalChunks > 0).
+  ///
+  /// Public (not just used by [uploadFile] above) so folder upload can hash
+  /// a local file's chunks the same way, to compare against a remote
+  /// manifest before deciding whether to skip re-uploading it.
+  static Stream<Uint8List> splitIntoChunks(Stream<List<int>> source) async* {
+    final buffer = BytesBuilder(copy: false);
+    var yielded = false;
+
+    await for (final piece in source) {
+      buffer.add(piece);
+      while (buffer.length >= chunkSize) {
+        final bytes = buffer.toBytes();
+        buffer.clear();
+        yield Uint8List.sublistView(bytes, 0, chunkSize);
+        yielded = true;
+        if (bytes.length > chunkSize) {
+          buffer.add(bytes.sublist(chunkSize));
+        }
+      }
+    }
+
+    if (buffer.isNotEmpty || !yielded) {
+      yield buffer.toBytes();
+    }
+  }
+
   /// Fetches the chunk manifest for a file.
   Future<ManifestDto> getManifest(String fileId) async {
     final response = await _dio.get(
       '${ApiConstants.storage}/download/$fileId/manifest',
     );
     return ManifestDto.fromJson(unwrapMap(response));
+  }
+
+  /// Like [getManifest], but returns null instead of throwing when [fileId]
+  /// has no manifest yet (a file node with no completed upload) — folder
+  /// upload's "is this already uploaded?" check needs to tell that apart
+  /// from a real error.
+  Future<ManifestDto?> tryGetManifest(String fileId) async {
+    try {
+      return await getManifest(fileId);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
   }
 
   /// Fetches one chunk's raw bytes.

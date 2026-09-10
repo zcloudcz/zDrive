@@ -28,10 +28,17 @@ abstract class FileRepository {
     DateTime? expiresAt,
   );
   Future<void> revokeShare(String id);
+
+  /// Uploads [content] as a new file. [sizeBytes] must be the exact byte
+  /// count [content] will produce — it drives the chunk count declared to
+  /// StorageService before any bytes are sent. [content] is streamed rather
+  /// than taking the whole file as one [Uint8List] so a multi-gigabyte
+  /// upload never has to sit fully in memory.
   Future<String> uploadFile(
     String? parentId,
     String fileName,
-    Uint8List bytes,
+    Stream<List<int>> content,
+    int sizeBytes,
     void Function(double progress)? onProgress,
   );
 

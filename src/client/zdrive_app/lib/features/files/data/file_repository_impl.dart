@@ -126,7 +126,8 @@ class FileRepositoryImpl implements FileRepository {
   Future<String> uploadFile(
     String? parentId,
     String fileName,
-    Uint8List bytes,
+    Stream<List<int>> content,
+    int sizeBytes,
     void Function(double progress)? onProgress,
   ) async {
     // Client-orchestrated upload across two services:
@@ -138,22 +139,16 @@ class FileRepositoryImpl implements FileRepository {
       name: fileName,
       isFolder: false,
       parentId: parentId,
-      sizeBytes: bytes.length,
+      sizeBytes: sizeBytes,
     );
 
-    // MVP: single-chunk upload.
-    final session = await _uploadDataSource.initUpload(node.id, fileName, 1);
-    await _uploadDataSource.uploadChunk(
-      session.sessionId,
-      0,
-      bytes,
-      onProgress: onProgress != null
-          ? (sent, total) {
-              if (total > 0) onProgress(sent / total);
-            }
-          : null,
+    final complete = await _uploadDataSource.uploadFile(
+      node.id,
+      fileName,
+      content,
+      sizeBytes,
+      onProgress: onProgress,
     );
-    final complete = await _uploadDataSource.completeUpload(session.sessionId);
 
     await _remoteDataSource.createFileVersion(
       node.id,
