@@ -80,18 +80,20 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // Apply this service's own pending EF migrations on startup, in every
-// environment. MigrateWithBaselineAsync creates the physical database if
-// missing, then applies only pending migrations tracked in this context's
-// own __EFMigrationsHistory table (scoped to the "auth" schema via
-// MigrationsHistoryTable in DependencyInjection.cs) — so it is safe for
-// every service to run this against the shared "zdrive" database: each
-// context only ever touches its own schema and its own history table.
-// Unlike the old EnsureCreated-based workaround this replaced, later
-// deploys that add tables/columns apply cleanly instead of silently no-op'ing.
-// It also baselines installations left over from that old workaround (tables
-// exist, no history row) instead of replaying DDL onto them, and takes a
-// per-schema advisory lock so concurrent replicas don't race the same
-// migration — see DatabaseMigrationExtensions for both.
+// environment. The "zdrive" database itself must already exist — docker-
+// compose, Terraform and Testcontainers all provision it — this helper
+// connects straight into it and does not create it. It applies only pending
+// migrations tracked in this context's own __EFMigrationsHistory table
+// (scoped to the "auth" schema via MigrationsHistoryTable in
+// DependencyInjection.cs) — so it is safe for every service to run this
+// against the shared "zdrive" database: each context only ever touches its
+// own schema and its own history table. Unlike the old EnsureCreated-based
+// workaround this replaced, later deploys that add tables/columns apply
+// cleanly instead of silently no-op'ing. If a schema has tables left over
+// from that old workaround (no history row), it aborts loudly instead of
+// guessing at what happened, and it takes a per-schema advisory lock so
+// concurrent replicas don't race the same migration — see
+// DatabaseMigrationExtensions for both.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
