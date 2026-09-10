@@ -220,6 +220,19 @@ class AppLocalizationsCs extends AppLocalizations {
   String get syncDeviceUpToDate => 'Toto zařízení je aktuální.';
 
   @override
+  String get syncItemsSkipped => 'Některé položky se nepodařilo synchronizovat';
+
+  @override
+  String get syncSkippedItems => 'Přeskočené položky';
+
+  @override
+  String get syncFolderNotEmptyTitle => 'Složka není prázdná';
+
+  @override
+  String get syncFolderNotEmptyMessage =>
+      'Tato složka už obsahuje soubory. Synchronizace nic z toho, co v ní není z jejího vlastního zásahu, nepřepíše — kolidující soubory zůstanou beze změny a zobrazí se jako přeskočené.';
+
+  @override
   String get versionHistory => 'Historie verzí';
 
   @override

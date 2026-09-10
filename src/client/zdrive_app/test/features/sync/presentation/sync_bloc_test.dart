@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -185,6 +187,7 @@ void main() {
       seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
       setUp: () {
         when(() => mockPullService.pullOnce('/local/sync')).thenAnswer((_) async => 2);
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
               {'id': 'dev-1', 'name': 'This PC', 'platform': 'windows'},
             ]);
@@ -229,6 +232,29 @@ void main() {
         ),
       ],
     );
+
+    blocTest<SyncBloc, SyncState>(
+      'does not run a second pull while one is already in flight (F4)',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
+      setUp: () {
+        final completer = Completer<int>();
+        when(() => mockPullService.pullOnce('/local/sync'))
+            .thenAnswer((_) => completer.future);
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+        // Resolves after both PullRequested events below have already been
+        // dispatched — simulating the periodic timer firing again while a
+        // slow pull (a whole-file transfer) is still in flight.
+        Future.delayed(const Duration(milliseconds: 20), () => completer.complete(0));
+      },
+      act: (bloc) {
+        bloc.add(const PullRequested());
+        bloc.add(const PullRequested());
+      },
+      wait: const Duration(milliseconds: 50),
+      verify: (_) => verify(() => mockPullService.pullOnce('/local/sync')).called(1),
+    );
   });
 
   group('SyncFolderChosen', () {
@@ -240,6 +266,7 @@ void main() {
         when(() => mockPreferences.setSyncFolderPath('/new/folder'))
             .thenAnswer((_) async {});
         when(() => mockPullService.pullOnce('/new/folder')).thenAnswer((_) async => 0);
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const SyncFolderChosen('/new/folder')),

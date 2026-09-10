@@ -219,6 +219,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncDeviceUpToDate => 'This device is up to date.';
 
   @override
+  String get syncItemsSkipped => 'Some items could not be synced';
+
+  @override
+  String get syncSkippedItems => 'Skipped items';
+
+  @override
+  String get syncFolderNotEmptyTitle => 'Folder is not empty';
+
+  @override
+  String get syncFolderNotEmptyMessage =>
+      'This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.';
+
+  @override
   String get versionHistory => 'Version history';
 
   @override

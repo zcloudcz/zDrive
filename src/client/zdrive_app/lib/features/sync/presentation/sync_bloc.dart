@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/storage/app_preferences.dart';
 import '../data/pull_sync_service.dart';
 import '../data/sync_remote_data_source.dart';
+import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_models.dart';
 
 // --- Events ---
@@ -62,6 +63,7 @@ final class SyncLoaded extends SyncState {
   final String? syncFolderPath;
   final bool isPulling;
   final String? pullError;
+  final List<SyncFailedEvent> failedEvents;
 
   const SyncLoaded({
     required this.devices,
@@ -69,6 +71,7 @@ final class SyncLoaded extends SyncState {
     this.syncFolderPath,
     this.isPulling = false,
     this.pullError,
+    this.failedEvents = const [],
   });
 
   SyncLoaded copyWith({
@@ -77,6 +80,7 @@ final class SyncLoaded extends SyncState {
     String? syncFolderPath,
     bool? isPulling,
     String? Function()? pullError,
+    List<SyncFailedEvent>? failedEvents,
   }) {
     return SyncLoaded(
       devices: devices ?? this.devices,
@@ -84,12 +88,13 @@ final class SyncLoaded extends SyncState {
       syncFolderPath: syncFolderPath ?? this.syncFolderPath,
       isPulling: isPulling ?? this.isPulling,
       pullError: pullError != null ? pullError() : this.pullError,
+      failedEvents: failedEvents ?? this.failedEvents,
     );
   }
 
   @override
   List<Object?> get props =>
-      [devices, conflicts, syncFolderPath, isPulling, pullError];
+      [devices, conflicts, syncFolderPath, isPulling, pullError, failedEvents];
 }
 
 final class SyncError extends SyncState {
@@ -172,7 +177,15 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     Emitter<SyncState> emit,
   ) async {
     final current = state;
-    if (current is! SyncLoaded || current.syncFolderPath == null) return;
+    // The isPulling check makes this re-entrancy-safe against the periodic
+    // timer, the initial load, and a folder pick all firing PullRequested
+    // around the same time: it is read and then set synchronously (no
+    // `await` in between), so a second call arriving while the first is
+    // still in flight always sees it already true and returns immediately
+    // instead of running a second pullOnce concurrently.
+    if (current is! SyncLoaded || current.syncFolderPath == null || current.isPulling) {
+      return;
+    }
 
     emit(current.copyWith(isPulling: true, pullError: () => null));
     try {
@@ -180,11 +193,13 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       // A first pull registers the device, so the device list can now
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
+      final failedEvents = await _pullService.getFailedEvents();
       final latest = state;
       if (latest is SyncLoaded) {
         emit(latest.copyWith(
           devices: devices.map(SyncDevice.fromJson).toList(),
           isPulling: false,
+          failedEvents: failedEvents,
         ));
       }
     } catch (e) {

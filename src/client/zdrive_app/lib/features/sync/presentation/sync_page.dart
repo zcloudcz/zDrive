@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -8,6 +10,7 @@ import '../../../core/di/injection.dart';
 import '../../../core/storage/app_preferences.dart';
 import '../data/pull_sync_service.dart';
 import '../data/sync_remote_data_source.dart';
+import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_models.dart';
 import 'sync_bloc.dart';
 
@@ -118,6 +121,10 @@ class _SyncLoadedBody extends StatelessWidget {
           _SectionHeader(title: l10n.syncConflicts),
           for (final conflict in state.conflicts) _ConflictTile(conflict: conflict),
         ],
+        if (state.failedEvents.isNotEmpty) ...[
+          _SectionHeader(title: l10n.syncSkippedItems),
+          for (final failed in state.failedEvents) _FailedEventTile(failed: failed),
+        ],
         _SectionHeader(title: l10n.syncDevices),
         if (state.devices.isEmpty)
           Padding(
@@ -214,6 +221,18 @@ class _FolderStatusTile extends StatelessWidget {
       );
     }
 
+    // A completed pull with something left quarantined (see F1/F3/F5 in the
+    // PR #12 review) is not "up to date" — that line must not claim more
+    // than pull actually delivered. The skipped-items section below the
+    // fold has the detail; this just says something needs a look.
+    if (state.failedEvents.isNotEmpty) {
+      return ListTile(
+        leading: Icon(Icons.warning_amber, color: Theme.of(context).colorScheme.error),
+        title: Text(l10n.syncItemsSkipped),
+        subtitle: Text(state.syncFolderPath!),
+      );
+    }
+
     return ListTile(
       leading: Icon(Icons.check_circle_outline, color: Theme.of(context).colorScheme.primary),
       title: Text(l10n.syncDeviceUpToDate),
@@ -224,6 +243,36 @@ class _FolderStatusTile extends StatelessWidget {
   Future<void> _chooseFolder(BuildContext context) async {
     final path = await FilePicker.platform.getDirectoryPath();
     if (path == null || !context.mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+
+    // Pull never overwrites a file it did not itself write (see F3), but a
+    // folder that already has content in it is still worth a heads-up
+    // before syncing starts writing into it — the user may not have
+    // intended to point sync at, say, their whole Documents folder.
+    final isNonEmpty = await Directory(path).exists() &&
+        !(await Directory(path).list().isEmpty);
+    if (isNonEmpty && context.mounted) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(l10n.syncFolderNotEmptyTitle),
+          content: Text(l10n.syncFolderNotEmptyMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(l10n.ok),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true || !context.mounted) return;
+    }
+
+    if (!context.mounted) return;
     context.read<SyncBloc>().add(SyncFolderChosen(path));
   }
 }
@@ -239,6 +288,21 @@ class _ConflictTile extends StatelessWidget {
       leading: Icon(Icons.warning_amber, color: Theme.of(context).colorScheme.error),
       title: Text(conflict.fileId),
       subtitle: Text('${conflict.status} · ${timeago.format(conflict.createdAt)}'),
+    );
+  }
+}
+
+class _FailedEventTile extends StatelessWidget {
+  final SyncFailedEvent failed;
+
+  const _FailedEventTile({required this.failed});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
+      title: Text(failed.fileId),
+      subtitle: Text(failed.reason),
     );
   }
 }
