@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Threading.RateLimiting;
 using FluentAssertions;
 using Xunit;
 using ZDrive.Shared.Auth;
@@ -59,5 +60,45 @@ public sealed class RateLimiterPartitioningTests
     {
         RateLimiterPartitioning.GetPartitionKey(Anonymous, null)
             .Should().Be("unknown");
+    }
+
+    [Fact]
+    public void GetRetryAfterSeconds_RejectedLease_ReturnsWholeSecondsRoundedUp()
+    {
+        // A real FixedWindowRateLimiter (rather than a hand-rolled fake lease)
+        // so this pins down actual .NET behaviour: does a rejected lease
+        // really carry a RetryAfter estimate for a fixed window? (It does —
+        // MetadataName.RetryAfter, verified against System.Threading.RateLimiting
+        // 8.0.0 before writing Program.cs's OnRejected around it.)
+        using var limiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 1,
+            Window = TimeSpan.FromSeconds(30),
+            QueueLimit = 0,
+            AutoReplenishment = false,
+        });
+        limiter.AttemptAcquire(1).IsAcquired.Should().BeTrue("the first permit must succeed for this test to mean anything");
+
+        var rejected = limiter.AttemptAcquire(1);
+
+        rejected.IsAcquired.Should().BeFalse();
+        RateLimiterPartitioning.GetRetryAfterSeconds(rejected).Should().Be("30");
+    }
+
+    [Fact]
+    public void GetRetryAfterSeconds_AcquiredLeaseCarriesNoRetryAfterMetadata_ReturnsNull()
+    {
+        using var limiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 1,
+            Window = TimeSpan.FromSeconds(30),
+            QueueLimit = 0,
+            AutoReplenishment = false,
+        });
+
+        var acquired = limiter.AttemptAcquire(1);
+
+        acquired.IsAcquired.Should().BeTrue();
+        RateLimiterPartitioning.GetRetryAfterSeconds(acquired).Should().BeNull();
     }
 }

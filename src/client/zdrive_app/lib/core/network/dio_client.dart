@@ -55,7 +55,15 @@ class RetryInterceptor extends Interceptor {
       final retryCount = (extra['retryCount'] as int?) ?? 0;
 
       if (retryCount < maxRetries) {
-        final delay = Duration(milliseconds: 200 * (1 << retryCount));
+        // For a 429, the gateway names the exact wait via Retry-After (its
+        // fixed window, e.g. 60s, is longer than any fixed backoff schedule
+        // could safely assume) — honour it instead of guessing. Fall back to
+        // the exponential schedule for a 429 with no header, and use it
+        // unconditionally for 5xx.
+        final delay = statusCode == 429
+            ? _retryAfterDelay(err.response) ??
+                Duration(milliseconds: 200 * (1 << retryCount))
+            : Duration(milliseconds: 200 * (1 << retryCount));
         await Future<void>.delayed(delay);
 
         err.requestOptions.extra['retryCount'] = retryCount + 1;
@@ -68,5 +76,13 @@ class RetryInterceptor extends Interceptor {
       }
     }
     return handler.next(err);
+  }
+
+  Duration? _retryAfterDelay(Response<dynamic>? response) {
+    final header = response?.headers.value('retry-after');
+    if (header == null) return null;
+    final seconds = int.tryParse(header);
+    if (seconds == null) return null;
+    return Duration(seconds: seconds);
   }
 }

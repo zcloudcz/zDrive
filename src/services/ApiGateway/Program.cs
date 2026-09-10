@@ -62,9 +62,29 @@ builder.Services.AddAuthorization();
 // than one global counter: a 1 GB upload is ~256 chunk requests, and a single
 // global window meant one large transfer would 429 itself halfway through
 // and starve every other user at the same time.
+//
+// A rejected request is answered immediately (QueueLimit = 0) rather than
+// held in the limiter's internal queue: the previous QueueLimit could hold a
+// request for up to the full window (~60s) while Dio's receiveTimeout
+// (dio_client.dart) is 15s, so the client gave up first and saw a
+// DioException with no response — no status code, so RetryInterceptor could
+// not even recognise it as a rate-limit rejection to retry. An immediate 429
+// always carries a status code and, via OnRejected below, a Retry-After
+// header naming exactly when the window frees up, which the client honours
+// instead of guessing a backoff against a window length it doesn't know.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.OnRejected = (context, _) =>
+    {
+        var retryAfterSeconds = RateLimiterPartitioning.GetRetryAfterSeconds(context.Lease);
+        if (retryAfterSeconds != null)
+        {
+            context.HttpContext.Response.Headers.RetryAfter = retryAfterSeconds;
+        }
+        return ValueTask.CompletedTask;
+    };
 
     options.AddPolicy("fixed", httpContext => RateLimitPartition.GetFixedWindowLimiter(
         RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
@@ -73,7 +93,7 @@ builder.Services.AddRateLimiter(options =>
             PermitLimit = 100,
             Window = TimeSpan.FromMinutes(1),
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-            QueueLimit = 10
+            QueueLimit = 0
         }));
 
     options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(
@@ -83,7 +103,7 @@ builder.Services.AddRateLimiter(options =>
             PermitLimit = 20,
             Window = TimeSpan.FromMinutes(1),
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-            QueueLimit = 5
+            QueueLimit = 0
         }));
 });
 
@@ -116,6 +136,11 @@ app.UseCors();
 // Authentication runs before the rate limiter so the partitioner above can
 // read the authenticated user's id off HttpContext.User — it would always
 // see an empty principal (and fall back to IP) if this ran the other way.
+// Trade-off: a flood of well-formed but wrongly-signed bearer tokens now
+// pays for RSA signature validation before the limiter can shed it, where
+// previously the limiter ran first. Partitioning by user id requires this
+// order; there is no rate limiting on unauthenticated request volume as a
+// result, only on the responses each partition key produces.
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
