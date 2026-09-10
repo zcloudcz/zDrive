@@ -167,6 +167,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get ok => 'OK';
 
   @override
+  String get retry => 'Zkusit znovu';
+
+  @override
   String get noPhotos => 'Zatím žádné fotky';
 
   @override
@@ -190,6 +193,18 @@ class AppLocalizationsCs extends AppLocalizations {
   @override
   String get syncDescription =>
       'Vaše soubory jsou aktuální na všech zařízeních.';
+
+  @override
+  String get syncDevices => 'Zařízení';
+
+  @override
+  String get syncConflicts => 'Konflikty';
+
+  @override
+  String get syncNoDevices => 'Žádná zaregistrovaná zařízení';
+
+  @override
+  String get syncNeverSynced => 'Nikdy nesynchronizováno';
 
   @override
   String get versionHistory => 'Historie verzí';

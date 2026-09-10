@@ -34,7 +34,10 @@ abstract class FileRepository {
     Uint8List bytes,
     void Function(double progress)? onProgress,
   );
-  Future<String> getDownloadUrl(String fileId);
+
+  /// Downloads and reassembles a file's complete content from its chunks —
+  /// there is no assembled whole-file blob on the server.
+  Future<Uint8List> downloadFile(String fileId);
 
   /// Lists recorded versions of a file, newest first.
   Future<List<FileVersion>> getVersions(String fileId);

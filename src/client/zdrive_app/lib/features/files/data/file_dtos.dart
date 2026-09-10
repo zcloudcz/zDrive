@@ -108,18 +108,36 @@ class UploadCompleteDto {
   Map<String, dynamic> toJson() => _$UploadCompleteDtoToJson(this);
 }
 
+/// The chunk manifest, fetched via `GET /storage/download/{fileId}/manifest`.
+/// StorageService's `GetManifestQueryHandler` reads the raw
+/// `ChunkManifest`/`ChunkInfo` value objects off blob storage (written
+/// PascalCase by a bare `JsonSerializer.Serialize`, see
+/// `AzureBlobStorageService.UploadManifestAsync`) and re-serves them through
+/// the normal controller pipeline, which is camelCase like every other
+/// endpoint — so, unlike the blob-stored manifest itself, this DTO needs no
+/// `@JsonKey` overrides.
 @JsonSerializable()
-class DownloadUrlDto {
-  final String sasUrl;
-  final DateTime expiresAt;
+class ManifestDto {
+  final int totalSize;
+  final List<ManifestChunkDto> chunks;
 
-  const DownloadUrlDto({
-    required this.sasUrl,
-    required this.expiresAt,
-  });
+  const ManifestDto({required this.totalSize, required this.chunks});
 
-  factory DownloadUrlDto.fromJson(Map<String, dynamic> json) =>
-      _$DownloadUrlDtoFromJson(json);
+  factory ManifestDto.fromJson(Map<String, dynamic> json) =>
+      _$ManifestDtoFromJson(json);
 
-  Map<String, dynamic> toJson() => _$DownloadUrlDtoToJson(this);
+  Map<String, dynamic> toJson() => _$ManifestDtoToJson(this);
+}
+
+@JsonSerializable()
+class ManifestChunkDto {
+  final String hash;
+  final int index;
+
+  const ManifestChunkDto({required this.hash, required this.index});
+
+  factory ManifestChunkDto.fromJson(Map<String, dynamic> json) =>
+      _$ManifestChunkDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$ManifestChunkDtoToJson(this);
 }

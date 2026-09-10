@@ -167,6 +167,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get ok => 'OK';
 
   @override
+  String get retry => 'Retry';
+
+  @override
   String get noPhotos => 'No photos yet';
 
   @override
@@ -189,6 +192,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get syncDescription => 'Your files are up to date across all devices.';
+
+  @override
+  String get syncDevices => 'Devices';
+
+  @override
+  String get syncConflicts => 'Conflicts';
+
+  @override
+  String get syncNoDevices => 'No devices registered';
+
+  @override
+  String get syncNeverSynced => 'Never synced';
 
   @override
   String get versionHistory => 'Version history';

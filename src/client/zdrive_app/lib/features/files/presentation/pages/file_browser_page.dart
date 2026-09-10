@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -5,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../data/file_saver.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
 import '../../domain/use_cases/create_folder_use_case.dart';
@@ -262,8 +265,18 @@ class _FileBrowserView extends StatelessWidget {
   void _onFileTap(BuildContext context, FileItem file) {
     if (file.isFolder) {
       context.go('/home/files/folder/${file.id}');
+      return;
     }
-    // For regular files, no action in MVP (download comes later)
+    _downloadFile(context, file);
+  }
+
+  Future<void> _downloadFile(BuildContext context, FileItem file) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await downloadFile(file, getIt<FileRepository>());
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+    }
   }
 
   Future<void> _showCreateFolderDialog(BuildContext context) async {
@@ -391,4 +404,22 @@ class _FileBrowserView extends StatelessWidget {
       );
     }
   }
+}
+
+/// Downloads [file]'s complete content (reassembled from its chunks by
+/// [repository]) and saves it via the platform-appropriate mechanism in
+/// [save] — file_picker + dart:io on native platforms, a Blob download on
+/// web (see `file_saver.dart`).
+///
+/// A top-level function (rather than inlined in [_FileBrowserView]) so it
+/// can be unit tested without a full widget/DI/router harness; [save]
+/// defaults to the real platform saver and is overridden in tests.
+@visibleForTesting
+Future<void> downloadFile(
+  FileItem file,
+  FileRepository repository, {
+  Future<void> Function(String fileName, Uint8List bytes) save = saveFile,
+}) async {
+  final bytes = await repository.downloadFile(file.id);
+  await save(file.name, bytes);
 }

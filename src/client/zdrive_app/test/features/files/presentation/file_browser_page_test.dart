@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -5,12 +7,16 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/features/files/domain/file_item.dart';
+import 'package:zdrive_app/features/files/domain/file_repository.dart';
 import 'package:zdrive_app/features/files/presentation/file_browser_bloc.dart';
+import 'package:zdrive_app/features/files/presentation/pages/file_browser_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 class MockFileBrowserBloc
     extends MockBloc<FileBrowserEvent, FileBrowserState>
     implements FileBrowserBloc {}
+
+class MockFileRepository extends Mock implements FileRepository {}
 
 void main() {
   late MockFileBrowserBloc mockBloc;
@@ -120,6 +126,69 @@ void main() {
       // We verify the tile is tappable.
       await tester.tap(find.text('Documents'));
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('downloadFile', () {
+    late MockFileRepository mockRepository;
+
+    setUp(() {
+      mockRepository = MockFileRepository();
+    });
+
+    test('fetches the reassembled bytes and hands them to the platform saver', () async {
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      when(() => mockRepository.downloadFile('file-1'))
+          .thenAnswer((_) async => bytes);
+
+      String? savedName;
+      Uint8List? savedBytes;
+
+      await downloadFile(
+        testFile,
+        mockRepository,
+        save: (fileName, data) async {
+          savedName = fileName;
+          savedBytes = data;
+        },
+      );
+
+      verify(() => mockRepository.downloadFile('file-1')).called(1);
+      expect(savedName, 'readme.txt');
+      expect(savedBytes, bytes);
+    });
+
+    test('propagates a failure reassembling the file without saving', () async {
+      when(() => mockRepository.downloadFile('file-1'))
+          .thenThrow(Exception('chunk hash mismatch'));
+
+      var saverCalled = false;
+
+      await expectLater(
+        () => downloadFile(
+          testFile,
+          mockRepository,
+          save: (fileName, data) async {
+            saverCalled = true;
+          },
+        ),
+        throwsA(isException),
+      );
+      expect(saverCalled, isFalse);
+    });
+
+    test('propagates a failure from the platform saver', () async {
+      when(() => mockRepository.downloadFile('file-1'))
+          .thenAnswer((_) async => Uint8List.fromList([1]));
+
+      await expectLater(
+        () => downloadFile(
+          testFile,
+          mockRepository,
+          save: (fileName, data) async => throw Exception('save cancelled'),
+        ),
+        throwsA(isException),
+      );
     });
   });
 }

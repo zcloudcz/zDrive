@@ -410,6 +410,12 @@ abstract class AppLocalizations {
   /// **'OK'**
   String get ok;
 
+  /// No description provided for @retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get retry;
+
   /// No description provided for @noPhotos.
   ///
   /// In en, this message translates to:
@@ -457,6 +463,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your files are up to date across all devices.'**
   String get syncDescription;
+
+  /// No description provided for @syncDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'Devices'**
+  String get syncDevices;
+
+  /// No description provided for @syncConflicts.
+  ///
+  /// In en, this message translates to:
+  /// **'Conflicts'**
+  String get syncConflicts;
+
+  /// No description provided for @syncNoDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'No devices registered'**
+  String get syncNoDevices;
+
+  /// No description provided for @syncNeverSynced.
+  ///
+  /// In en, this message translates to:
+  /// **'Never synced'**
+  String get syncNeverSynced;
 
   /// No description provided for @versionHistory.
   ///

@@ -187,6 +187,17 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         return properties.Value.ContentLength;
     }
 
+    public async Task<Stream?> DownloadChunkAsync(Guid tenantId, Guid userId, Guid fileId, string chunkHash, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);
+        var blobClient = containerClient.GetBlobClient(GetFinalChunkPath(tenantId, userId, fileId, chunkHash));
+
+        if (!await blobClient.ExistsAsync(ct))
+            return null;
+
+        return await blobClient.OpenReadAsync(cancellationToken: ct);
+    }
+
     private string GenerateSasUrl(string containerName, string blobPath, BlobSasPermissions permissions)
     {
         if (_sharedKeyCredential is null)

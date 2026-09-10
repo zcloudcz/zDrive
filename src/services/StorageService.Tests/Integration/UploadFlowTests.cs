@@ -189,6 +189,89 @@ public sealed class UploadFlowTests : IClassFixture<StorageServiceFactory>
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    /// <summary>
+    /// Web clients cannot fetch a SAS URL directly (no blob CORS configured),
+    /// so the manifest and chunk bytes are proxied through this API instead
+    /// — see GetManifestQueryHandler/DownloadChunkQueryHandler. This proves
+    /// both endpoints return the same content a SAS-based fetch would.
+    /// </summary>
+    [Fact]
+    public async Task GetManifestAndDownloadChunk_AfterUpload_ReturnsProxiedContent()
+    {
+        var fileId = Guid.NewGuid();
+        var chunkData = new byte[][] { new byte[1024], new byte[512] };
+        Random.Shared.NextBytes(chunkData[0]);
+        Random.Shared.NextBytes(chunkData[1]);
+
+        var initResponse = await AuthPost("/api/v1/storage/upload/init", new
+        {
+            fileId,
+            fileName = "proxied.bin",
+            totalChunks = 2
+        });
+        var sessionId = (await initResponse.Content.ReadFromJsonAsync<ApiResponse<UploadSessionDto>>())!.Data!.SessionId;
+
+        for (var i = 0; i < 2; i++)
+        {
+            var chunkContent = new ByteArrayContent(chunkData[i]);
+            chunkContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            var request = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/storage/upload/{sessionId}/chunk/{i}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
+            request.Headers.Add("X-Chunk-Hash", $"hash-{i}");
+            request.Content = chunkContent;
+            await _client.SendAsync(request);
+        }
+
+        await AuthPost($"/api/v1/storage/upload/{sessionId}/complete", new { });
+
+        // GetManifest returns JSON from the API (not a SAS URL to manifest.json)
+        var manifestResponse = await AuthGet($"/api/v1/storage/download/{fileId}/manifest");
+        manifestResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var manifestResult = await manifestResponse.Content.ReadFromJsonAsync<ApiResponse<ManifestDto>>();
+        manifestResult!.Success.Should().BeTrue();
+        manifestResult.Data!.TotalSize.Should().Be(1024 + 512);
+        manifestResult.Data.Chunks.Should().HaveCount(2);
+
+        // DownloadChunk returns raw bytes (not a SAS URL) matching what was uploaded
+        foreach (var chunk in manifestResult.Data.Chunks)
+        {
+            var chunkResponse = await AuthGet($"/api/v1/storage/download/{fileId}/chunk/{chunk.Hash}/bytes");
+            chunkResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            chunkResponse.Content.Headers.ContentType!.MediaType.Should().Be("application/octet-stream");
+
+            var bytes = await chunkResponse.Content.ReadAsByteArrayAsync();
+            bytes.Should().BeEquivalentTo(chunkData[chunk.Index]);
+        }
+    }
+
+    [Fact]
+    public async Task GetManifest_NonExistentFile_Returns404()
+    {
+        var response = await AuthGet($"/api/v1/storage/download/{Guid.NewGuid()}/manifest");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DownloadChunk_NonExistentChunk_Returns404()
+    {
+        // A well-formed hash that simply is not stored. The placeholder this
+        // test used before ("does-not-exist") stopped reaching the handler
+        // once the hash was validated as lowercase hex SHA-256 — it was
+        // rejected as malformed, so the test asserted 404 while proving 400.
+        var missingHash = new string('a', 64);
+
+        var response = await AuthGet($"/api/v1/storage/download/{Guid.NewGuid()}/chunk/{missingHash}/bytes");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DownloadChunk_MalformedHash_Returns400()
+    {
+        var response = await AuthGet($"/api/v1/storage/download/{Guid.NewGuid()}/chunk/does-not-exist/bytes");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     private async Task<HttpResponseMessage> AuthPost(string url, object body)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, url);
