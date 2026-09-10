@@ -1,6 +1,5 @@
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace ZDrive.Shared.Persistence;
 
@@ -16,11 +15,17 @@ namespace ZDrive.Shared.Persistence;
 ///    this service had real EF migrations) have every table but no
 ///    __EFMigrationsHistory row. Migrate() would see the migration as
 ///    pending and replay its CREATE TABLE statements against a schema that
-///    already has them, crashing with 42P07. <see cref="BaselineIfAlreadyPopulatedAsync"/>
-///    detects that case and records the pending migrations as already
-///    applied instead of replaying their DDL — but only when every table
-///    the current model expects is already present; a partial match aborts
-///    instead of guessing at a schema that might just be unrelated.
+///    already has them, crashing with 42P07. This helper detects that
+///    case — any table present in the schema with no history table — and
+///    aborts with an error naming the manual recovery step, instead of
+///    guessing whether the schema actually matches the current model. An
+///    earlier version of this helper tried to guess from the set of table
+///    names alone and baseline automatically; that could mark a migration
+///    as applied against a schema that was actually missing one of its
+///    columns, corrupting migration state permanently (no later
+///    `dotnet ef database update` revisits a migration EF already believes
+///    ran). Silent corruption is worse than a loud startup failure, so this
+///    helper no longer guesses at all.
 ///  - EF Core 8 takes no lock around Migrate() (that lands in EF Core 9), so
 ///    concurrent replicas scaling up from zero can race each other applying
 ///    the same migration. A Postgres advisory lock scoped to this schema
@@ -29,11 +34,12 @@ namespace ZDrive.Shared.Persistence;
 public static class DatabaseMigrationExtensions
 {
     /// <summary>
-    /// Migrates <paramref name="db"/>'s schema, baselining an old
-    /// EnsureCreated-created install first if needed. See class remarks.
+    /// Migrates <paramref name="db"/>'s schema, aborting instead of guessing
+    /// if the schema looks like an old EnsureCreated-created install. See
+    /// class remarks.
     /// </summary>
     /// <param name="schema">The Postgres schema this context owns (matches its MigrationsHistoryTable schema).</param>
-    public static async Task MigrateWithBaselineAsync(this DbContext db, string schema, ILogger? logger = null)
+    public static async Task MigrateWithBaselineAsync(this DbContext db, string schema)
     {
         var database = db.Database;
         await database.OpenConnectionAsync();
@@ -47,7 +53,7 @@ public static class DatabaseMigrationExtensions
 
             if (!await HistoryTableExistsAsync(database.GetDbConnection(), schema))
             {
-                await BaselineIfAlreadyPopulatedAsync(db, schema, logger);
+                await AbortIfSchemaAlreadyHasTablesAsync(database.GetDbConnection(), schema);
             }
 
             await database.MigrateAsync();
@@ -61,12 +67,21 @@ public static class DatabaseMigrationExtensions
             // pruned the physical connection (ConnectionIdleLifetime, 300s by
             // default), which turned the three-replica test from a 31s failure
             // into a 15-minute pass.
-            if (locked)
+            //
+            // Nested try/finally: if the migration above already threw and
+            // the unlock below also throws (e.g. a degraded connection), the
+            // unlock failure must not stop CloseConnectionAsync from running.
+            try
             {
-                await ReleaseSchemaLockAsync(database.GetDbConnection(), schema);
+                if (locked)
+                {
+                    await ReleaseSchemaLockAsync(database.GetDbConnection(), schema);
+                }
             }
-
-            await database.CloseConnectionAsync();
+            finally
+            {
+                await database.CloseConnectionAsync();
+            }
         }
     }
 
@@ -105,73 +120,26 @@ public static class DatabaseMigrationExtensions
         return await cmd.ExecuteScalarAsync() is not null;
     }
 
-    private static async Task BaselineIfAlreadyPopulatedAsync(DbContext db, string schema, ILogger? logger)
+    private static async Task AbortIfSchemaAlreadyHasTablesAsync(DbConnection connection, string schema)
     {
-        var expectedTables = db.Model.GetEntityTypes()
-            .Select(e => e.GetTableName())
-            .Where(t => t is not null)
-            .Distinct()
-            .ToList();
-
-        var connection = db.Database.GetDbConnection();
-        var existingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = "SELECT table_name FROM information_schema.tables WHERE table_schema = @schema";
-            AddParameter(cmd, "schema", schema);
-            using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                existingTables.Add(reader.GetString(0));
-            }
-        }
-
-        var matchCount = expectedTables.Count(t => existingTables.Contains(t!));
-        if (matchCount == 0)
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema = @schema LIMIT 1";
+        AddParameter(cmd, "schema", schema);
+        if (await cmd.ExecuteScalarAsync() is null)
         {
             return; // Fresh install — MigrateAsync() below creates the schema and tables.
         }
 
-        if (matchCount != expectedTables.Count)
-        {
-            throw new InvalidOperationException(
-                $"Schema '{schema}' has {matchCount}/{expectedTables.Count} of the tables the current model " +
-                "expects, but no __EFMigrationsHistory table. This looks like a partially-created or unrelated " +
-                "schema rather than a full install from the old EnsureCreated-based workaround — refusing to " +
-                "guess. Reconcile the schema manually, then retry.");
-        }
-
-        // Every table the current model expects is already there — this is the
-        // old workaround's install. Record the pending migrations as applied
-        // instead of letting MigrateAsync() replay their DDL against tables
-        // that already exist.
-        logger?.LogWarning(
-            "Schema '{Schema}' has all expected tables but no migration history — baselining as an existing " +
-            "install instead of replaying migrations.", schema);
-
-        var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
-        var productVersion = typeof(DbContext).Assembly.GetName().Version!.ToString(3);
-
-        using (var createCmd = connection.CreateCommand())
-        {
-            createCmd.CommandText =
-                $"CREATE TABLE IF NOT EXISTS \"{schema}\".\"__EFMigrationsHistory\" (" +
-                "\"MigrationId\" character varying(150) NOT NULL, " +
-                "\"ProductVersion\" character varying(32) NOT NULL, " +
-                "CONSTRAINT \"PK___EFMigrationsHistory\" PRIMARY KEY (\"MigrationId\"))";
-            await createCmd.ExecuteNonQueryAsync();
-        }
-
-        foreach (var migrationId in pendingMigrations)
-        {
-            using var insertCmd = connection.CreateCommand();
-            insertCmd.CommandText =
-                $"INSERT INTO \"{schema}\".\"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") " +
-                "VALUES (@id, @version) ON CONFLICT DO NOTHING";
-            AddParameter(insertCmd, "id", migrationId);
-            AddParameter(insertCmd, "version", productVersion);
-            await insertCmd.ExecuteNonQueryAsync();
-        }
+        throw new InvalidOperationException(
+            $"Schema '{schema}' has tables but no __EFMigrationsHistory table. This could be an install from " +
+            "the old EnsureCreated-based workaround, a partially-created schema, or an unrelated schema that " +
+            "happens to share table names — there is no reliable way to tell without inspecting it by hand, so " +
+            "refusing to guess and risk marking a migration as applied when the schema does not actually match " +
+            "it. For a throwaway dev database, drop the 'postgres-data' Docker volume (docker-compose.yml) and " +
+            "let this service recreate the schema from scratch. For a real database, reconcile its schema " +
+            "against the current EF model by hand, then record each migration that is already reflected in the " +
+            $"schema as applied by inserting its id into \"{schema}\".\"__EFMigrationsHistory\" yourself, and " +
+            "retry.");
     }
 
     private static void AddParameter(DbCommand cmd, string name, string value)
