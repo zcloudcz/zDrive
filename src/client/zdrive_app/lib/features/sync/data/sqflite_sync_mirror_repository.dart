@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -8,13 +9,27 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
 
-/// sqflite over drift: the schema is two small tables with no joins or
-/// migrations planned, so drift's code-generated query builder buys nothing
-/// here that a handful of plain SQL statements don't already give us.
+/// sqflite over drift: the schema is a handful of small tables with no joins
+/// or migrations planned, so drift's code-generated query builder buys
+/// nothing here that plain SQL statements don't already give us.
 @LazySingleton(as: SyncMirrorRepository)
 class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   static const _filesTable = 'mirror_files';
   static const _cursorTable = 'sync_cursor';
+  static const _bootstrapTable = 'bootstrap_state';
+  static const _failedTable = 'failed_events';
+
+  final String? _dbPathOverride;
+
+  SqfliteSyncMirrorRepository() : _dbPathOverride = null;
+
+  /// Test-only escape hatch: opens [dbPath] (e.g. sqflite_common_ffi's
+  /// `inMemoryDatabasePath`) instead of a file under
+  /// getApplicationSupportDirectory(), which needs a platform channel plain
+  /// `flutter test` doesn't have. Not annotated for injectable, so DI keeps
+  /// using the default constructor above.
+  @visibleForTesting
+  SqfliteSyncMirrorRepository.withDbPath(String dbPath) : _dbPathOverride = dbPath;
 
   Database? _db;
 
@@ -30,8 +45,8 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
       databaseFactory = databaseFactoryFfi;
     }
 
-    final dir = await getApplicationSupportDirectory();
-    final dbPath = p.join(dir.path, 'zdrive_sync.db');
+    final dbPath = _dbPathOverride ??
+        p.join((await getApplicationSupportDirectory()).path, 'zdrive_sync.db');
 
     final db = await databaseFactory.openDatabase(
       dbPath,
@@ -53,6 +68,19 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
             CREATE TABLE $_cursorTable (
               deviceId TEXT PRIMARY KEY,
               cursor INTEGER NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE $_bootstrapTable (
+              deviceId TEXT PRIMARY KEY
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE $_failedTable (
+              fileId TEXT PRIMARY KEY,
+              eventId INTEGER NOT NULL,
+              reason TEXT NOT NULL,
+              failedAt TEXT NOT NULL
             )
           ''');
         },
@@ -106,6 +134,81 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
       {'deviceId': deviceId, 'cursor': cursor},
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  @override
+  Future<void> rePathChildren(String oldPrefix, String newPrefix) async {
+    final db = await _database;
+    // A LIKE query would need to escape '%'/'_' in the prefix (a legal
+    // filename character on both platforms), so this scans and filters in
+    // Dart instead — fine for a local per-user mirror table.
+    final prefix = '$oldPrefix${Platform.pathSeparator}';
+    final rows = await db.query(_filesTable);
+    final batch = db.batch();
+    for (final row in rows) {
+      final path = row['localPath'] as String;
+      if (path.startsWith(prefix)) {
+        batch.update(
+          _filesTable,
+          {'localPath': newPrefix + path.substring(oldPrefix.length)},
+          where: 'serverId = ?',
+          whereArgs: [row['serverId']],
+        );
+      }
+    }
+    await batch.commit(noResult: true);
+  }
+
+  @override
+  Future<bool> isBootstrapped(String deviceId) async {
+    final db = await _database;
+    final rows = await db.query(_bootstrapTable, where: 'deviceId = ?', whereArgs: [deviceId]);
+    return rows.isNotEmpty;
+  }
+
+  @override
+  Future<void> markBootstrapped(String deviceId) async {
+    final db = await _database;
+    await db.insert(
+      _bootstrapTable,
+      {'deviceId': deviceId},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  @override
+  Future<void> recordFailedEvent(String fileId, int eventId, String reason) async {
+    final db = await _database;
+    await db.insert(
+      _failedTable,
+      {
+        'fileId': fileId,
+        'eventId': eventId,
+        'reason': reason,
+        'failedAt': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  @override
+  Future<void> clearFailedEvent(String fileId) async {
+    final db = await _database;
+    await db.delete(_failedTable, where: 'fileId = ?', whereArgs: [fileId]);
+  }
+
+  @override
+  Future<List<SyncFailedEvent>> getFailedEvents() async {
+    final db = await _database;
+    final rows = await db.query(_failedTable, orderBy: 'failedAt DESC');
+    return rows
+        .map((row) => SyncFailedEvent(
+              fileId: row['fileId'] as String,
+              eventId: row['eventId'] as int,
+              reason: row['reason'] as String,
+              failedAt: DateTime.parse(row['failedAt'] as String),
+            ))
+        .toList();
   }
 
   SyncMirrorEntry _fromRow(Map<String, Object?> row) => SyncMirrorEntry(

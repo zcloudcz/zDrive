@@ -16,4 +16,32 @@ abstract class SyncMirrorRepository {
   Future<int> getCursor(String deviceId);
 
   Future<void> setCursor(String deviceId, int cursor);
+
+  /// Re-parents every mirror row whose [SyncMirrorEntry.localPath] lives
+  /// under [oldPrefix] to [newPrefix] instead — used when a folder is
+  /// renamed/moved on disk (a directory rename, not a delete+recreate; see
+  /// PR #12 review F2) so its children's recorded paths follow it rather
+  /// than going stale.
+  Future<void> rePathChildren(String oldPrefix, String newPrefix);
+
+  /// Whether the one-time full-tree backfill has already run for
+  /// [deviceId]. Distinct from the cursor being 0, which also means
+  /// "nothing pulled yet" but stays true after a completed backfill if the
+  /// account legitimately had zero sync events at that moment.
+  Future<bool> isBootstrapped(String deviceId);
+
+  Future<void> markBootstrapped(String deviceId);
+
+  /// Records that the event [eventId] for [fileId] could not be applied for
+  /// a permanent reason (see PullSyncService) — the cursor still advances
+  /// past it, so this is how that gets surfaced instead of silently
+  /// swallowed.
+  Future<void> recordFailedEvent(String fileId, int eventId, String reason);
+
+  /// Clears a previously recorded failure for [fileId] — called after a
+  /// later event for the same file applies successfully.
+  Future<void> clearFailedEvent(String fileId);
+
+  /// Recorded failures, most recent first.
+  Future<List<SyncFailedEvent>> getFailedEvents();
 }
