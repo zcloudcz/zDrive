@@ -37,12 +37,13 @@ public static class DatabaseMigrationExtensions
     {
         var database = db.Database;
         await database.OpenConnectionAsync();
+        var locked = false;
         try
         {
             // Serializes concurrent migrators for this schema (scale-from-zero
-            // burst); released automatically when the connection closes below,
-            // even if this method throws.
+            // burst).
             await AcquireSchemaLockAsync(database.GetDbConnection(), schema);
+            locked = true;
 
             if (!await HistoryTableExistsAsync(database.GetDbConnection(), schema))
             {
@@ -53,6 +54,18 @@ public static class DatabaseMigrationExtensions
         }
         finally
         {
+            // The lock MUST be released explicitly. It is session-scoped, and
+            // CloseConnectionAsync below only returns the connection to
+            // Npgsql's pool — the Postgres session survives and keeps holding
+            // it. Relying on the close alone left the lock held until the pool
+            // pruned the physical connection (ConnectionIdleLifetime, 300s by
+            // default), which turned the three-replica test from a 31s failure
+            // into a 15-minute pass.
+            if (locked)
+            {
+                await ReleaseSchemaLockAsync(database.GetDbConnection(), schema);
+            }
+
             await database.CloseConnectionAsync();
         }
     }
@@ -71,6 +84,14 @@ public static class DatabaseMigrationExtensions
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT pg_advisory_lock(hashtext(@schema)::bigint)";
         cmd.CommandTimeout = 0;
+        AddParameter(cmd, "schema", schema);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task ReleaseSchemaLockAsync(DbConnection connection, string schema)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT pg_advisory_unlock(hashtext(@schema)::bigint)";
         AddParameter(cmd, "schema", schema);
         await cmd.ExecuteNonQueryAsync();
     }
