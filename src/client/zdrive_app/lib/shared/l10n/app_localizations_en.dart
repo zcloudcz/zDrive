@@ -86,6 +86,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get uploadFile => 'Upload file';
 
   @override
+  String get downloadFolder => 'Download';
+
+  @override
   String get rename => 'Rename';
 
   @override

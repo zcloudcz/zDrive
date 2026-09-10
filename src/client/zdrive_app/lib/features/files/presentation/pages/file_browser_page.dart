@@ -1,13 +1,16 @@
-import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../data/file_remote_data_source.dart';
 import '../../data/file_saver.dart';
+import '../../data/file_upload_data_source.dart';
+import '../../data/folder_downloader.dart';
+import '../../data/folder_uploader.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
 import '../../domain/use_cases/create_folder_use_case.dart';
@@ -213,6 +216,7 @@ class _FileBrowserView extends StatelessWidget {
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
           onVersions: () => _showVersionHistoryDialog(context, file),
+          onDownloadFolder: () => _downloadFolder(context, file),
         );
       },
     );
@@ -237,6 +241,7 @@ class _FileBrowserView extends StatelessWidget {
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
           onVersions: () => _showVersionHistoryDialog(context, file),
+          onDownloadFolder: () => _downloadFolder(context, file),
         );
       },
     );
@@ -253,6 +258,17 @@ class _FileBrowserView extends StatelessWidget {
           child: const Icon(Icons.upload_file),
         ),
         const SizedBox(height: 8),
+        // Picking and walking a directory tree needs dart:io, which does not
+        // exist on web (see folder_uploader.dart) — hide the action there
+        // rather than offering a button that can only throw.
+        if (!kIsWeb) ...[
+          FloatingActionButton.small(
+            heroTag: 'uploadFolder',
+            onPressed: () => _pickAndUploadFolder(context),
+            child: const Icon(Icons.drive_folder_upload),
+          ),
+          const SizedBox(height: 8),
+        ],
         FloatingActionButton(
           heroTag: 'newFolder',
           onPressed: () => _showCreateFolderDialog(context),
@@ -350,11 +366,21 @@ class _FileBrowserView extends StatelessWidget {
 
   Future<void> _pickAndUploadFile(BuildContext context) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await FilePicker.platform.pickFiles(withData: true);
+    // withData: false + withReadStream: true streams the file from disk (or,
+    // on web, from the browser's File object in 1 MB windows) instead of
+    // loading it whole into memory — verified against file_picker 8.3.7's
+    // source for every platform this app targets (Windows/macOS/Linux via
+    // dart:io File.openRead(), web via FileReader + Blob.slice()); the
+    // package docs don't spell this out.
+    final result = await FilePicker.platform.pickFiles(
+      withData: false,
+      withReadStream: true,
+    );
     if (result == null || result.files.isEmpty) return;
 
     final pickedFile = result.files.first;
-    if (pickedFile.bytes == null) return;
+    final stream = pickedFile.readStream;
+    if (stream == null) return;
 
     if (!context.mounted) return;
 
@@ -388,7 +414,8 @@ class _FileBrowserView extends StatelessWidget {
       await uploadUseCase(
         parentId,
         pickedFile.name,
-        pickedFile.bytes!,
+        stream,
+        pickedFile.size,
       );
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
@@ -402,6 +429,58 @@ class _FileBrowserView extends StatelessWidget {
       messenger.showSnackBar(
         SnackBar(content: Text(e.toString())),
       );
+    }
+  }
+
+  Future<void> _pickAndUploadFolder(BuildContext context) async {
+    final l10n = AppLocalizations.of(context)!;
+    final bloc = context.read<FileBrowserBloc>();
+    final currentState = bloc.state;
+    final parentId =
+        currentState is FileBrowserLoaded ? currentState.currentFolderId : null;
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Text(l10n.uploadProgress),
+          ],
+        ),
+        duration: const Duration(minutes: 30),
+      ),
+    );
+
+    try {
+      await uploadFolder(
+        getIt<FileRepository>(),
+        getIt<FileUploadDataSource>(),
+        getIt<FileRemoteDataSource>(),
+        parentId,
+      );
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(l10n.uploadComplete)));
+      if (context.mounted) {
+        bloc.add(const RefreshFiles());
+      }
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  Future<void> _downloadFolder(BuildContext context, FileItem folder) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await downloadFolder(getIt<FileRepository>(), folder);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 }
