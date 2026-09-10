@@ -18,10 +18,34 @@ import 'sync_remote_data_source.dart';
 /// is reached.
 const _maxEventsPerPage = 500;
 
-/// Thrown when [PullSyncService.pullOnce] is called with no designated
-/// folder configured yet.
-class NoSyncFolderConfiguredException implements Exception {
-  const NoSyncFolderConfiguredException();
+/// Thrown when a server-supplied name cannot become a safe local path —
+/// either it is not a single plain path segment (a drive letter, a UNC
+/// root, a separator, or `.`/`..`), or the path it would resolve to lands
+/// outside the designated sync folder. `package:path` itself documents that
+/// `p.join` discards everything before a later absolute segment, which is
+/// exactly what would let a name like `C:\Users\<u>\...\Startup\x.cmd`
+/// escape the folder pull is supposed to be confined to. Permanent:
+/// retrying changes nothing, so the event is quarantined rather than
+/// retried forever (see the PR #12 review, F1).
+class UnsafeRemoteNameException implements Exception {
+  final String message;
+  const UnsafeRemoteNameException(this.message);
+
+  @override
+  String toString() => 'unsafe remote name: $message';
+}
+
+/// Thrown when applying a pull event would overwrite a local file pull did
+/// not itself write — either nothing was ever synced to that path before,
+/// or the bytes on disk no longer match what was last synced there (a local
+/// edit since). Pull refuses to clobber user data; the event is quarantined
+/// instead of retried (see the PR #12 review, F3).
+class LocalConflictException implements Exception {
+  final String message;
+  const LocalConflictException(this.message);
+
+  @override
+  String toString() => 'local conflict: $message';
 }
 
 /// Applies remote sync events into the designated local folder.
@@ -33,7 +57,20 @@ class NoSyncFolderConfiguredException implements Exception {
 /// dies mid-[pullOnce], the persisted cursor never points past work that
 /// did not land. The event that was in flight (and everything after it)
 /// will be re-delivered on the next pull; re-applying it is safe because
-/// writing a file or removing one that is already gone are both idempotent.
+/// writing a file, removing one that is already gone, and renaming one that
+/// has already moved are all idempotent. Move/rename gets this deliberately:
+/// [_applyUpsert] deletes the stale path *before* committing the mirror row,
+/// not after, so a crash in between never leaves an orphaned duplicate that
+/// nothing would ever go back and clean up.
+///
+/// A *permanent* failure (an unsafe name, or a local file pull refuses to
+/// overwrite) does not get the "block until it succeeds" treatment above:
+/// it is quarantined instead — recorded via
+/// [SyncMirrorRepository.recordFailedEvent], with the cursor still advancing
+/// past it — because retrying it would fail the same way forever and block
+/// every event behind it. Anything else (a network error, an exception we
+/// don't recognise) still blocks the cursor, since those usually do resolve
+/// on a later retry.
 @lazySingleton
 class PullSyncService {
   final SyncRemoteDataSource _syncDataSource;
@@ -49,8 +86,13 @@ class PullSyncService {
   );
 
   /// Pulls and applies everything pending for this device, draining
-  /// multiple pages if the server reports more than fit in one. Returns the
-  /// number of events applied.
+  /// multiple pages if the server reports more than fit in one. On this
+  /// device's first ever sync, also backfills the designated folder from
+  /// whatever currently exists in FileService (see [_bootstrap]) — the
+  /// event log only ever covers files touched *after* an event was first
+  /// raised for them, so a file nobody has touched since before this
+  /// feature shipped would otherwise never arrive. Returns the number of
+  /// events applied (the backfill is not counted — it is not an event).
   Future<int> pullOnce(String syncFolderPath) async {
     final deviceId = await _deviceRegistration.ensureRegistered();
 
@@ -62,18 +104,31 @@ class PullSyncService {
       if (events.isEmpty) break;
 
       for (final event in events) {
-        // No try/catch here: an exception must propagate out of pullOnce
-        // immediately, leaving the cursor at the previous event's id — that
-        // is the ordering guarantee. Wrapping this loop would let a failed
-        // apply be silently skipped and the cursor advance past it anyway.
         await _applyEvent(event, deviceId, syncFolderPath);
         applied++;
       }
 
       if (events.length < _maxEventsPerPage) break;
     }
+
+    // Runs after the event-log drain above, not before: that way the
+    // cursor this device has already committed to covers everything the
+    // event log holds as of now, and anything raised while the walk below
+    // is still running simply has an id past that point — the very next
+    // pull picks it up normally. The walk itself never touches the cursor,
+    // so there is no way for it to skip an event.
+    if (!await _mirror.isBootstrapped(deviceId)) {
+      await _bootstrap(syncFolderPath);
+      await _mirror.markBootstrapped(deviceId);
+    }
+
     return applied;
   }
+
+  /// Events pull could not apply for a permanent reason — see the class doc
+  /// comment. A thin passthrough so the presentation layer can surface them
+  /// without depending on [SyncMirrorRepository] directly.
+  Future<List<SyncFailedEvent>> getFailedEvents() => _mirror.getFailedEvents();
 
   Future<void> _applyEvent(
     Map<String, dynamic> event,
@@ -84,25 +139,44 @@ class PullSyncService {
     final fileId = event['fileId'] as String;
     final eventType = event['eventType'] as String;
 
-    if (eventType == 'Delete') {
-      await _applyDelete(fileId);
-    } else {
-      // Create/Update/Move/Rename are all handled the same way: fetch the
-      // file's current state and reconcile the local copy against it. This
-      // also covers move/rename without a separate code path — the mirror
-      // lookup below finds the entry's previous local path (if any) and
-      // relocates it when the resolved path has changed.
-      await _applyUpsert(fileId, syncFolderPath);
+    try {
+      if (eventType == 'Delete') {
+        await _applyDelete(fileId, syncFolderPath);
+      } else {
+        // Create/Update/Move/Rename are all handled the same way: fetch the
+        // file's current state and reconcile the local copy against it.
+        // This also covers move/rename without a separate code path — the
+        // mirror lookup inside finds the entry's previous local path (if
+        // any) and relocates it when the resolved path has changed.
+        await _applyUpsert(fileId, syncFolderPath);
+      }
+      // A previous failure for this file, if any, no longer applies now
+      // that a later event for it has gone through cleanly.
+      await _mirror.clearFailedEvent(fileId);
+    } on UnsafeRemoteNameException catch (e) {
+      await _mirror.recordFailedEvent(fileId, eventId, e.toString());
+    } on LocalConflictException catch (e) {
+      await _mirror.recordFailedEvent(fileId, eventId, e.toString());
+    } on FileSystemException catch (e) {
+      // A name Windows can't represent, a path past MAX_PATH, a locked
+      // file — quarantined on the assumption that the filesystem's answer
+      // will not change. ponytail: that assumption is wrong for a handful
+      // of genuinely transient FileSystemExceptions (disk full, a removable
+      // drive unplugged mid-write) — those get quarantined too instead of
+      // retried. Telling them apart needs an OS-error-code allowlist, which
+      // is more machinery than one un-writable name is worth right now; add
+      // it if a transient case like that actually shows up.
+      await _mirror.recordFailedEvent(fileId, eventId, e.message);
     }
 
     await _mirror.setCursor(deviceId, eventId);
   }
 
-  Future<void> _applyDelete(String fileId) async {
+  Future<void> _applyDelete(String fileId, String syncFolderPath) async {
     final entry = await _mirror.getByServerId(fileId);
     if (entry == null) return; // Never pulled locally — nothing to remove.
 
-    await _deleteLocal(entry.localPath, entry.isFolder);
+    await _deleteLocal(syncFolderPath, entry.localPath, entry.isFolder);
     await _mirror.deleteByServerId(fileId);
   }
 
@@ -115,7 +189,7 @@ class PullSyncService {
         // The file is gone by the time we looked it up (e.g. a Create
         // immediately followed by a Delete) — reconcile as a delete instead
         // of failing the whole pull over a stale event.
-        await _applyDelete(fileId);
+        await _applyDelete(fileId, syncFolderPath);
         return;
       }
       rethrow;
@@ -123,12 +197,44 @@ class PullSyncService {
 
     final previous = await _mirror.getByServerId(fileId);
     final dirPath = await _resolveLocalDirPath(remote.parentId, syncFolderPath);
-    final localPath = p.join(dirPath, remote.name);
+    final localPath = _safeChildPath(syncFolderPath, dirPath, remote.name);
+    final moved = previous != null && previous.localPath != localPath;
 
     String? contentHash;
     if (remote.isFolder) {
-      await Directory(localPath).create(recursive: true);
+      if (moved && previous.isFolder) {
+        await Directory(localPath).parent.create(recursive: true);
+        try {
+          // A directory rename moves every child with it — creating an
+          // empty folder at the new path and recursively deleting the old
+          // one (the previous approach) would destroy every child that has
+          // no sync event of its own to re-download it with.
+          await Directory(previous.localPath).rename(localPath);
+        } on PathNotFoundException {
+          // Already renamed by an earlier attempt at this same event that
+          // crashed before the mirror commit below — the directory is
+          // already at the new path, but the child re-path below still
+          // needs to run.
+        }
+        await _mirror.rePathChildren(previous.localPath, localPath);
+      } else {
+        await Directory(localPath).create(recursive: true);
+      }
     } else {
+      // Order matters here: check for a local conflict *before* touching
+      // anything on disk, so a refusal to overwrite never leaves behind a
+      // deleted "moved from" copy with nothing written at the new path.
+      if (await _wouldOverwriteLocalChange(localPath, previous)) {
+        throw LocalConflictException(
+            'local file differs from what was last synced: $localPath');
+      }
+      if (moved) {
+        // Moved/renamed file: remove the stale copy before committing the
+        // mirror row below, not after — see the class doc comment. Deleting
+        // first is safe to repeat: an already-gone file is a no-op
+        // (_deleteLocal).
+        await _deleteLocal(syncFolderPath, previous.localPath, previous.isFolder);
+      }
       final bytes = await _fileRepository.downloadFile(fileId);
       await File(localPath).parent.create(recursive: true);
       await File(localPath).writeAsBytes(bytes, flush: true);
@@ -144,12 +250,22 @@ class PullSyncService {
       updatedAt: remote.updatedAt,
       syncedAt: DateTime.now(),
     ));
+  }
 
-    // Moved or renamed: the old path is stale now that the new one has been
-    // written, so clean it up.
-    if (previous != null && previous.localPath != localPath) {
-      await _deleteLocal(previous.localPath, previous.isFolder);
-    }
+  /// True if writing to [localPath] would clobber something pull did not
+  /// itself put there: either nothing was ever synced to this path before
+  /// and a file already sits there (untracked), or something was synced but
+  /// its on-disk bytes no longer match [previous]'s recorded hash (edited
+  /// locally since).
+  Future<bool> _wouldOverwriteLocalChange(
+    String localPath,
+    SyncMirrorEntry? previous,
+  ) async {
+    final file = File(localPath);
+    if (!await file.exists()) return false;
+    if (previous == null) return true;
+    final onDiskHash = sha256.convert(await file.readAsBytes()).toString();
+    return onDiskHash != previous.contentHash;
   }
 
   /// Resolves [folderId]'s local directory path under [syncFolderPath],
@@ -164,7 +280,7 @@ class PullSyncService {
 
     final folder = await _fileRepository.getFile(folderId);
     final parentPath = await _resolveLocalDirPath(folder.parentId, syncFolderPath);
-    final dirPath = p.join(parentPath, folder.name);
+    final dirPath = _safeChildPath(syncFolderPath, parentPath, folder.name);
 
     await Directory(dirPath).create(recursive: true);
     await _mirror.upsert(SyncMirrorEntry(
@@ -178,7 +294,8 @@ class PullSyncService {
     return dirPath;
   }
 
-  Future<void> _deleteLocal(String path, bool isFolder) async {
+  Future<void> _deleteLocal(String syncFolderPath, String path, bool isFolder) async {
+    _assertWithinSyncFolder(syncFolderPath, path);
     try {
       if (isFolder) {
         await Directory(path).delete(recursive: true);
@@ -188,5 +305,129 @@ class PullSyncService {
     } on PathNotFoundException {
       // Already gone locally — deleting is idempotent, not an error.
     }
+  }
+
+  /// Backfills [syncFolderPath] and the mirror from FileService's current
+  /// tree — see [pullOnce] for why and when this runs. Resumable: a folder
+  /// already known to the mirror is still walked (there may be new children
+  /// under it since the last attempt), but a file already known is skipped.
+  Future<void> _bootstrap(String syncFolderPath) async {
+    await _bootstrapFolder(null, syncFolderPath, syncFolderPath);
+  }
+
+  Future<void> _bootstrapFolder(
+    String? folderId,
+    String dirPath,
+    String syncFolderPath,
+  ) async {
+    var page = 1;
+    while (true) {
+      final result = await _fileRepository.listChildren(folderId, page: page);
+      for (final item in result.items) {
+        if (item.isDeleted) continue;
+        await _bootstrapItem(item, dirPath, syncFolderPath);
+      }
+      if (!result.hasMore) break;
+      page++;
+    }
+  }
+
+  Future<void> _bootstrapItem(
+    FileItem item,
+    String dirPath,
+    String syncFolderPath,
+  ) async {
+    final existing = await _mirror.getByServerId(item.id);
+
+    if (item.isFolder) {
+      String localPath;
+      if (existing != null) {
+        localPath = existing.localPath;
+      } else {
+        try {
+          localPath = _safeChildPath(syncFolderPath, dirPath, item.name);
+        } on UnsafeRemoteNameException {
+          return; // Skip this one branch; siblings still need walking.
+        }
+        await Directory(localPath).create(recursive: true);
+        await _mirror.upsert(SyncMirrorEntry(
+          serverId: item.id,
+          localPath: localPath,
+          isFolder: true,
+          updatedAt: item.updatedAt,
+          syncedAt: DateTime.now(),
+        ));
+      }
+      await _bootstrapFolder(item.id, localPath, syncFolderPath);
+      return;
+    }
+
+    if (existing != null) return; // Already delivered by the drain above, or a previous run.
+
+    try {
+      final localPath = _safeChildPath(syncFolderPath, dirPath, item.name);
+      // Same untracked-file guard as delta apply (F3): backfill must not
+      // clobber a file the user already has. Unlike a delta event, there is
+      // no eventId to quarantine this against, and bootstrap only ever runs
+      // once (see [pullOnce]) — so a conflicting file found here is skipped
+      // for good rather than retried.
+      if (await File(localPath).exists()) return;
+
+      final bytes = await _fileRepository.downloadFile(item.id);
+      await File(localPath).parent.create(recursive: true);
+      await File(localPath).writeAsBytes(bytes, flush: true);
+      await _mirror.upsert(SyncMirrorEntry(
+        serverId: item.id,
+        localPath: localPath,
+        isFolder: false,
+        sizeBytes: item.sizeBytes,
+        contentHash: sha256.convert(bytes).toString(),
+        updatedAt: item.updatedAt,
+        syncedAt: DateTime.now(),
+      ));
+    } on UnsafeRemoteNameException {
+      // Skip this one item; the rest of the tree still needs walking.
+    } on FileSystemException {
+      // Same reasoning as _applyEvent's FileSystemException catch — not
+      // retryable, and bootstrap has no per-item retry mechanism anyway.
+    }
+  }
+}
+
+/// Windows and POSIX both forbid `/`; Windows additionally forbids `\` and
+/// `:` (drive letters), and treats a bare `.`/`..` as a directory reference
+/// rather than a real entry. A server-supplied name has to be exactly one
+/// plain path segment for `p.join` to be safe.
+bool _isPlainSegment(String name) =>
+    name.isNotEmpty &&
+    name != '.' &&
+    name != '..' &&
+    !name.contains('/') &&
+    !name.contains('\\') &&
+    !name.contains(':');
+
+/// Joins [name] under [dirPath], rejecting it outright if it is not a safe
+/// path segment, then asserting the canonicalised result still lands inside
+/// [syncFolderPath]. [_isPlainSegment] is the primary control; the
+/// canonicalised containment check is the backstop — it is checked on the
+/// resolved result, not as a string prefix on the raw input. The *returned*
+/// path is the plain join, not the canonicalised one: on Windows,
+/// `p.canonicalize` lowercases the whole path, and that is not the path
+/// this app should be writing to, storing in the mirror, or showing the
+/// user.
+String _safeChildPath(String syncFolderPath, String dirPath, String name) {
+  if (!_isPlainSegment(name)) {
+    throw UnsafeRemoteNameException(name);
+  }
+  final joined = p.join(dirPath, name);
+  _assertWithinSyncFolder(syncFolderPath, joined);
+  return joined;
+}
+
+void _assertWithinSyncFolder(String syncFolderPath, String path) {
+  final root = p.canonicalize(syncFolderPath);
+  final resolved = p.canonicalize(path);
+  if (!p.isWithin(root, resolved)) {
+    throw UnsafeRemoteNameException('resolved path escapes the sync folder: $path');
   }
 }
