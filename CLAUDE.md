@@ -214,14 +214,47 @@ already ran).
 
 If a service fails to start with that error:
 
-- **Throwaway dev database** (docker-compose): drop the `postgres-data`
-  volume (`docker-compose down -v`, or `docker volume rm` it by name) and
-  restart — `MigrateAsync()` recreates the schema from scratch.
+- **Throwaway dev database** (docker-compose): drop the Postgres volume and
+  restart — `MigrateAsync()` recreates the schema from scratch. Compose
+  prefixes volume names with the project, so it is `zdrive_postgres-data`,
+  not `postgres-data`:
+
+  ```bash
+  docker compose down && docker volume rm zdrive_postgres-data
+  ```
+
+  `docker compose down -v` also works but removes **every** volume in the
+  file, `azurite-data` included — that is every uploaded blob.
+
 - **Real database**: reconcile the schema against the current EF model by
-  hand (compare it against `dotnet ef migrations script` for that service),
-  then record each migration already reflected in the schema by inserting
-  its id into `"<schema>"."__EFMigrationsHistory"` yourself. This is a
-  manual, per-migration step — nothing in the codebase automates it.
+  hand (`dotnet ef migrations script` for that service shows what the model
+  expects), then record the migration as applied. Both statements are
+  required, in one transaction — creating the table without inserting the
+  row leaves the guard passing and the next start replaying the DDL:
+
+  ```sql
+  BEGIN;
+  CREATE TABLE IF NOT EXISTS "<schema>"."__EFMigrationsHistory" (
+      "MigrationId"    character varying(150) NOT NULL,
+      "ProductVersion" character varying(32)  NOT NULL,
+      CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+  );
+  INSERT INTO "<schema>"."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+  VALUES ('<migration id>', '8.0.11');
+  COMMIT;
+  ```
+
+  `ProductVersion` is `NOT NULL` with no default, so inserting only the id
+  fails with `23502`. `<migration id>` is the **timestamped** name, not
+  `InitialCreate` — it differs per service, and is the file name under that
+  service's `Migrations/` folder (e.g. `20260908185942_InitialCreate` for
+  AuthService). Take `ProductVersion` from the
+  `Microsoft.EntityFrameworkCore.Design` version in that service's
+  `.csproj`.
+
+  Nothing in the codebase automates this, and it is per migration: if more
+  than `InitialCreate` is already reflected in the schema, insert a row for
+  each.
 
 ### Local substitutes for Azure services
 

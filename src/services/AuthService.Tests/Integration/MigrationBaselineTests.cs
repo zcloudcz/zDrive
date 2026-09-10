@@ -56,7 +56,7 @@ public sealed class MigrationBaselineTests : IAsyncLifetime
         await using var db = CreateContext();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => db.MigrateWithBaselineAsync("auth"));
-        Assert.Contains("no __EFMigrationsHistory table", ex.Message);
+        Assert.Contains("no applied migrations recorded", ex.Message);
     }
 
     [Fact]
@@ -76,7 +76,42 @@ public sealed class MigrationBaselineTests : IAsyncLifetime
         await using var db = CreateContext();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => db.MigrateWithBaselineAsync("auth"));
-        Assert.Contains("no __EFMigrationsHistory table", ex.Message);
+        Assert.Contains("no applied migrations recorded", ex.Message);
+    }
+
+    [Fact]
+    public async Task MigrateWithBaselineAsync_TablesWithEmptyHistoryTable_ThrowsInsteadOfReplaying()
+    {
+        // What a half-finished manual recovery leaves behind: someone created
+        // the history table but the INSERT failed (ProductVersion is NOT NULL
+        // with no default). Keying the guard on the table's existence rather
+        // than on an applied migration would treat this as tracked, skip the
+        // abort, and replay the DDL into 42P07 on every start — the exact
+        // failure the guard exists to prevent.
+        await using (var oldStyleDb = CreateContext())
+        {
+            await oldStyleDb.Database.EnsureCreatedAsync();
+        }
+
+        await using (var conn = new Npgsql.NpgsqlConnection(_postgres.GetConnectionString()))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                """
+                CREATE TABLE auth."__EFMigrationsHistory" (
+                    "MigrationId" character varying(150) NOT NULL,
+                    "ProductVersion" character varying(32) NOT NULL,
+                    CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
+                );
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await using var db = CreateContext();
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.MigrateWithBaselineAsync("auth"));
+        Assert.Contains("no applied migrations recorded", ex.Message);
     }
 
     [Fact]

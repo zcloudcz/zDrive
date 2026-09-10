@@ -16,7 +16,8 @@ namespace ZDrive.Shared.Persistence;
 ///    __EFMigrationsHistory row. Migrate() would see the migration as
 ///    pending and replay its CREATE TABLE statements against a schema that
 ///    already has them, crashing with 42P07. This helper detects that
-///    case — any table present in the schema with no history table — and
+///    case — any table other than the history table present in a schema
+///    with no applied migration recorded — and
 ///    aborts with an error naming the manual recovery step, instead of
 ///    guessing whether the schema actually matches the current model. An
 ///    earlier version of this helper tried to guess from the set of table
@@ -51,7 +52,12 @@ public static class DatabaseMigrationExtensions
             await AcquireSchemaLockAsync(database.GetDbConnection(), schema);
             locked = true;
 
-            if (!await HistoryTableExistsAsync(database.GetDbConnection(), schema))
+            // Keyed on applied migrations, not on the history table existing.
+            // An empty history table is what a half-finished manual recovery
+            // leaves behind, and treating that as "tracked" would skip the
+            // guard and replay the DDL into 42P07 — the exact failure the
+            // guard exists to prevent.
+            if (!await HasAppliedMigrationsAsync(database.GetDbConnection(), schema))
             {
                 await AbortIfSchemaAlreadyHasTablesAsync(database.GetDbConnection(), schema);
             }
@@ -111,19 +117,35 @@ public static class DatabaseMigrationExtensions
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private static async Task<bool> HistoryTableExistsAsync(DbConnection connection, string schema)
+    private static async Task<bool> HasAppliedMigrationsAsync(DbConnection connection, string schema)
     {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText =
-            "SELECT 1 FROM information_schema.tables WHERE table_schema = @schema AND table_name = '__EFMigrationsHistory'";
-        AddParameter(cmd, "schema", schema);
-        return await cmd.ExecuteScalarAsync() is not null;
+        using (var exists = connection.CreateCommand())
+        {
+            exists.CommandText =
+                "SELECT 1 FROM information_schema.tables WHERE table_schema = @schema AND table_name = '__EFMigrationsHistory'";
+            AddParameter(exists, "schema", schema);
+            if (await exists.ExecuteScalarAsync() is null)
+            {
+                return false;
+            }
+        }
+
+        using var rows = connection.CreateCommand();
+        // Identifiers cannot be parameterised. `schema` is an internal
+        // constant supplied by each service, never user input; the quote
+        // doubling is belt-and-braces.
+        rows.CommandText = $"SELECT 1 FROM \"{schema.Replace("\"", "\"\"")}\".\"__EFMigrationsHistory\" LIMIT 1";
+        return await rows.ExecuteScalarAsync() is not null;
     }
 
     private static async Task AbortIfSchemaAlreadyHasTablesAsync(DbConnection connection, string schema)
     {
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema = @schema LIMIT 1";
+        // Excludes the history table itself: an empty one alongside no other
+        // tables is not an old install, and must still migrate normally.
+        cmd.CommandText =
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = @schema " +
+            "AND table_name <> '__EFMigrationsHistory' LIMIT 1";
         AddParameter(cmd, "schema", schema);
         if (await cmd.ExecuteScalarAsync() is null)
         {
@@ -131,15 +153,15 @@ public static class DatabaseMigrationExtensions
         }
 
         throw new InvalidOperationException(
-            $"Schema '{schema}' has tables but no __EFMigrationsHistory table. This could be an install from " +
+            $"Schema '{schema}' has tables but no applied migrations recorded. This could be an install from " +
             "the old EnsureCreated-based workaround, a partially-created schema, or an unrelated schema that " +
             "happens to share table names — there is no reliable way to tell without inspecting it by hand, so " +
             "refusing to guess and risk marking a migration as applied when the schema does not actually match " +
-            "it. For a throwaway dev database, drop the 'postgres-data' Docker volume (docker-compose.yml) and " +
-            "let this service recreate the schema from scratch. For a real database, reconcile its schema " +
-            "against the current EF model by hand, then record each migration that is already reflected in the " +
-            $"schema as applied by inserting its id into \"{schema}\".\"__EFMigrationsHistory\" yourself, and " +
-            "retry.");
+            "it. For a throwaway dev database, drop the Postgres volume (see docker-compose.yml) and let this " +
+            "service recreate the schema from scratch. For a real database, follow \"Recovering a database from " +
+            "before EF migrations existed\" in CLAUDE.md — it has the exact DDL, because creating the history " +
+            "table without also inserting the migration row leaves this check passing and the next start " +
+            "replaying the DDL.");
     }
 
     private static void AddParameter(DbCommand cmd, string name, string value)
