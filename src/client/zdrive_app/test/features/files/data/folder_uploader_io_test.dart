@@ -147,4 +147,63 @@ void main() {
     // a second createFile() with a name that already exists in this folder.
     verifyNever(() => repository.uploadFile(any(), any(), any(), any(), any()));
   });
+
+  test('one failed file does not abort the rest of the directory', () async {
+    await File('${tempRoot.path}/a.txt').writeAsString('a');
+    await File('${tempRoot.path}/b.txt').writeAsString('b');
+
+    when(() => repository.listChildren('root-id', page: 1, pageSize: 200))
+        .thenAnswer((_) async => paged([]));
+    // Simulates e.g. the 409 a local directory's namesake file would hit.
+    when(() => repository.uploadFile('root-id', 'a.txt', any(), 1, null))
+        .thenThrow(Exception('409 Conflict'));
+    when(() => repository.uploadFile('root-id', 'b.txt', any(), 1, null))
+        .thenAnswer((_) async => 'b-id');
+
+    await mirrorDirectory(repository, uploadDataSource, remoteDataSource, tempRoot, 'root-id');
+
+    // Without per-item isolation, a.txt's exception would propagate out of
+    // mirrorDirectory before b.txt (sorted after it) is ever reached.
+    verify(() => repository.uploadFile('root-id', 'b.txt', any(), 1, null)).called(1);
+  });
+
+  test('does not follow a symlink, so it cannot loop back into an ancestor', () async {
+    // Point a symlink inside the root back at the root itself — the exact
+    // "infinite recursion" hazard BackupRunner.cs's ReparsePoint check
+    // guards against. A sibling-target symlink instead of this
+    // self-reference could pass even without the fix, if recursion happened
+    // to terminate on its own.
+    await Link('${tempRoot.path}/loop').create(tempRoot.path);
+
+    when(() => repository.listChildren(any(), page: 1, pageSize: 200))
+        .thenAnswer((_) async => paged([]));
+
+    await mirrorDirectory(repository, uploadDataSource, remoteDataSource, tempRoot, 'root-id')
+        .timeout(const Duration(seconds: 5));
+
+    verifyNever(() => repository.createFolder(any(), 'loop'));
+  });
+
+  test('uploadDirectoryAsRoot uploads under a remote folder named after the picked directory',
+      () async {
+    // Mirrors downloadFolder, which saves a downloaded tree into
+    // `<destination>/<folder.name>` rather than scattering it directly into
+    // the destination.
+    final picked = Directory('${tempRoot.path}/Photos')..createSync();
+    await File('${picked.path}/pic.jpg').writeAsString('data');
+
+    when(() => repository.listChildren('parent-id', page: 1, pageSize: 200))
+        .thenAnswer((_) async => paged([]));
+    when(() => repository.createFolder('parent-id', 'Photos'))
+        .thenAnswer((_) async => fileItem('photos-id', 'Photos', isFolder: true));
+    when(() => repository.listChildren('photos-id', page: 1, pageSize: 200))
+        .thenAnswer((_) async => paged([]));
+    when(() => repository.uploadFile('photos-id', 'pic.jpg', any(), 4, null))
+        .thenAnswer((_) async => 'pic-id');
+
+    await uploadDirectoryAsRoot(repository, uploadDataSource, remoteDataSource, picked, 'parent-id');
+
+    verify(() => repository.createFolder('parent-id', 'Photos')).called(1);
+    verify(() => repository.uploadFile('photos-id', 'pic.jpg', any(), 4, null)).called(1);
+  });
 }

@@ -8,8 +8,8 @@ import '../domain/file_repository.dart';
 import 'file_remote_data_source.dart';
 import 'file_upload_data_source.dart';
 
-/// Lets the user pick a local directory, then mirrors it into zDrive under
-/// [parentId]. See [mirrorDirectory] for the traversal itself.
+/// Lets the user pick a local directory, then mirrors it into zDrive.
+/// See [uploadDirectoryAsRoot] for what "mirrors" means here.
 Future<void> uploadFolder(
   FileRepository repository,
   FileUploadDataSource uploadDataSource,
@@ -18,12 +18,42 @@ Future<void> uploadFolder(
 ) async {
   final rootPath = await FilePicker.platform.getDirectoryPath();
   if (rootPath == null) return; // User cancelled the picker.
-  await mirrorDirectory(
+  await uploadDirectoryAsRoot(
     repository,
     uploadDataSource,
     remoteDataSource,
     Directory(rootPath),
     parentId,
+  );
+}
+
+/// Uploads [rootDir]'s whole tree under a remote folder named after
+/// [rootDir] itself (created, or reused if one already exists) — matching
+/// [downloadFolder]/`mirrorRemoteFolder`, which saves into
+/// `<destination>/<folder.name>`. Without recreating that name here,
+/// "upload folder" on e.g. `Photos` would scatter its children directly
+/// into [remoteParentId] instead of round-tripping as `Photos` again.
+Future<void> uploadDirectoryAsRoot(
+  FileRepository repository,
+  FileUploadDataSource uploadDataSource,
+  FileRemoteDataSource remoteDataSource,
+  Directory rootDir,
+  String? remoteParentId,
+) async {
+  final name = rootDir.uri.pathSegments.where((s) => s.isNotEmpty).last;
+
+  final existing = await _listExistingByName(repository, remoteParentId);
+  final match = existing[name];
+  final folderId = match != null && match.isFolder
+      ? match.id
+      : (await repository.createFolder(remoteParentId, name)).id;
+
+  await mirrorDirectory(
+    repository,
+    uploadDataSource,
+    remoteDataSource,
+    rootDir,
+    folderId,
   );
 }
 
@@ -33,6 +63,13 @@ Future<void> uploadFolder(
 /// a local subdirectory that doesn't already have one, and skip uploading a
 /// file whose remote chunk manifest already matches its local content
 /// exactly (see [_matchesRemote]) — otherwise upload it.
+///
+/// Two defences ported from BackupRunner, both load-bearing: a symlink is
+/// skipped rather than followed (it could point outside the picked root or
+/// back at an ancestor, recursing without bound), and each entry is handled
+/// in its own try/catch so one unreadable file or one 409 (e.g. a local
+/// directory whose remote namesake is a file) fails just that item instead
+/// of aborting the rest of the tree.
 ///
 /// One disclosed difference from BackupRunner: that CLI also repairs a file
 /// whose manifest matches but has no FileService version row (content
@@ -46,36 +83,54 @@ Future<void> mirrorDirectory(
   Directory dir,
   String? remoteParentId,
 ) async {
-  final existing = await _listExistingByName(repository, remoteParentId);
-
-  final entries = dir.listSync()
-    ..sort((a, b) => a.path.compareTo(b.path));
+  final Map<String, FileItem> existing;
+  final List<FileSystemEntity> entries;
+  try {
+    existing = await _listExistingByName(repository, remoteParentId);
+    entries = (await dir.list(followLinks: false).toList())
+      ..sort((a, b) => a.path.compareTo(b.path));
+  } on Exception catch (_) {
+    // Listing is one unit of work: a remote API hiccup or the directory
+    // itself becoming unreadable is a failure of this one directory, not
+    // the whole walk — mirrors BackupRunner.cs.
+    return;
+  }
 
   for (final entry in entries) {
+    if (entry is Link) continue; // See the symlink note above.
+
     final name = entry.uri.pathSegments.where((s) => s.isNotEmpty).last;
     final match = existing[name];
 
-    if (entry is Directory) {
-      final folderId = match != null && match.isFolder
-          ? match.id
-          : (await repository.createFolder(remoteParentId, name)).id;
-      await mirrorDirectory(
-        repository,
-        uploadDataSource,
-        remoteDataSource,
-        entry,
-        folderId,
-      );
-    } else if (entry is File) {
-      await _uploadFileIfNeeded(
-        repository,
-        uploadDataSource,
-        remoteDataSource,
-        entry,
-        name,
-        remoteParentId,
-        match,
-      );
+    try {
+      if (entry is Directory) {
+        final folderId = match != null && match.isFolder
+            ? match.id
+            : (await repository.createFolder(remoteParentId, name)).id;
+        await mirrorDirectory(
+          repository,
+          uploadDataSource,
+          remoteDataSource,
+          entry,
+          folderId,
+        );
+      } else if (entry is File) {
+        await _uploadFileIfNeeded(
+          repository,
+          uploadDataSource,
+          remoteDataSource,
+          entry,
+          name,
+          remoteParentId,
+          match,
+        );
+      }
+    } on Exception catch (_) {
+      // ponytail: one failed item is silently skipped, no per-item report
+      // to the user (BackupRunner has stdout/stderr for that; this
+      // interactive upload has no such channel) — add a failure summary if
+      // that visibility is needed.
+      continue;
     }
   }
 }
