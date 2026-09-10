@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -20,6 +19,21 @@ class ChunkHashMismatchException implements Exception {
   @override
   String toString() =>
       'ChunkHashMismatchException: expected $chunkHash, got $actualHash';
+}
+
+/// Thrown when the reassembled file does not match the manifest's recorded
+/// `totalSize`. Per-chunk SHA-256 only proves each chunk's own bytes are
+/// intact; it cannot catch a chunk dropped server-side, an index sent twice,
+/// or an empty chunk list — all of which change the assembled length.
+class ManifestSizeMismatchException implements Exception {
+  final int expectedSize;
+  final int actualSize;
+
+  const ManifestSizeMismatchException(this.expectedSize, this.actualSize);
+
+  @override
+  String toString() =>
+      'ManifestSizeMismatchException: manifest declared $expectedSize bytes, got $actualSize';
 }
 
 /// Thin transport over StorageService's chunked-upload API. Orchestration
@@ -79,57 +93,54 @@ class FileUploadDataSource {
     return UploadCompleteDto.fromJson(unwrapMap(response));
   }
 
-  Future<String> getDownloadUrl(String fileId) async {
+  /// Fetches the chunk manifest for a file.
+  Future<ManifestDto> getManifest(String fileId) async {
     final response = await _dio.get(
-      '${ApiConstants.storage}/download/$fileId',
+      '${ApiConstants.storage}/download/$fileId/manifest',
     );
-    return DownloadUrlDto.fromJson(unwrapMap(response)).sasUrl;
+    return ManifestDto.fromJson(unwrapMap(response));
   }
 
-  Future<String> getChunkDownloadUrl(String fileId, String chunkHash) async {
-    final response = await _dio.get(
-      '${ApiConstants.storage}/download/$fileId/chunk/$chunkHash',
+  /// Fetches one chunk's raw bytes.
+  Future<Uint8List> downloadChunkBytes(String fileId, String chunkHash) async {
+    final response = await _dio.get<List<int>>(
+      '${ApiConstants.storage}/download/$fileId/chunk/$chunkHash/bytes',
+      options: Options(responseType: ResponseType.bytes),
     );
-    return DownloadUrlDto.fromJson(unwrapMap(response)).sasUrl;
+    return Uint8List.fromList(response.data!);
   }
 
   /// Downloads a file's complete content.
   ///
   /// There is no assembled whole-file blob on the server — StorageService
   /// only ever writes content-addressed chunks (`chunks/{hash}.blk`) plus a
-  /// `manifest.json` listing them — so reassembly happens here: fetch the
-  /// manifest, fetch each chunk in manifest order, verify its SHA-256
-  /// against the hash the manifest recorded for it (chunks are content-
-  /// addressed by that hash, so a mismatch means corruption or tampering in
-  /// transit), and concatenate.
+  /// manifest listing them — so reassembly happens here: fetch the manifest,
+  /// fetch each chunk in manifest order, verify its SHA-256 against the hash
+  /// the manifest recorded for it (chunks are content-addressed by that
+  /// hash, so a mismatch means corruption or tampering in transit), and
+  /// concatenate.
   ///
-  /// [blobFetcher] performs the actual GET against a blob SAS URL. It must
-  /// NOT be [_dio] — [_dio] carries this app's Authorization header via
-  /// [AuthInterceptor], which must not be sent to Azure Blob Storage.
-  /// Defaults to a bare [Dio]; overridden in tests.
-  Future<Uint8List> downloadFile(String fileId, {Dio? blobFetcher}) async {
-    final blob = blobFetcher ?? Dio();
-
-    final manifestUrl = await getDownloadUrl(fileId);
-    final manifestResponse = await blob.get<String>(
-      manifestUrl,
-      options: Options(responseType: ResponseType.plain),
-    );
-    final manifest = ManifestDto.fromJson(
-      jsonDecode(manifestResponse.data!) as Map<String, dynamic>,
-    );
+  /// Manifest and chunks are fetched through this app's own API — StorageService
+  /// proxies the blob bytes — rather than SAS URLs straight to Azure Blob
+  /// Storage: a SAS token authorises the request but does not exempt it from
+  /// CORS, and Blob Storage CORS is not configured (and Azurite does not
+  /// support it locally either), so a browser client could never complete
+  /// that cross-origin fetch. The gateway this app already talks to has CORS
+  /// configured, so proxying works identically on every platform.
+  Future<Uint8List> downloadFile(String fileId) async {
+    final manifest = await getManifest(fileId);
 
     final chunks = [...manifest.chunks]
       ..sort((a, b) => a.index.compareTo(b.index));
 
+    // ponytail: whole file is buffered in memory (this BytesBuilder plus the
+    // copy toBytes() makes), peak ~2-3x file size. Pre-existing ceiling —
+    // upload is already whole-file/single-chunk, so nothing this client
+    // uploads is bigger than that today. Upgrade path if that changes:
+    // stream to a temp file on native, File System Access API on web.
     final builder = BytesBuilder(copy: false);
     for (final chunk in chunks) {
-      final chunkUrl = await getChunkDownloadUrl(fileId, chunk.hash);
-      final chunkResponse = await blob.get<List<int>>(
-        chunkUrl,
-        options: Options(responseType: ResponseType.bytes),
-      );
-      final bytes = Uint8List.fromList(chunkResponse.data!);
+      final bytes = await downloadChunkBytes(fileId, chunk.hash);
 
       final actualHash = sha256.convert(bytes).toString();
       if (actualHash != chunk.hash) {
@@ -137,6 +148,18 @@ class FileUploadDataSource {
       }
       builder.add(bytes);
     }
-    return builder.toBytes();
+
+    final assembled = builder.toBytes();
+    // Per-chunk hashing only proves each chunk's own bytes are intact — it
+    // says nothing about whether the *set* of chunks is complete or correct
+    // (a chunk dropped server-side, an index sent twice, an empty chunk
+    // list). Comparing the assembled length against the manifest's recorded
+    // total catches all of those; a separate index contiguity/uniqueness
+    // check would only catch the same cases the length check already does,
+    // so it is not added on top.
+    if (assembled.length != manifest.totalSize) {
+      throw ManifestSizeMismatchException(manifest.totalSize, assembled.length);
+    }
+    return assembled;
   }
 }
