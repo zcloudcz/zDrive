@@ -36,6 +36,17 @@ class ManifestSizeMismatchException implements Exception {
       'ManifestSizeMismatchException: manifest declared $expectedSize bytes, got $actualSize';
 }
 
+class ManifestChunkIndexException implements Exception {
+  final int expectedIndex;
+  final int actualIndex;
+
+  const ManifestChunkIndexException(this.expectedIndex, this.actualIndex);
+
+  @override
+  String toString() =>
+      'ManifestChunkIndexException: expected chunk index $expectedIndex, got $actualIndex';
+}
+
 /// Thin transport over StorageService's chunked-upload API. Orchestration
 /// (creating the file node, recording the version) lives in the repository.
 @lazySingleton
@@ -133,6 +144,17 @@ class FileUploadDataSource {
     final chunks = [...manifest.chunks]
       ..sort((a, b) => a.index.compareTo(b.index));
 
+    // The length check further down does not subsume this. Chunks are a fixed
+    // size, so a manifest repeating one index — [{0,A},{0,A}] — assembles to
+    // A||A at exactly the size A||B would have been, and every individual
+    // chunk still hashes correctly. Indices must therefore be exactly
+    // 0..n-1: unique, contiguous, zero-based.
+    for (var i = 0; i < chunks.length; i++) {
+      if (chunks[i].index != i) {
+        throw ManifestChunkIndexException(i, chunks[i].index);
+      }
+    }
+
     // ponytail: whole file is buffered in memory (this BytesBuilder plus the
     // copy toBytes() makes), peak ~2-3x file size. Pre-existing ceiling —
     // upload is already whole-file/single-chunk, so nothing this client
@@ -151,12 +173,9 @@ class FileUploadDataSource {
 
     final assembled = builder.toBytes();
     // Per-chunk hashing only proves each chunk's own bytes are intact — it
-    // says nothing about whether the *set* of chunks is complete or correct
-    // (a chunk dropped server-side, an index sent twice, an empty chunk
-    // list). Comparing the assembled length against the manifest's recorded
-    // total catches all of those; a separate index contiguity/uniqueness
-    // check would only catch the same cases the length check already does,
-    // so it is not added on top.
+    // says nothing about whether the *set* of chunks is complete. Together
+    // with the index check above (which catches duplicates and gaps at equal
+    // total size), this catches a truncated manifest and an empty chunk list.
     if (assembled.length != manifest.totalSize) {
       throw ManifestSizeMismatchException(manifest.totalSize, assembled.length);
     }

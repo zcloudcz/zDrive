@@ -182,6 +182,28 @@ void main() {
         throwsA(isA<ManifestSizeMismatchException>()),
       );
     });
+
+    test('throws ManifestChunkIndexException when the manifest repeats an index',
+        () async {
+      // The counterexample the length check cannot see. Chunks are a fixed
+      // size, so a manifest listing index 0 twice assembles to chunk0||chunk0
+      // at exactly the total a correct two-chunk file would have, and both
+      // copies hash correctly. Only the index check catches it — silent
+      // corruption otherwise, since the file would save and look plausible.
+      final chunk0 = Uint8List.fromList([1, 2, 3]);
+      final hash0 = sha256.convert(chunk0).toString();
+
+      stubManifest('f1', [
+        {'hash': hash0, 'index': 0},
+        {'hash': hash0, 'index': 0},
+      ], chunk0.length * 2);
+      stubChunk('f1', hash0, chunk0);
+
+      await expectLater(
+        ds.downloadFile('f1'),
+        throwsA(isA<ManifestChunkIndexException>()),
+      );
+    });
   });
 }
 

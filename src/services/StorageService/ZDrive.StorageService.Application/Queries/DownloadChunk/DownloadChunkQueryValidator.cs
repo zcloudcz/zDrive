@@ -9,6 +9,9 @@ public sealed class DownloadChunkQueryValidator : AbstractValidator<DownloadChun
         RuleFor(x => x.TenantId).NotEmpty();
         RuleFor(x => x.UserId).NotEmpty();
         RuleFor(x => x.FileId).NotEmpty();
-        RuleFor(x => x.ChunkHash).NotEmpty().MaximumLength(128);
+        // Chunks are addressed by their lowercase hex SHA-256, and the value
+        // is interpolated into a blob path — constrain it to that shape
+        // rather than to a length.
+        RuleFor(x => x.ChunkHash).Matches("^[0-9a-f]{64}$");
     }
 }
