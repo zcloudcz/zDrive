@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
+using ZDrive.ApiGateway;
 using ZDrive.Shared.Extensions;
 using ZDrive.Shared.Middleware;
 
@@ -57,26 +58,33 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// Rate limiting
+// Rate limiting — partitioned per caller (see RateLimiterPartitioning) rather
+// than one global counter: a 1 GB upload is ~256 chunk requests, and a single
+// global window meant one large transfer would 429 itself halfway through
+// and starve every other user at the same time.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    options.AddFixedWindowLimiter("fixed", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 100;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 10;
-    });
+    options.AddPolicy("fixed", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 100,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 10
+        }));
 
-    options.AddFixedWindowLimiter("auth", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 20;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 5;
-    });
+    options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 5
+        }));
 });
 
 // YARP reverse proxy
@@ -105,8 +113,11 @@ var app = builder.Build();
 // Middleware
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors();
-app.UseRateLimiter();
+// Authentication runs before the rate limiter so the partitioner above can
+// read the authenticated user's id off HttpContext.User — it would always
+// see an empty principal (and fall back to IP) if this ran the other way.
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapReverseProxy();
 

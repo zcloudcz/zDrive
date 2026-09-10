@@ -44,7 +44,13 @@ class RetryInterceptor extends Interceptor {
     ErrorInterceptorHandler handler,
   ) async {
     final statusCode = err.response?.statusCode;
-    if (statusCode != null && statusCode >= 500) {
+    // 429 is retried alongside 5xx: the gateway's rate limiter now rejects
+    // per authenticated user rather than globally (see ApiGateway/Program.cs),
+    // but a single large chunked upload can still legitimately outrun its own
+    // per-minute budget. The rejection happens in gateway middleware before
+    // the request reaches any service handler, so — unlike a 5xx, which might
+    // have partially executed — retrying it can never double-apply a write.
+    if (statusCode != null && (statusCode >= 500 || statusCode == 429)) {
       final extra = err.requestOptions.extra;
       final retryCount = (extra['retryCount'] as int?) ?? 0;
 
