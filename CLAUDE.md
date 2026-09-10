@@ -198,6 +198,31 @@ service that starts generates an RSA key pair into `~/.zdrive/dev-keys/`
 AuthService validate everywhere. Outside Development a missing
 `Jwt:RsaPrivateKeyPem` / `Jwt:RsaPublicKeyPem` is a hard startup failure.
 
+### Recovering a database from before EF migrations existed
+
+Every service migrates its own schema on startup via `MigrateWithBaselineAsync`
+(`ZDrive.Shared/Persistence/DatabaseMigrationExtensions.cs`). If a schema has
+tables but no `__EFMigrationsHistory` table, it refuses to guess whether
+that's an install from the old `EnsureCreated`-based workaround, a
+partially-created schema, or something unrelated, and aborts the service
+with an `InvalidOperationException` instead of silently marking migrations
+as applied against a schema that might not actually match them — an earlier
+version tried to baseline automatically from matching table names and could
+mark a migration as applied when the schema was actually missing one of its
+columns, which is unrecoverable (EF never revisits a migration it believes
+already ran).
+
+If a service fails to start with that error:
+
+- **Throwaway dev database** (docker-compose): drop the `postgres-data`
+  volume (`docker-compose down -v`, or `docker volume rm` it by name) and
+  restart — `MigrateAsync()` recreates the schema from scratch.
+- **Real database**: reconcile the schema against the current EF model by
+  hand (compare it against `dotnet ef migrations script` for that service),
+  then record each migration already reflected in the schema by inserting
+  its id into `"<schema>"."__EFMigrationsHistory"` yourself. This is a
+  manual, per-migration step — nothing in the codebase automates it.
+
 ### Local substitutes for Azure services
 
 The production design targets Azure managed services; local development
