@@ -36,15 +36,18 @@ void main() {
     verify(() => dio.get('/sync/devices')).called(1);
   });
 
-  test('registerDevice posts name and platform and returns the created device', () async {
-    final created = {'id': 'dev-3', 'name': 'Tablet', 'platform': 'ios'};
-    when(() => dio.post('/sync/devices', data: {'name': 'Tablet', 'platform': 'ios'}))
+  test('registerDevice posts name and the platform ordinal and returns the created device', () async {
+    final created = {'id': 'dev-3', 'name': 'Tablet', 'platform': 'iOS'};
+    // SyncService binds DevicePlatform from the raw System.Text.Json enum
+    // encoding (no JsonStringEnumConverter registered), i.e. the ordinal —
+    // 3 for iOS — not the name.
+    when(() => dio.post('/sync/devices', data: {'name': 'Tablet', 'platform': 3}))
         .thenAnswer((_) async => response(created, '/sync/devices'));
 
-    final result = await dataSource.registerDevice('Tablet', 'ios');
+    final result = await dataSource.registerDevice('Tablet', 3);
 
     expect(result['id'], 'dev-3');
-    verify(() => dio.post('/sync/devices', data: {'name': 'Tablet', 'platform': 'ios'}))
+    verify(() => dio.post('/sync/devices', data: {'name': 'Tablet', 'platform': 3}))
         .called(1);
   });
 
@@ -77,6 +80,22 @@ void main() {
 
     verify(() => dio.post('/sync/conflicts/c-1/resolve', data: {'resolution': 'keepLocal'}))
         .called(1);
+  });
+
+  test('pull posts deviceId and cursor and returns events plus the new cursor', () async {
+    final pullData = {
+      'events': [
+        {'id': 5, 'fileId': 'f-1', 'eventType': 'Create', 'metadata': null},
+      ],
+      'newCursor': 5,
+    };
+    when(() => dio.post('/sync/pull', data: {'deviceId': 'dev-1', 'cursor': 0}))
+        .thenAnswer((_) async => response(pullData, '/sync/pull'));
+
+    final pullResult = await dataSource.pull('dev-1', 0);
+
+    expect(pullResult['newCursor'], 5);
+    verify(() => dio.post('/sync/pull', data: {'deviceId': 'dev-1', 'cursor': 0})).called(1);
   });
 
   test('propagates DioException from the HTTP layer', () async {
