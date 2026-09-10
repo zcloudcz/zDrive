@@ -42,8 +42,7 @@ public static class DatabaseMigrationExtensions
             // Serializes concurrent migrators for this schema (scale-from-zero
             // burst); released automatically when the connection closes below,
             // even if this method throws.
-            await database.ExecuteSqlRawAsync(
-                "SELECT pg_advisory_lock(hashtext({0})::bigint)", schema);
+            await AcquireSchemaLockAsync(database.GetDbConnection(), schema);
 
             if (!await HistoryTableExistsAsync(database.GetDbConnection(), schema))
             {
@@ -56,6 +55,24 @@ public static class DatabaseMigrationExtensions
         {
             await database.CloseConnectionAsync();
         }
+    }
+
+    /// <remarks>
+    /// Waiting for this lock takes as long as the migration the holder is
+    /// running, which can exceed a normal command timeout — the default 30s
+    /// made a three-replica burst fail with "Timeout during reading attempt"
+    /// instead of queueing. CommandTimeout = 0 disables the client-side
+    /// timeout for the wait only; every later statement keeps the configured
+    /// one, so a genuinely stuck migration still surfaces rather than hanging
+    /// the whole startup forever.
+    /// </remarks>
+    private static async Task AcquireSchemaLockAsync(DbConnection connection, string schema)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT pg_advisory_lock(hashtext(@schema)::bigint)";
+        cmd.CommandTimeout = 0;
+        AddParameter(cmd, "schema", schema);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private static async Task<bool> HistoryTableExistsAsync(DbConnection connection, string schema)
