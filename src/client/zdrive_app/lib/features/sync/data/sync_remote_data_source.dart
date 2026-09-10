@@ -41,6 +41,24 @@ class SyncRemoteDataSource {
     return unwrapMap(response);
   }
 
+  /// Reports local changes for [deviceId] so other devices see them on
+  /// their next pull. `eventType` in each event map is the ordinal of
+  /// SyncService's `SyncEventType` enum (Create=0, Update=1, Delete=2,
+  /// Move=3, Rename=4) — not its name, for the same reason `platform` in
+  /// [registerDevice] is an ordinal: SyncService registers no
+  /// JsonStringEnumConverter. Prefer [PushSyncService.reportChange] over
+  /// calling this directly — it hides the wire format and the ordinal.
+  Future<Map<String, dynamic>> push(
+    String deviceId,
+    List<Map<String, dynamic>> events,
+  ) async {
+    final response = await _dio.post('/sync/push', data: {
+      'deviceId': deviceId,
+      'events': events,
+    });
+    return unwrapMap(response);
+  }
+
   Future<List<Map<String, dynamic>>> getConflicts() async {
     final response = await _dio.get('/sync/conflicts');
     return unwrapMapList(response);

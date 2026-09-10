@@ -53,6 +53,7 @@ import 'package:zdrive_app/features/sync/data/device_id_storage.dart' as _i918;
 import 'package:zdrive_app/features/sync/data/device_registration_service.dart'
     as _i318;
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart' as _i827;
+import 'package:zdrive_app/features/sync/data/push_sync_service.dart' as _i557;
 import 'package:zdrive_app/features/sync/data/sqflite_sync_mirror_repository.dart'
     as _i294;
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart'
@@ -140,6 +141,12 @@ extension GetItInjectableX on _i174.GetIt {
     );
     gh.lazySingleton<_i328.PhotoRepository>(
       () => _i826.PhotoRepositoryImpl(gh<_i5.PhotoRemoteDataSource>()),
+    );
+    gh.lazySingleton<_i557.PushSyncService>(
+      () => _i557.PushSyncService(
+        gh<_i319.SyncRemoteDataSource>(),
+        gh<_i318.DeviceRegistrationService>(),
+      ),
     );
     gh.lazySingleton<_i827.PullSyncService>(
       () => _i827.PullSyncService(
