@@ -131,16 +131,26 @@ class FileRepositoryImpl implements FileRepository {
     void Function(double progress)? onProgress,
   ) async {
     // Client-orchestrated upload across two services:
-    //  1. FileService — create the file node (gives us the id).
+    //  1. FileService — create the file node (gives us the id), or reuse one
+    //     an earlier attempt already created (see _findExistingFile below).
     //  2. StorageService — open a session, push chunks, complete (returns the
     //     manifest hash that identifies this content).
     //  3. FileService — record the version, binding the manifest to the file.
-    final node = await _remoteDataSource.createFile(
-      name: fileName,
-      isFolder: false,
-      parentId: parentId,
-      sizeBytes: sizeBytes,
-    );
+    //
+    // A retry after a failed upload must reuse the existing node rather than
+    // create another: the chunk upload can die mid-transfer (e.g. the rate
+    // limiter in dio_client.dart) after step 1 already succeeded, and
+    // createFile() rejects a second call with this name in this folder as a
+    // duplicate (CreateFileCommandHandler.cs) — mirrors the same-node re-
+    // upload folder_uploader_io.dart already does for its own retries.
+    final existing = await _findExistingFile(parentId, fileName);
+    final node = existing ??
+        await _remoteDataSource.createFile(
+          name: fileName,
+          isFolder: false,
+          parentId: parentId,
+          sizeBytes: sizeBytes,
+        );
 
     final complete = await _uploadDataSource.uploadFile(
       node.id,
@@ -158,6 +168,29 @@ class FileRepositoryImpl implements FileRepository {
     );
 
     return node.id;
+  }
+
+  /// A non-folder child named [fileName] directly under [parentId], if one
+  /// already exists — paginated the same way folder_uploader_io.dart's
+  /// `_listExistingByName` is, since a folder can hold more than one page.
+  Future<FileDto?> _findExistingFile(String? parentId, String fileName) async {
+    var page = 1;
+    const pageSize = 200;
+    while (true) {
+      final result = await _remoteDataSource.listChildren(
+        parentId,
+        page: page,
+        pageSize: pageSize,
+      );
+      for (final item in result.items) {
+        final dto = FileDto.fromJson(item as Map<String, dynamic>);
+        if (dto.name == fileName && !dto.isFolder) return dto;
+      }
+      if (result.items.isEmpty || page * pageSize >= result.totalCount) {
+        return null;
+      }
+      page++;
+    }
   }
 
   @override
