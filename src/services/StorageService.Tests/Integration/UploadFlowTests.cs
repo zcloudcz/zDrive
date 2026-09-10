@@ -255,8 +255,21 @@ public sealed class UploadFlowTests : IClassFixture<StorageServiceFactory>
     [Fact]
     public async Task DownloadChunk_NonExistentChunk_Returns404()
     {
-        var response = await AuthGet($"/api/v1/storage/download/{Guid.NewGuid()}/chunk/does-not-exist/bytes");
+        // A well-formed hash that simply is not stored. The placeholder this
+        // test used before ("does-not-exist") stopped reaching the handler
+        // once the hash was validated as lowercase hex SHA-256 — it was
+        // rejected as malformed, so the test asserted 404 while proving 400.
+        var missingHash = new string('a', 64);
+
+        var response = await AuthGet($"/api/v1/storage/download/{Guid.NewGuid()}/chunk/{missingHash}/bytes");
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DownloadChunk_MalformedHash_Returns400()
+    {
+        var response = await AuthGet($"/api/v1/storage/download/{Guid.NewGuid()}/chunk/does-not-exist/bytes");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     private async Task<HttpResponseMessage> AuthPost(string url, object body)
