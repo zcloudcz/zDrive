@@ -248,12 +248,6 @@ abstract class AppLocalizations {
   /// **'Upload file'**
   String get uploadFile;
 
-  /// No description provided for @downloadFolder.
-  ///
-  /// In en, this message translates to:
-  /// **'Download'**
-  String get downloadFolder;
-
   /// No description provided for @rename.
   ///
   /// In en, this message translates to:

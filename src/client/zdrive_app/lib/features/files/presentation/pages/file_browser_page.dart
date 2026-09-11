@@ -6,11 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
-import '../../data/file_remote_data_source.dart';
 import '../../data/file_saver.dart';
-import '../../data/file_upload_data_source.dart';
-import '../../data/folder_downloader.dart';
-import '../../data/folder_uploader.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
 import '../../domain/use_cases/create_folder_use_case.dart';
@@ -216,7 +212,6 @@ class _FileBrowserView extends StatelessWidget {
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
           onVersions: () => _showVersionHistoryDialog(context, file),
-          onDownloadFolder: () => _downloadFolder(context, file),
         );
       },
     );
@@ -241,7 +236,6 @@ class _FileBrowserView extends StatelessWidget {
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
           onVersions: () => _showVersionHistoryDialog(context, file),
-          onDownloadFolder: () => _downloadFolder(context, file),
         );
       },
     );
@@ -258,17 +252,6 @@ class _FileBrowserView extends StatelessWidget {
           child: const Icon(Icons.upload_file),
         ),
         const SizedBox(height: 8),
-        // Picking and walking a directory tree needs dart:io, which does not
-        // exist on web (see folder_uploader.dart) — hide the action there
-        // rather than offering a button that can only throw.
-        if (!kIsWeb) ...[
-          FloatingActionButton.small(
-            heroTag: 'uploadFolder',
-            onPressed: () => _pickAndUploadFolder(context),
-            child: const Icon(Icons.drive_folder_upload),
-          ),
-          const SizedBox(height: 8),
-        ],
         FloatingActionButton(
           heroTag: 'newFolder',
           onPressed: () => _showCreateFolderDialog(context),
@@ -432,57 +415,6 @@ class _FileBrowserView extends StatelessWidget {
     }
   }
 
-  Future<void> _pickAndUploadFolder(BuildContext context) async {
-    final l10n = AppLocalizations.of(context)!;
-    final bloc = context.read<FileBrowserBloc>();
-    final currentState = bloc.state;
-    final parentId =
-        currentState is FileBrowserLoaded ? currentState.currentFolderId : null;
-
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 12),
-            Text(l10n.uploadProgress),
-          ],
-        ),
-        duration: const Duration(minutes: 30),
-      ),
-    );
-
-    try {
-      await uploadFolder(
-        getIt<FileRepository>(),
-        getIt<FileUploadDataSource>(),
-        getIt<FileRemoteDataSource>(),
-        parentId,
-      );
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text(l10n.uploadComplete)));
-      if (context.mounted) {
-        bloc.add(const RefreshFiles());
-      }
-    } catch (e) {
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
-
-  Future<void> _downloadFolder(BuildContext context, FileItem folder) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await downloadFolder(getIt<FileRepository>(), folder);
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
 }
 
 /// Downloads [file]'s complete content (reassembled from its chunks by

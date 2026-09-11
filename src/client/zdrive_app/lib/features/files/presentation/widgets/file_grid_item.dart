@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
@@ -12,7 +11,6 @@ class FileGridItem extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onShare;
   final VoidCallback onVersions;
-  final VoidCallback onDownloadFolder;
 
   const FileGridItem({
     super.key,
@@ -22,7 +20,6 @@ class FileGridItem extends StatelessWidget {
     required this.onDelete,
     required this.onShare,
     required this.onVersions,
-    required this.onDownloadFolder,
   });
 
   @override
@@ -73,8 +70,6 @@ class FileGridItem extends StatelessWidget {
                             onShare();
                           case 'versions':
                             onVersions();
-                          case 'downloadFolder':
-                            onDownloadFolder();
                         }
                       },
                       itemBuilder: (_) => [
@@ -82,17 +77,11 @@ class FileGridItem extends StatelessWidget {
                             value: 'rename', child: Text(l10n.rename)),
                         PopupMenuItem(
                             value: 'share', child: Text(l10n.share)),
-                        // Folders have no content, so no version history —
-                        // but they do get a download action, since tapping a
-                        // folder navigates into it rather than downloading.
+                        // Folders have no content, so no version history.
                         if (!file.isFolder)
                           PopupMenuItem(
                               value: 'versions',
                               child: Text(l10n.versionHistory)),
-                        if (file.isFolder && !kIsWeb)
-                          PopupMenuItem(
-                              value: 'downloadFolder',
-                              child: Text(l10n.downloadFolder)),
                         PopupMenuItem(
                             value: 'delete', child: Text(l10n.delete)),
                       ],

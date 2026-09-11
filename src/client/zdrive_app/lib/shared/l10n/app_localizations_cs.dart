@@ -86,9 +86,6 @@ class AppLocalizationsCs extends AppLocalizations {
   String get uploadFile => 'Nahrát soubor';
 
   @override
-  String get downloadFolder => 'Stáhnout';
-
-  @override
   String get rename => 'Přejmenovat';
 
   @override
