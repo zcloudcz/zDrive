@@ -92,11 +92,12 @@ void main() {
         hasMore: hasMore,
       );
 
-  // A Delete feed item is now checked against getFile first (restored-file
-  // handling — see PullSyncService._applyDeleteEvent), so every test below
-  // that means "genuinely gone server-side" stubs getFile to 404 for that
-  // id; a test for the *other* branch (restored) stubs getFile to succeed
-  // instead.
+  // A Delete feed item is routed through _applyUpsert like every other type
+  // (F4, PR #16 review round 1), whose own getFile call is what tells a
+  // genuine delete apart from a file that is live again — so every test
+  // below that means "genuinely gone server-side" stubs getFile to 404 for
+  // that id; a test for the *other* branch (restored) stubs getFile to
+  // succeed instead.
   DioException notFound(String fileId) => DioException(
         requestOptions: RequestOptions(path: '/files/$fileId'),
         response: Response(requestOptions: RequestOptions(path: '/files/$fileId'), statusCode: 404),
@@ -217,6 +218,28 @@ void main() {
     await service.pullOnce(tempDir.path);
 
     verify(() => mockMirror.setCursor('dev-1', 9)).called(1);
+  });
+
+  test('pages past an empty page that still reports hasMore: true — an '
+      'empty page must not be mistaken for the end of the feed (F5c, PR #16 '
+      'review round 1)', () async {
+    var cursor = 0;
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => cursor);
+    when(() => mockMirror.setCursor('dev-1', any())).thenAnswer((invocation) async {
+      cursor = invocation.positionalArguments[1] as int;
+    });
+
+    // Every item on this page belongs to this device (server-side filtered
+    // out), so changes is empty even though more pages remain.
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+        .thenAnswer((_) async => page([], 5, hasMore: true));
+    when(() => mockFilesDataSource.getChanges(5, deviceId: 'dev-1'))
+        .thenAnswer((_) async => page([], 5, hasMore: false));
+
+    await service.pullOnce(tempDir.path);
+
+    verify(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).called(1);
+    verify(() => mockFilesDataSource.getChanges(5, deviceId: 'dev-1')).called(1);
   });
 
   test('a Delete feed item for a file that is live again (e.g. restored '

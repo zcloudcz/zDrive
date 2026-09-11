@@ -101,6 +101,19 @@ void main() {
         .called(1);
   });
 
+  test('renameFile sends X-Device-Id when originDeviceId is given', () async {
+    when(() => dio.put('/files/f1/rename', data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async => ok(fileJson, '/files/f1/rename'));
+
+    await ds.renameFile('f1', 'renamed.txt', originDeviceId: 'dev-1');
+
+    final captured = verify(() => dio.put('/files/f1/rename',
+            data: any(named: 'data'), options: captureAny(named: 'options')))
+        .captured
+        .single as Options;
+    expect(captured.headers, {'X-Device-Id': 'dev-1'});
+  });
+
   test('moveFile uses PUT /files/{id}/move with newParentId', () async {
     when(() => dio.put('/files/f1/move', data: any(named: 'data'), options: any(named: 'options')))
         .thenAnswer((_) async => ok(fileJson, '/files/f1/move'));
@@ -108,6 +121,19 @@ void main() {
     await ds.moveFile('f1', 'p2');
 
     verify(() => dio.put('/files/f1/move', data: {'newParentId': 'p2'}, options: null)).called(1);
+  });
+
+  test('moveFile sends X-Device-Id when originDeviceId is given', () async {
+    when(() => dio.put('/files/f1/move', data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async => ok(fileJson, '/files/f1/move'));
+
+    await ds.moveFile('f1', 'p2', originDeviceId: 'dev-1');
+
+    final captured = verify(() => dio.put('/files/f1/move',
+            data: any(named: 'data'), options: captureAny(named: 'options')))
+        .captured
+        .single as Options;
+    expect(captured.headers, {'X-Device-Id': 'dev-1'});
   });
 
   test('getChanges hits /files/changes with cursor and limit, and sends '
@@ -190,6 +216,51 @@ void main() {
     await ds.deleteFile('f1', originDeviceId: 'dev-1');
 
     final captured = verify(() => dio.delete('/files/f1', options: captureAny(named: 'options')))
+        .captured
+        .single as Options;
+    expect(captured.headers, {'X-Device-Id': 'dev-1'});
+  });
+
+  test('createFileVersion posts to /files/{id}/versions with the manifest '
+      'fields, no X-Device-Id when no originDeviceId is given', () async {
+    final versionJson = {
+      'id': 'v1',
+      'fileId': 'f1',
+      'versionNumber': 2,
+      'blobVersionId': 'hash-1',
+      'sizeBytes': 10,
+      'manifestHash': 'hash-1',
+      'createdAt': '2026-01-01T00:00:00.000Z',
+    };
+    when(() => dio.post('/files/f1/versions', data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async => ok(versionJson, '/files/f1/versions'));
+
+    await ds.createFileVersion('f1', blobVersionId: 'hash-1', sizeBytes: 10, manifestHash: 'hash-1');
+
+    verify(() => dio.post('/files/f1/versions',
+        data: {'blobVersionId': 'hash-1', 'sizeBytes': 10, 'manifestHash': 'hash-1'},
+        options: null)).called(1);
+  });
+
+  test('createFileVersion sends X-Device-Id when originDeviceId is given — '
+      'dropping this would make every device re-download its own uploaded '
+      'version on the next pull', () async {
+    when(() => dio.post('/files/f1/versions', data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async => ok(<String, dynamic>{
+              'id': 'v1',
+              'fileId': 'f1',
+              'versionNumber': 2,
+              'blobVersionId': 'hash-1',
+              'sizeBytes': 10,
+              'manifestHash': 'hash-1',
+              'createdAt': '2026-01-01T00:00:00.000Z',
+            }, '/files/f1/versions'));
+
+    await ds.createFileVersion('f1',
+        blobVersionId: 'hash-1', sizeBytes: 10, manifestHash: 'hash-1', originDeviceId: 'dev-1');
+
+    final captured = verify(() => dio.post('/files/f1/versions',
+            data: any(named: 'data'), options: captureAny(named: 'options')))
         .captured
         .single as Options;
     expect(captured.headers, {'X-Device-Id': 'dev-1'});
