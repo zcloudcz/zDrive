@@ -94,9 +94,16 @@ advancing the cursor past it forever.
 **Guarantee:** no change is skipped for any transaction that commits within
 5 seconds of inserting its `FileChange` row. This is a real limit, not just a
 defensive margin: a transaction that takes longer than 5 seconds to commit
-can still be skipped. Nothing today does — but if a future FileService
-change makes the file-mutation transaction slow (e.g. synchronous work added
-inside the same SaveChanges scope), this window needs revisiting.
+can still be skipped. Ordinary requests commit in milliseconds, but a
+delete or restore of a folder with a very large subtree (tens of thousands
+of descendants in one `SaveChanges`) can hold the insert-to-commit window
+open for seconds, and so can any synchronous work added to that transaction
+later. If that becomes realistic, the fix is to stop relying on time: read
+only up to a watermark derived from the database snapshot
+(`pg_snapshot_xmin(pg_current_snapshot())` against each row's `xmin`), which
+holds back exactly the rows of still-open transactions. Not done now because
+the snapshot is database-wide — every service's schema shares one Postgres
+server here, so one long transaction anywhere would stall every feed.
 
 If a client omits `X-Device-Id` (or a different device made the change), the
 device just re-applies a change it may already have — redundant work, not

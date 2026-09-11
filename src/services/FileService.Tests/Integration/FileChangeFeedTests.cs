@@ -18,7 +18,7 @@ namespace ZDrive.FileService.Tests.Integration;
 /// clock_timestamp() (FileChangeConfiguration), not by application code, so
 /// tests age a row past the 5-second hold-back with a raw SQL UPDATE against
 /// the real column instead of a fake clock — that is the only way to
-/// reproduce the commit-order skip bug (B1) the hold-back exists to close:
+/// reproduce the commit-order skip the hold-back exists to close:
 /// two rows need INDEPENDENT ages, which a single shared clock cannot give.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -288,7 +288,7 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task GetChanges_AllRemainingRowsAreOwnDevice_StillAdvancesCursor()
     {
-        // Review finding B2: the origin filter used to run before the cursor
+        // The origin filter used to run before the cursor
         // was fixed, so a page that turned out empty (everything left was
         // this device's own write) echoed the request cursor back — the
         // device would re-scan the same growing own-origin tail forever.
@@ -397,7 +397,7 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task GetChanges_OlderRowNotYetAged_IsNotSkippedByAYoungerHigherIdRow()
     {
-        // Reproduces review finding B1: a per-row time filter lets a
+        // Reproduces the skip a per-row time filter allowed: it lets a
         // higher-id row through while holding back a lower-id row that is
         // still "too young", and advances the cursor past the lower-id row
         // forever once its own age would otherwise have made it visible. The

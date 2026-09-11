@@ -22,19 +22,12 @@ public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQ
 
     public async Task<FileChangesPageDto> Handle(GetFileChangesQuery request, CancellationToken cancellationToken)
     {
-        // Read one row past the limit, in id order (= commit order, since
-        // ids are assigned inside SaveChanges before commit and never
-        // reused), with no per-row time filter yet — a per-row filter is
-        // exactly bug B1: a row can be young (occurred_at close to "now")
-        // while a HIGHER-id row that committed later happens to have an
-        // OLDER stamp, and a per-row filter would let that older-stamped
-        // row through while holding back the younger one behind it,
-        // advancing the cursor past the younger row forever.
-        //
-        // TooYoung is computed here, server-side, against the one Postgres
-        // clock (Npgsql translates DateTime.UtcNow to now()) rather than
-        // this handler's own process clock — two FileService instances with
-        // skewed clocks must not disagree about which rows are held back.
+        // Read one row past the limit in id order. Id order is NOT commit
+        // order (see the field comment above), which is why there is no
+        // per-row time filter here: a row can still be young while a
+        // higher-id row carries an older stamp, and a per-row filter would
+        // let the higher id through and move the cursor past the younger
+        // row for good. Where to stop is decided below, as a prefix.
 
         var rows = await _db.FileChanges
             .AsNoTracking()
@@ -44,12 +37,10 @@ public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQ
                 && c.Id > request.Cursor)
             .OrderBy(c => c.Id)
             .Take(request.Limit + 1)
-            // DateTime.UtcNow inside the expression is translated by Npgsql to
-            // the database's now(), so both sides of the comparison come from
-            // the one clock that also stamped occurred_at (clock_timestamp()).
-            // Computing the cutoff in C# would compare the app server's clock
-            // against the database's — skew between them would shrink or
-            // remove the hold-back.
+            // Must stay inside the expression: Npgsql translates DateTime.UtcNow
+            // to the database's now(), the same clock that stamped occurred_at.
+            // A cutoff computed in C# would compare the app server's clock
+            // against the database's, and skew would shrink the hold-back.
             .Select(c => new { Change = c, TooYoung = c.OccurredAt > DateTime.UtcNow.AddSeconds(-CommitOrderHoldBack.TotalSeconds) })
             .ToListAsync(cancellationToken);
 
@@ -57,8 +48,8 @@ public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQ
         // first too-young row is hit, everything after it (by id) is held
         // back too, regardless of its own timestamp. That is what actually
         // closes the skip window — a filter that let a later, older-stamped
-        // row through while dropping an earlier, younger one is the bug this
-        // replaces.
+        // row through while dropping an earlier, younger one would move the
+        // cursor past the younger row for good.
         var firstTooYoungIndex = rows.FindIndex(r => r.TooYoung);
         var prefixLength = Math.Min(
             firstTooYoungIndex >= 0 ? firstTooYoungIndex : rows.Count,
@@ -70,13 +61,12 @@ public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQ
         // of those rows are about to be dropped below for being the caller's
         // own device. An excluded row still moved the cursor past it — so a
         // caller whose only remaining rows are its own writes doesn't
-        // re-scan that same growing tail on every poll (review finding B2).
+        // re-scan that same growing tail on every poll.
         var nextCursor = prefix.Count > 0 ? prefix[^1].Id : request.Cursor;
 
-        // EF's default null semantics turn this into "<> @p OR IS NULL", so a
-        // row with no origin still passes — only an exact device match is
-        // excluded. Done in memory, after nextCursor is already fixed above,
-        // so exclusion never affects paging.
+        // In memory, after nextCursor is already fixed above, so exclusion
+        // never affects paging. A row with no origin (null) never equals a
+        // device id, so it passes — only an exact device match is excluded.
         var visible = request.RequestingDeviceId.HasValue
             ? prefix.Where(c => c.OriginDeviceId != request.RequestingDeviceId)
             : prefix;
