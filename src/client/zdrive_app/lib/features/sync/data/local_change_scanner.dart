@@ -117,10 +117,19 @@ class LocalChangeScanner {
     _failedPaths[_key(path)] = DateTime.now();
   }
 
-  /// Test-only seam for exercising a retried scan without waiting out
-  /// [_retryBackoff] (PR #12 review, F2 test b).
+  /// Clears every path's backoff — called by [SyncCoordinator.startSession]
+  /// when this machine's synced state is being handed off to a different
+  /// account: a path that failed for the previous owner (and is still
+  /// within [_retryBackoff]) must not delay the new owner's first scan of
+  /// that same path, which — from the new account's perspective — has
+  /// never even been attempted yet (PR #16 review round 2, finding 8).
+  void resetBackoff() => _failedPaths.clear();
+
+  /// Test-only alias for [resetBackoff] (PR #12 review, F2 test b) — kept
+  /// under its own name since every call site reads as "force a retry
+  /// right now", not "a new owner took over this machine".
   @visibleForTesting
-  void debugClearBackoff() => _failedPaths.clear();
+  void debugClearBackoff() => resetBackoff();
 
   /// Test-only seam for simulating a new file this scan could not hash (a
   /// locked file, antivirus holding it open) without depending on

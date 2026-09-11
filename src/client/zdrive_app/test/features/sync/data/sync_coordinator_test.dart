@@ -49,6 +49,12 @@ void main() {
     when(() => mockDeviceIdStorage.clear()).thenAnswer((_) async {});
     when(() => mockPreferences.clearSyncFolderPath()).thenAnswer((_) async {});
     when(() => mockPreferences.setSyncOwnerUserId(any())).thenAnswer((_) async {});
+    when(() => mockPreferences.setSyncFolderPath(any())).thenAnswer((_) async {});
+    // syncOnce now no-ops when its argument differs from the stored sync
+    // folder path (finding 3 below) — every test in this file that calls
+    // syncOnce(syncPath) needs the two to agree by default, unless a test
+    // is specifically exercising that mismatch.
+    when(() => mockPreferences.syncFolderPath).thenReturn(syncPath);
   });
 
   tearDown(() {
@@ -129,6 +135,7 @@ void main() {
       'otherwise silently recreate it and the scan that follows would then '
       'see every tracked item as deleted', () async {
     final missingPath = p.join(syncPath, 'does-not-exist');
+    when(() => mockPreferences.syncFolderPath).thenReturn(missingPath);
 
     await expectLater(
       coordinator.syncOnce(missingPath),
@@ -192,6 +199,10 @@ void main() {
       verify(() => mockDeviceIdStorage.clear()).called(1);
       verify(() => mockPreferences.clearSyncFolderPath()).called(1);
       verify(() => mockPreferences.setSyncOwnerUserId('user-b')).called(1);
+      // The previous owner's backoff entries are keyed by local path, not
+      // by user — must not delay user-b's first scan of a path it has
+      // never even tried (PR #16 review round 2, finding 8).
+      verify(() => mockScanner.resetBackoff()).called(1);
     });
 
     test('the same owner as the one stored clears nothing — a re-login by '
@@ -205,6 +216,7 @@ void main() {
       verifyNever(() => mockDeviceIdStorage.clear());
       verifyNever(() => mockPreferences.clearSyncFolderPath());
       verify(() => mockPreferences.setSyncOwnerUserId('user-a')).called(1);
+      verifyNever(() => mockScanner.resetBackoff());
     });
 
     test('no stored owner yet (first ever sync session on this machine) '
@@ -215,19 +227,47 @@ void main() {
 
       verifyNever(() => mockMirror.clearAll());
       verify(() => mockPreferences.setSyncOwnerUserId('user-a')).called(1);
+      verifyNever(() => mockScanner.resetBackoff());
     });
   });
 
   group('resetForNewFolder (test 6)', () {
     test('clears the mirror (rows, cursor, bootstrap state, failed events '
         '— all wiped by the same clearAll call)', () async {
-      await coordinator.resetForNewFolder();
+      await coordinator.resetForNewFolder('/new/folder');
 
       verify(() => mockMirror.clearAll()).called(1);
       // Switching folders keeps the session alive, unlike endSession —
-      // device id and chosen folder are not touched by this call.
+      // device id is not touched by this call. The chosen folder itself IS
+      // touched, though — that is the point of the next test below.
       verifyNever(() => mockDeviceIdStorage.clear());
       verifyNever(() => mockPreferences.clearSyncFolderPath());
+    });
+
+    test('persists the new path inside the same lock as the mirror clear '
+        '(PR #16 review round 2, finding 3) — saving it outside the lock '
+        'left a window where a poll tick queued behind this same mutex '
+        'could run against the old path, or the new one before the caller '
+        'actually meant it', () async {
+      await coordinator.resetForNewFolder('/new/folder');
+
+      verify(() => mockPreferences.setSyncFolderPath('/new/folder')).called(1);
+    });
+  });
+
+  group('syncOnce path guard (finding 3)', () {
+    test('no-ops instead of pulling/scanning when its argument no longer '
+        'matches the stored sync folder path — the case a poll tick hits '
+        'when it captured the path before it changed underneath it',
+        () async {
+      when(() => mockPreferences.syncFolderPath).thenReturn('/some/other/path');
+
+      final result = await coordinator.syncOnce(syncPath);
+
+      expect(result.pulled, 0);
+      expect(result.pushed, 0);
+      verifyNever(() => mockPull.pullOnce(any()));
+      verifyNever(() => mockScanner.scanOnce(any()));
     });
   });
 

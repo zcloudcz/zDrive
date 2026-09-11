@@ -95,6 +95,18 @@ class SyncCoordinator {
       // check below so it holds regardless of what is still on disk.
       return const SyncRunResult(pulled: 0, pushed: 0);
     }
+    if (_preferences.syncFolderPath != syncFolderPath) {
+      // A poll tick or watch event that captured the sync folder path
+      // before [resetForNewFolder] switched it to a different one — that
+      // switch (see its doc comment) sets the new path inside the same
+      // mutex as the mirror clear, so by the time this call gets its turn
+      // on the lock, the stored path already reflects whichever folder is
+      // actually current. A stale argument must not run pull/scan against
+      // either the old path (nothing there is tracked in the just-cleared
+      // mirror any more) or the new one under a caller who does not
+      // actually mean it (PR #16 review round 2, finding 3).
+      return const SyncRunResult(pulled: 0, pushed: 0);
+    }
     // Checked before pull runs — see SyncFolderMissingException's doc
     // comment for why pull and scan must never run against a folder that
     // is not actually there.
@@ -128,6 +140,12 @@ class SyncCoordinator {
         await _mirror.clearAll();
         await _deviceIdStorage.clear();
         await _preferences.clearSyncFolderPath();
+        // The previous owner's backoff entries are keyed by local path, not
+        // by user — if the new owner picks the same folder, a path that
+        // failed for the old account must not sit in cooldown for the new
+        // one too, delaying files it has never even tried yet (PR #16
+        // review round 2, finding 8).
+        _scanner.resetBackoff();
       }
       await _preferences.setSyncOwnerUserId(userId);
       _sessionEnded = false;
@@ -161,8 +179,23 @@ class SyncCoordinator {
   /// by [SyncBloc] when a folder is picked that differs from the one
   /// already configured. Runs inside [_withLock] for the same reason as
   /// [endSession]: never while a [syncOnce] is mid-flight.
-  Future<void> resetForNewFolder() {
-    return _withLock(() => _mirror.clearAll());
+  ///
+  /// [newPath] is persisted here, inside the same lock as the mirror clear
+  /// — not left for the caller to save afterwards. Saving it outside the
+  /// lock left a window where a poll tick queued behind this same mutex
+  /// would get its turn between the clear and the save and run
+  /// [syncOnce] against whichever path it had captured before either of
+  /// those happened: the old path (nothing under it is tracked in the
+  /// just-cleared mirror any more) or the new one, by accident, before the
+  /// caller actually meant to start syncing it (PR #16 review round 2,
+  /// finding 3). [_syncOnce]'s own check against [AppPreferences
+  /// .syncFolderPath] is what makes a tick that queued behind THIS call, and
+  /// so sees the new path already saved, a safe no-op instead.
+  Future<void> resetForNewFolder(String newPath) {
+    return _withLock(() async {
+      await _mirror.clearAll();
+      await _preferences.setSyncFolderPath(newPath);
+    });
   }
 }
 
