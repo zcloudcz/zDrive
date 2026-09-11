@@ -244,12 +244,22 @@ void main() {
       verifyNever(() => mockPreferences.clearSyncFolderPath());
     });
 
-    test('persists the new path inside the same lock as the mirror clear '
+    test('persists the new path only after the mirror clear has actually '
+        'finished, not as a fire-and-forget call made regardless of it '
         '(PR #16 review round 2, finding 3) — saving it outside the lock '
         'left a window where a poll tick queued behind this same mutex '
         'could run against the old path, or the new one before the caller '
         'actually meant it', () async {
-      await coordinator.resetForNewFolder('/new/folder');
+      final clearGate = Completer<void>();
+      when(() => mockMirror.clearAll()).thenAnswer((_) => clearGate.future);
+
+      final future = coordinator.resetForNewFolder('/new/folder');
+      // resetForNewFolder is now mid-clear, held open by clearGate.
+      await Future<void>.delayed(Duration.zero);
+      verifyNever(() => mockPreferences.setSyncFolderPath(any()));
+
+      clearGate.complete();
+      await future;
 
       verify(() => mockPreferences.setSyncFolderPath('/new/folder')).called(1);
     });
