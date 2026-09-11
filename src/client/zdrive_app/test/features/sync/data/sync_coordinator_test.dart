@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:path/path.dart' as p;
 import 'package:zdrive_app/features/sync/data/local_change_scanner.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
@@ -14,26 +16,38 @@ void main() {
   late MockPullSyncService mockPull;
   late MockLocalChangeScanner mockScanner;
   late SyncCoordinator coordinator;
+  late Directory tempDir;
+  late String syncPath;
 
   setUp(() {
     mockPull = MockPullSyncService();
     mockScanner = MockLocalChangeScanner();
     coordinator = SyncCoordinator(mockPull, mockScanner);
+    // A real, existing directory — syncOnce now checks for that before
+    // doing anything else (F3), so a bare string like '/local/sync' that
+    // does not exist on the test runner's filesystem would fail every
+    // test in this file, not just the one added for that check below.
+    tempDir = Directory.systemTemp.createTempSync('sync_coordinator_test_');
+    syncPath = tempDir.path;
+  });
+
+  tearDown(() {
+    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
   test('syncOnce pulls, then scans — pull strictly completes before the '
       'scan starts', () async {
     final callOrder = <String>[];
-    when(() => mockPull.pullOnce('/local/sync')).thenAnswer((_) async {
+    when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async {
       callOrder.add('pull');
       return 3;
     });
-    when(() => mockScanner.scanOnce('/local/sync')).thenAnswer((_) async {
+    when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async {
       callOrder.add('scan');
       return 2;
     });
 
-    final result = await coordinator.syncOnce('/local/sync');
+    final result = await coordinator.syncOnce(syncPath);
 
     expect(callOrder, ['pull', 'scan']);
     expect(result.pulled, 3);
@@ -45,19 +59,19 @@ void main() {
     final gate = Completer<int>();
     var pullCalls = 0;
     var scanCalls = 0;
-    when(() => mockPull.pullOnce('/local/sync')).thenAnswer((_) async {
+    when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async {
       pullCalls++;
       // Held open until the test releases it, so both syncOnce calls are
       // guaranteed to overlap before either completes.
       return gate.future;
     });
-    when(() => mockScanner.scanOnce('/local/sync')).thenAnswer((_) async {
+    when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async {
       scanCalls++;
       return 0;
     });
 
-    final first = coordinator.syncOnce('/local/sync');
-    final second = coordinator.syncOnce('/local/sync');
+    final first = coordinator.syncOnce(syncPath);
+    final second = coordinator.syncOnce(syncPath);
     gate.complete(1);
     final results = await Future.wait([first, second]);
 
@@ -73,13 +87,13 @@ void main() {
       'writing', () async {
     final pullGate = Completer<int>();
     var scanStarted = false;
-    when(() => mockPull.pullOnce('/local/sync')).thenAnswer((_) => pullGate.future);
-    when(() => mockScanner.scanOnce('/local/sync')).thenAnswer((_) async {
+    when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) => pullGate.future);
+    when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async {
       scanStarted = true;
       return 0;
     });
 
-    final run = coordinator.syncOnce('/local/sync');
+    final run = coordinator.syncOnce(syncPath);
     // Give the event loop a chance to run anything eager — there should be
     // nothing for the scan to do yet, since pull has not resolved.
     await Future<void>.delayed(Duration.zero);
@@ -88,5 +102,20 @@ void main() {
     pullGate.complete(0);
     await run;
     expect(scanStarted, isTrue);
+  });
+
+  test('syncOnce throws SyncFolderMissingException and runs neither pull '
+      'nor scan when the sync folder itself is gone (F3) — pull would '
+      'otherwise silently recreate it and the scan that follows would then '
+      'see every tracked item as deleted', () async {
+    final missingPath = p.join(syncPath, 'does-not-exist');
+
+    await expectLater(
+      coordinator.syncOnce(missingPath),
+      throwsA(isA<SyncFolderMissingException>()),
+    );
+
+    verifyNever(() => mockPull.pullOnce(any()));
+    verifyNever(() => mockScanner.scanOnce(any()));
   });
 }

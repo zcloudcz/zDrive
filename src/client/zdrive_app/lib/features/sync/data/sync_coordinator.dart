@@ -1,7 +1,27 @@
+import 'dart:io';
+
 import 'package:injectable/injectable.dart';
 
 import 'local_change_scanner.dart';
 import 'pull_sync_service.dart';
+
+/// Thrown when the designated sync folder no longer exists on disk (the
+/// user renamed or deleted it since it was chosen — the watcher and poll
+/// have no way to notice that asynchronously, so this is caught on the
+/// very next [SyncCoordinator.syncOnce] instead). Must be checked *before*
+/// pull runs: [Directory.create] deep inside pull would silently recreate
+/// the folder as soon as it needs to write anything into it, and the scan
+/// that follows would then find every tracked item "missing" from that
+/// freshly-empty folder and delete the whole account's content (PR #12
+/// review round 1, F3). Surfaces through SyncBloc's existing pull-error
+/// path (`e.toString()` shown as-is), so no new UI string is needed.
+class SyncFolderMissingException implements Exception {
+  final String path;
+  const SyncFolderMissingException(this.path);
+
+  @override
+  String toString() => 'sync folder is missing: $path';
+}
 
 /// Runs one full sync cycle: pull, then scan-and-push, never overlapping —
 /// pull and push share this single lock instead of each guarding itself
@@ -29,6 +49,12 @@ class SyncCoordinator {
   }
 
   Future<SyncRunResult> _syncOnce(String syncFolderPath) async {
+    // Checked before pull runs — see SyncFolderMissingException's doc
+    // comment for why pull and scan must never run against a folder that
+    // is not actually there.
+    if (!await Directory(syncFolderPath).exists()) {
+      throw SyncFolderMissingException(syncFolderPath);
+    }
     final pulled = await _pull.pullOnce(syncFolderPath);
     final pushed = await _scanner.scanOnce(syncFolderPath);
     return SyncRunResult(pulled: pulled, pushed: pushed);
