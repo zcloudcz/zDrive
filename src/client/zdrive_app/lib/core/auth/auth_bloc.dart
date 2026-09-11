@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -126,6 +128,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       emit(Authenticated(user));
     } catch (_) {
       await _tokenStorage.clear();
+      // A failed session check is a logout too — the stored tokens turned
+      // out to be no good — so sync must stop here as well, not only from
+      // the logout button (PR #16 review round 1, F3).
+      await _runBeforeLogout();
       emit(const Unauthenticated());
     }
   }
@@ -167,8 +173,21 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     LogoutRequested event,
     Emitter<AuthState> emit,
   ) async {
-    await _beforeLogout?.call();
+    await _runBeforeLogout();
     await _authRepository.logout();
     emit(const Unauthenticated());
+  }
+
+  /// Runs [_beforeLogout], if one was given, swallowing any failure — a
+  /// storage or sqlite error there (PR #16 review round 1, non-blocking
+  /// note) must not stop the user from actually logging out. Shared by
+  /// every path that moves this bloc from an authenticated session to
+  /// [Unauthenticated], not just the logout button.
+  Future<void> _runBeforeLogout() async {
+    try {
+      await _beforeLogout?.call();
+    } catch (e, st) {
+      log('beforeLogout failed; logging out anyway', error: e, stackTrace: st, name: 'AuthBloc');
+    }
   }
 }

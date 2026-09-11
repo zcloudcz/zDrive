@@ -48,6 +48,7 @@ void main() {
     when(() => mockMirror.clearAll()).thenAnswer((_) async {});
     when(() => mockDeviceIdStorage.clear()).thenAnswer((_) async {});
     when(() => mockPreferences.clearSyncFolderPath()).thenAnswer((_) async {});
+    when(() => mockPreferences.setSyncOwnerUserId(any())).thenAnswer((_) async {});
   });
 
   tearDown(() {
@@ -138,14 +139,16 @@ void main() {
     verifyNever(() => mockScanner.scanOnce(any()));
   });
 
-  group('endSession (test 5)', () {
-    test('clears the mirror, the device id, and the chosen sync folder',
-        () async {
+  group('endSession (F3, PR #16 review round 1)', () {
+    test('only stops syncing — it no longer clears the mirror, device id, '
+        'or chosen sync folder. That moved to startSession\'s owner check, '
+        'so the same account signing back in keeps its mirror instead of '
+        're-uploading every local file as a new version', () async {
       await coordinator.endSession();
 
-      verify(() => mockMirror.clearAll()).called(1);
-      verify(() => mockDeviceIdStorage.clear()).called(1);
-      verify(() => mockPreferences.clearSyncFolderPath()).called(1);
+      verifyNever(() => mockMirror.clearAll());
+      verifyNever(() => mockDeviceIdStorage.clear());
+      verifyNever(() => mockPreferences.clearSyncFolderPath());
     });
 
     test('syncOnce is a no-op after endSession, until startSession '
@@ -155,6 +158,7 @@ void main() {
       // unstubbed mock.
       when(() => mockPull.pullOnce(any())).thenAnswer((_) async => 1);
       when(() => mockScanner.scanOnce(any())).thenAnswer((_) async => 1);
+      when(() => mockPreferences.syncOwnerUserId).thenReturn('user-a');
       await coordinator.endSession();
 
       final result = await coordinator.syncOnce(syncPath);
@@ -164,7 +168,7 @@ void main() {
       verifyNever(() => mockPull.pullOnce(any()));
       verifyNever(() => mockScanner.scanOnce(any()));
 
-      coordinator.startSession();
+      await coordinator.startSession('user-a');
       when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 1);
       when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 1);
 
@@ -172,6 +176,45 @@ void main() {
 
       expect(afterRestart.pulled, 1);
       expect(afterRestart.pushed, 1);
+    });
+  });
+
+  group('startSession (F3, PR #16 review round 1)', () {
+    test('a different owner than the one stored clears the mirror, device '
+        'id, and chosen folder before storing the new owner — this is what '
+        'protects the next user no matter how the previous session ended '
+        '(logout button, expired refresh token, killed app)', () async {
+      when(() => mockPreferences.syncOwnerUserId).thenReturn('user-a');
+
+      await coordinator.startSession('user-b');
+
+      verify(() => mockMirror.clearAll()).called(1);
+      verify(() => mockDeviceIdStorage.clear()).called(1);
+      verify(() => mockPreferences.clearSyncFolderPath()).called(1);
+      verify(() => mockPreferences.setSyncOwnerUserId('user-b')).called(1);
+    });
+
+    test('the same owner as the one stored clears nothing — a re-login by '
+        'the same account must not wipe its own mirror and re-upload every '
+        'local file as a new version', () async {
+      when(() => mockPreferences.syncOwnerUserId).thenReturn('user-a');
+
+      await coordinator.startSession('user-a');
+
+      verifyNever(() => mockMirror.clearAll());
+      verifyNever(() => mockDeviceIdStorage.clear());
+      verifyNever(() => mockPreferences.clearSyncFolderPath());
+      verify(() => mockPreferences.setSyncOwnerUserId('user-a')).called(1);
+    });
+
+    test('no stored owner yet (first ever sync session on this machine) '
+        'clears nothing', () async {
+      when(() => mockPreferences.syncOwnerUserId).thenReturn(null);
+
+      await coordinator.startSession('user-a');
+
+      verifyNever(() => mockMirror.clearAll());
+      verify(() => mockPreferences.setSyncOwnerUserId('user-a')).called(1);
     });
   });
 
@@ -207,14 +250,18 @@ void main() {
       // in-flight syncOnce.
       await Future<void>.delayed(Duration.zero);
       expect(endSessionCompleted, isFalse);
-      verifyNever(() => mockMirror.clearAll());
 
       pullGate.complete(0);
       await syncFuture;
       await endSessionFuture;
 
       expect(endSessionCompleted, isTrue);
-      verify(() => mockMirror.clearAll()).called(1);
+      // Proof endSession actually ran (not just that its Future happened to
+      // resolve after syncFuture's): syncOnce is now a no-op, which only
+      // holds once _sessionEnded has actually been set.
+      final afterEndSession = await coordinator.syncOnce(syncPath);
+      expect(afterEndSession.pulled, 0);
+      expect(afterEndSession.pushed, 0);
     });
   });
 }

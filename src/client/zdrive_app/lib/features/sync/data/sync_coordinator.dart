@@ -29,8 +29,9 @@ class SyncFolderMissingException implements Exception {
 
 /// Runs one full sync cycle: pull, then scan-and-push, never overlapping —
 /// pull and push share this single lock instead of each guarding itself
-/// independently. The same lock also serializes [endSession] and
-/// [resetForNewFolder] against [syncOnce] — see [_withLock]'s doc comment.
+/// independently. The same lock also serializes [startSession], [endSession]
+/// and [resetForNewFolder] against [syncOnce] — see [_withLock]'s doc
+/// comment.
 ///
 /// WHY strictly sequential under one guard, not just "not concurrent with
 /// itself": a scan running *between* pull writing a file to disk and pull
@@ -53,14 +54,14 @@ class SyncCoordinator {
   Future<SyncRunResult>? _inFlight;
 
   // A small async mutex: every critical section below (syncOnce's own body,
-  // endSession, resetForNewFolder) chains onto this future in call order,
-  // one at a time. Not a package dependency — the need is this narrow: no
-  // reentrancy, no timeout, just "wait your turn". WHY this is needed on top
-  // of syncOnce's own single-flight [_inFlight] dedupe below: that dedupe
-  // only protects syncOnce against a second concurrent syncOnce call: it
-  // does nothing to stop [endSession] from running while a syncOnce is
-  // mid-pull, which would clear the mirror out from under a write still in
-  // progress — see [endSession]'s doc comment.
+  // startSession, endSession, resetForNewFolder) chains onto this future in
+  // call order, one at a time. Not a package dependency — the need is this
+  // narrow: no reentrancy, no timeout, just "wait your turn". WHY this is
+  // needed on top of syncOnce's own single-flight [_inFlight] dedupe below:
+  // that dedupe only protects syncOnce against a second concurrent syncOnce
+  // call: it does nothing to stop [startSession] from clearing the mirror
+  // while a syncOnce is mid-pull, which would pull the ground out from under
+  // a write still in progress — see [startSession]'s doc comment.
   Future<void> _mutex = Future.value();
 
   Future<T> _withLock<T>(Future<T> Function() body) {
@@ -106,36 +107,53 @@ class SyncCoordinator {
   }
 
   /// Re-enables syncing after [endSession] — called by [SyncBloc] on
-  /// `LoadSyncStatus`, i.e. once the app has a fresh, authenticated shell to
-  /// sync for.
-  void startSession() {
-    _sessionEnded = false;
+  /// `LoadSyncStatus` with the id of whichever user is now authenticated.
+  ///
+  /// Also the one place that decides whether this machine's mirror, device
+  /// id, and chosen folder still belong to [userId]: if the stored owner is
+  /// someone else, everything is cleared before this session is allowed to
+  /// sync. Checking here — not at logout — is what makes this hold
+  /// regardless of *how* the previous session ended (the logout button, an
+  /// expired refresh token, a killed app process): every one of those paths
+  /// leaves this machine's stored owner pointing at the account that just
+  /// left, and this check runs unconditionally when the next login arrives,
+  /// so it does not depend on every possible ending path having its own
+  /// cleanup call. The same user signing back in clears nothing — its
+  /// mirror, device id and folder are exactly what let that re-login skip
+  /// re-uploading every local file as a new version.
+  Future<void> startSession(String userId) {
+    return _withLock(() async {
+      final storedOwner = _preferences.syncOwnerUserId;
+      if (storedOwner != null && storedOwner != userId) {
+        await _mirror.clearAll();
+        await _deviceIdStorage.clear();
+        await _preferences.clearSyncFolderPath();
+      }
+      await _preferences.setSyncOwnerUserId(userId);
+      _sessionEnded = false;
+    });
   }
 
-  /// Clears everything this machine remembers about the account that is
-  /// logging out — the mirror, the device id, and the chosen sync folder —
-  /// then blocks [syncOnce] until [startSession] re-enables it.
+  /// Stops syncing for the session that is ending — the logout button, or
+  /// any other path that calls it. Does *not* clear the mirror, device id,
+  /// or chosen sync folder any more: that responsibility moved to
+  /// [startSession]'s owner check (see its doc comment for why), so the
+  /// same account logging back in on this machine is not made to
+  /// re-upload every local file as a new version just because it logged
+  /// out first.
   ///
-  /// WHY the flag, not just clearing state and trusting nothing calls
-  /// syncOnce again: [SyncBloc]'s poll timer and folder watcher keep firing
-  /// until the app shell that owns them is actually disposed, which happens
-  /// asynchronously after `AuthBloc` emits `Unauthenticated` — a tick in
-  /// that window would otherwise register a fresh device and re-bootstrap
-  /// the just-cleared folder from FileService before the shell is gone, and
-  /// the next account that logs in on this machine would inherit that
-  /// mirror and folder: its first scan would then upload the previous
-  /// user's files into the new account.
+  /// WHY the flag, not just trusting nothing calls syncOnce again:
+  /// [SyncBloc]'s poll timer and folder watcher keep firing until the app
+  /// shell that owns them is actually disposed, which happens asynchronously
+  /// after `AuthBloc` emits `Unauthenticated` — a tick in that window would
+  /// otherwise keep syncing this account's folder for a few more cycles
+  /// after the user asked to log out.
   ///
   /// Runs inside [_withLock] so it can never run while a [syncOnce] is
-  /// mid-flight — clearing the mirror out from under a pull or scan that is
-  /// still writing to it would leave that write's own mirror row pointing
-  /// at data that no longer exists.
+  /// mid-flight.
   Future<void> endSession() {
     return _withLock(() async {
       _sessionEnded = true;
-      await _mirror.clearAll();
-      await _deviceIdStorage.clear();
-      await _preferences.clearSyncFolderPath();
     });
   }
 

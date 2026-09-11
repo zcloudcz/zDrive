@@ -69,6 +69,30 @@ void main() {
       act: (bloc) => bloc.add(const CheckAuthStatus()),
       expect: () => [const Unauthenticated()],
     );
+
+    test('a failed session check (tokens exist but getCurrentUser throws) '
+        'also runs beforeLogout — not just the logout button — so sync '
+        'stops promptly on that path too (PR #16 review round 1, F3)',
+        () async {
+      when(() => mockTokenStorage.hasTokens).thenAnswer((_) async => true);
+      when(() => mockAuthRepository.getCurrentUser())
+          .thenThrow(Exception('unauthorized'));
+      when(() => mockTokenStorage.clear()).thenAnswer((_) async {});
+      var beforeLogoutCalled = false;
+      final bloc = AuthBloc(
+        authRepository: mockAuthRepository,
+        tokenStorage: mockTokenStorage,
+        beforeLogout: () async {
+          beforeLogoutCalled = true;
+        },
+      );
+      addTearDown(bloc.close);
+
+      bloc.add(const CheckAuthStatus());
+      await bloc.stream.firstWhere((s) => s is Unauthenticated);
+
+      expect(beforeLogoutCalled, isTrue);
+    });
   });
 
   group('LoginRequested', () {
@@ -174,5 +198,22 @@ void main() {
       act: (bloc) => bloc.add(const LogoutRequested()),
       expect: () => [const Unauthenticated()],
     );
+
+    test('still logs out when beforeLogout throws — a storage/sqlite '
+        'failure there must not block the user from actually logging out '
+        '(PR #16 review round 1, non-blocking note)', () async {
+      when(() => mockAuthRepository.logout()).thenAnswer((_) async {});
+      final bloc = AuthBloc(
+        authRepository: mockAuthRepository,
+        tokenStorage: mockTokenStorage,
+        beforeLogout: () async => throw Exception('sqlite locked'),
+      );
+      addTearDown(bloc.close);
+
+      bloc.add(const LogoutRequested());
+      await bloc.stream.firstWhere((s) => s is Unauthenticated);
+
+      verify(() => mockAuthRepository.logout()).called(1);
+    });
   });
 }
