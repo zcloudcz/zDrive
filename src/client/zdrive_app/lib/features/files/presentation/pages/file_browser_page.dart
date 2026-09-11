@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -350,11 +349,21 @@ class _FileBrowserView extends StatelessWidget {
 
   Future<void> _pickAndUploadFile(BuildContext context) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await FilePicker.platform.pickFiles(withData: true);
+    // withData: false + withReadStream: true streams the file from disk (or,
+    // on web, from the browser's File object in 1 MB windows) instead of
+    // loading it whole into memory — verified against file_picker 8.3.7's
+    // source for every platform this app targets (Windows/macOS/Linux via
+    // dart:io File.openRead(), web via FileReader + Blob.slice()); the
+    // package docs don't spell this out.
+    final result = await FilePicker.platform.pickFiles(
+      withData: false,
+      withReadStream: true,
+    );
     if (result == null || result.files.isEmpty) return;
 
     final pickedFile = result.files.first;
-    if (pickedFile.bytes == null) return;
+    final stream = pickedFile.readStream;
+    if (stream == null) return;
 
     if (!context.mounted) return;
 
@@ -388,7 +397,8 @@ class _FileBrowserView extends StatelessWidget {
       await uploadUseCase(
         parentId,
         pickedFile.name,
-        pickedFile.bytes!,
+        stream,
+        pickedFile.size,
       );
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(

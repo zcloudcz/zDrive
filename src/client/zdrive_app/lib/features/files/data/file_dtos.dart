@@ -10,6 +10,14 @@ class FileDto {
   final int? sizeBytes;
   final String? mimeType;
   final String? parentId;
+  // Null when no upload has ever completed for this node — but that is also
+  // true while an upload into it is still running, from this device or
+  // another, so it is only a necessary condition for reuse on a 409 from
+  // createFile, not sufficient on its own. _createOrReuseNode
+  // (file_repository_impl.dart) additionally requires the node's id to be in
+  // this app instance's own _failedUploadNodeIds before treating it as an
+  // orphan safe to reuse.
+  final String? manifestHash;
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isDeleted;
@@ -21,6 +29,7 @@ class FileDto {
     this.sizeBytes,
     this.mimeType,
     this.parentId,
+    this.manifestHash,
     required this.createdAt,
     required this.updatedAt,
     this.isDeleted = false,

@@ -36,6 +36,15 @@ class RetryInterceptor extends Interceptor {
   final Dio dio;
   final int maxRetries;
 
+  // A cap on how long a Retry-After header can pause a request. Nothing
+  // between here and the gateway is trusted to send a sane value — a
+  // misconfigured or hostile 429 from ingress/a WAF/a CDN could otherwise
+  // park an upload for as long as it likes, with no cancel path and no
+  // receiveTimeout (that only covers time waiting on a response, not the
+  // delay between requests). 120s is 2x the gateway's 1-minute fixed window,
+  // so it never cuts off a legitimate wait.
+  static const _maxRetryAfter = Duration(seconds: 120);
+
   RetryInterceptor({required this.dio, this.maxRetries = 3});
 
   @override
@@ -44,12 +53,26 @@ class RetryInterceptor extends Interceptor {
     ErrorInterceptorHandler handler,
   ) async {
     final statusCode = err.response?.statusCode;
-    if (statusCode != null && statusCode >= 500) {
+    // 429 is retried alongside 5xx: the gateway's rate limiter now rejects
+    // per authenticated user rather than globally (see ApiGateway/Program.cs),
+    // but a single large chunked upload can still legitimately outrun its own
+    // per-minute budget. The rejection happens in gateway middleware before
+    // the request reaches any service handler, so — unlike a 5xx, which might
+    // have partially executed — retrying it can never double-apply a write.
+    if (statusCode != null && (statusCode >= 500 || statusCode == 429)) {
       final extra = err.requestOptions.extra;
       final retryCount = (extra['retryCount'] as int?) ?? 0;
 
       if (retryCount < maxRetries) {
-        final delay = Duration(milliseconds: 200 * (1 << retryCount));
+        // For a 429, the gateway names the exact wait via Retry-After (its
+        // fixed window, e.g. 60s, is longer than any fixed backoff schedule
+        // could safely assume) — honour it instead of guessing. Fall back to
+        // the exponential schedule for a 429 with no header, and use it
+        // unconditionally for 5xx.
+        final delay = statusCode == 429
+            ? retryAfterDelay(err.response) ??
+                Duration(milliseconds: 200 * (1 << retryCount))
+            : Duration(milliseconds: 200 * (1 << retryCount));
         await Future<void>.delayed(delay);
 
         err.requestOptions.extra['retryCount'] = retryCount + 1;
@@ -62,5 +85,17 @@ class RetryInterceptor extends Interceptor {
       }
     }
     return handler.next(err);
+  }
+
+  // Not private so the ceiling can be asserted directly without waiting out
+  // a real 120s delay in a test.
+  @visibleForTesting
+  Duration? retryAfterDelay(Response<dynamic>? response) {
+    final header = response?.headers.value('retry-after');
+    if (header == null) return null;
+    final seconds = int.tryParse(header);
+    if (seconds == null) return null;
+    final delay = Duration(seconds: seconds);
+    return delay > _maxRetryAfter ? _maxRetryAfter : delay;
   }
 }
