@@ -52,26 +52,26 @@ class FileRepositoryImpl implements FileRepository {
   }
 
   @override
-  Future<FileItem> createFolder(String? parentId, String name) async {
-    final dto = await _remoteDataSource.createFolder(parentId, name);
+  Future<FileItem> createFolder(String? parentId, String name, {String? originDeviceId}) async {
+    final dto = await _remoteDataSource.createFolder(parentId, name, originDeviceId: originDeviceId);
     return _mapDtoToFileItem(dto);
   }
 
   @override
-  Future<FileItem> renameFile(String id, String newName) async {
-    final dto = await _remoteDataSource.renameFile(id, newName);
+  Future<FileItem> renameFile(String id, String newName, {String? originDeviceId}) async {
+    final dto = await _remoteDataSource.renameFile(id, newName, originDeviceId: originDeviceId);
     return _mapDtoToFileItem(dto);
   }
 
   @override
-  Future<FileItem> moveFile(String id, String? newParentId) async {
-    final dto = await _remoteDataSource.moveFile(id, newParentId);
+  Future<FileItem> moveFile(String id, String? newParentId, {String? originDeviceId}) async {
+    final dto = await _remoteDataSource.moveFile(id, newParentId, originDeviceId: originDeviceId);
     return _mapDtoToFileItem(dto);
   }
 
   @override
-  Future<void> deleteFile(String id) async {
-    await _remoteDataSource.deleteFile(id);
+  Future<void> deleteFile(String id, {String? originDeviceId}) async {
+    await _remoteDataSource.deleteFile(id, originDeviceId: originDeviceId);
   }
 
   @override
@@ -143,18 +143,19 @@ class FileRepositoryImpl implements FileRepository {
     String fileName,
     Stream<List<int>> content,
     int sizeBytes,
-    void Function(double progress)? onProgress,
-  ) async {
+    void Function(double progress)? onProgress, {
+    String? originDeviceId,
+  }) async {
     // Client-orchestrated upload across two services:
     //  1. FileService — create the file node (gives us the id), or reuse one
     //     an earlier attempt already created (see _createOrReuseNode below).
     //  2. StorageService — open a session, push chunks, complete (returns the
     //     manifest hash that identifies this content).
     //  3. FileService — record the version, binding the manifest to the file.
-    final node = await _createOrReuseNode(parentId, fileName, sizeBytes);
+    final node = await _createOrReuseNode(parentId, fileName, sizeBytes, originDeviceId);
 
     try {
-      await _uploadIntoNode(node.id, fileName, content, sizeBytes, onProgress);
+      await _uploadIntoNode(node.id, fileName, content, sizeBytes, onProgress, originDeviceId);
       _failedUploadNodeIds.remove(node.id);
       return node.id;
     } catch (_) {
@@ -171,23 +172,28 @@ class FileRepositoryImpl implements FileRepository {
     String fileId,
     String fileName,
     Stream<List<int>> content,
-    int sizeBytes,
-  ) {
+    int sizeBytes, {
+    String? originDeviceId,
+  }) {
     // The second half of uploadFile only: no node creation, so this never
     // touches _createOrReuseNode or _failedUploadNodeIds — fileId is already
     // an existing node.
-    return _uploadIntoNode(fileId, fileName, content, sizeBytes, null);
+    return _uploadIntoNode(fileId, fileName, content, sizeBytes, null, originDeviceId);
   }
 
   /// Chunk-uploads [content] into the already-existing node [nodeId] and
   /// records the resulting version — shared by [uploadFile] (after creating
   /// the node) and [uploadNewVersion] (which skips node creation entirely).
+  /// [originDeviceId] only tags the FileService write below
+  /// ([FileRemoteDataSource.createFileVersion]) — the StorageService chunk
+  /// upload itself has no change-feed row of its own to exclude from.
   Future<void> _uploadIntoNode(
     String nodeId,
     String fileName,
     Stream<List<int>> content,
     int sizeBytes,
     void Function(double progress)? onProgress,
+    String? originDeviceId,
   ) async {
     final complete = await _uploadDataSource.uploadFile(
       nodeId,
@@ -202,6 +208,7 @@ class FileRepositoryImpl implements FileRepository {
       blobVersionId: complete.manifestHash,
       sizeBytes: complete.totalSize,
       manifestHash: complete.manifestHash,
+      originDeviceId: originDeviceId,
     );
   }
 
@@ -235,6 +242,7 @@ class FileRepositoryImpl implements FileRepository {
     String? parentId,
     String fileName,
     int sizeBytes,
+    String? originDeviceId,
   ) async {
     try {
       return await _remoteDataSource.createFile(
@@ -242,6 +250,7 @@ class FileRepositoryImpl implements FileRepository {
         isFolder: false,
         parentId: parentId,
         sizeBytes: sizeBytes,
+        originDeviceId: originDeviceId,
       );
     } on DioException catch (e) {
       if (e.response?.statusCode != 409) rethrow;

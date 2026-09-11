@@ -6,19 +6,14 @@ import 'package:dio/dio.dart';
 import 'package:injectable/injectable.dart';
 import 'package:path/path.dart' as p;
 
+import '../../files/data/file_dtos.dart';
+import '../../files/data/file_remote_data_source.dart';
 import '../../files/domain/file_item.dart';
 import '../../files/domain/file_repository.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
 import 'device_registration_service.dart';
 import 'sync_name_rules.dart';
-import 'sync_remote_data_source.dart';
-
-/// The server returns at most this many events per pull
-/// (`PullChangesQueryHandler.MaxEventsPerPull`) — a full page means there may
-/// be more, so [pullOnce] keeps polling until a short page tells it the tail
-/// is reached.
-const _maxEventsPerPage = 500;
 
 /// Thrown when a server-supplied name cannot become a safe local path —
 /// either it is not a single plain path segment (a drive letter, a UNC
@@ -79,7 +74,7 @@ class LocalConflictException implements Exception {
 /// those usually do resolve on a later retry.
 @lazySingleton
 class PullSyncService {
-  final SyncRemoteDataSource _syncDataSource;
+  final FileRemoteDataSource _filesDataSource;
   final DeviceRegistrationService _deviceRegistration;
   final SyncMirrorRepository _mirror;
   final FileRepository _fileRepository;
@@ -92,7 +87,7 @@ class PullSyncService {
   final bool _isWindows;
 
   PullSyncService(
-    this._syncDataSource,
+    this._filesDataSource,
     this._deviceRegistration,
     this._mirror,
     this._fileRepository, {
@@ -151,16 +146,15 @@ class PullSyncService {
     var applied = 0;
     while (true) {
       final cursor = await _mirror.getCursor(deviceId);
-      final page = await _syncDataSource.pull(deviceId, cursor);
-      final events = (page['events'] as List).cast<Map<String, dynamic>>();
-      if (events.isEmpty) break;
+      final page = await _filesDataSource.getChanges(cursor, deviceId: deviceId);
+      if (page.changes.isEmpty) break;
 
-      for (final event in events) {
-        await _applyEvent(event, deviceId, syncFolderPath);
+      for (final change in page.changes) {
+        await _applyEvent(change, deviceId, syncFolderPath);
         applied++;
       }
 
-      if (events.length < _maxEventsPerPage) break;
+      if (!page.hasMore) break;
     }
 
     // Runs after the event-log drain above, not before: that way the
@@ -223,17 +217,16 @@ class PullSyncService {
   }
 
   Future<void> _applyEvent(
-    Map<String, dynamic> event,
+    ChangeFeedItemDto change,
     String deviceId,
     String syncFolderPath,
   ) async {
-    final eventId = (event['id'] as num).toInt();
-    final fileId = event['fileId'] as String;
-    final eventType = event['eventType'] as String;
+    final eventId = change.id;
+    final fileId = change.fileId;
 
     try {
-      if (eventType == 'Delete') {
-        await _applyDelete(fileId, syncFolderPath);
+      if (change.type == 'Delete') {
+        await _applyDeleteEvent(fileId, syncFolderPath);
       } else {
         // Create/Update/Move/Rename are all handled the same way: fetch the
         // file's current state and reconcile the local copy against it.
@@ -261,6 +254,26 @@ class PullSyncService {
     }
 
     await _mirror.setCursor(deviceId, eventId);
+  }
+
+  /// A Delete feed item does not necessarily mean the file is gone right
+  /// now — it may have been deleted and then restored (e.g. from trash)
+  /// before this device got around to pulling. Checked here, with its own
+  /// [_fileRepository.getFile] call, rather than folded into [_applyUpsert]'s
+  /// own 404 handling (which exists for the opposite case: an Upsert-shaped
+  /// event for a file that has since become 404) — the two are separate
+  /// checks for separate event types, not one shared code path.
+  Future<void> _applyDeleteEvent(String fileId, String syncFolderPath) async {
+    try {
+      await _fileRepository.getFile(fileId);
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 404) rethrow;
+      await _applyDelete(fileId, syncFolderPath);
+      return;
+    }
+    // Still exists server-side — restored since the event was raised, so
+    // this is reconciled as an upsert instead of a delete.
+    await _applyUpsert(fileId, syncFolderPath);
   }
 
   Future<void> _applyDelete(String fileId, String syncFolderPath) async {

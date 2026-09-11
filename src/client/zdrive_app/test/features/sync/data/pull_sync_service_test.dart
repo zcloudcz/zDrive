@@ -13,11 +13,12 @@ import 'package:zdrive_app/features/files/domain/file_repository.dart';
 import 'package:zdrive_app/features/sync/data/device_registration_service.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_name_rules.dart';
-import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
+import 'package:zdrive_app/features/files/data/file_dtos.dart';
+import 'package:zdrive_app/features/files/data/file_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_entry.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart';
 
-class MockSyncRemoteDataSource extends Mock implements SyncRemoteDataSource {}
+class MockFileRemoteDataSource extends Mock implements FileRemoteDataSource {}
 
 class MockDeviceRegistrationService extends Mock implements DeviceRegistrationService {}
 
@@ -28,7 +29,7 @@ class MockFileRepository extends Mock implements FileRepository {}
 class FakeSyncMirrorEntry extends Fake implements SyncMirrorEntry {}
 
 void main() {
-  late MockSyncRemoteDataSource mockSyncDataSource;
+  late MockFileRemoteDataSource mockFilesDataSource;
   late MockDeviceRegistrationService mockDeviceRegistration;
   late MockSyncMirrorRepository mockMirror;
   late MockFileRepository mockFileRepository;
@@ -38,12 +39,12 @@ void main() {
   setUpAll(() => registerFallbackValue(FakeSyncMirrorEntry()));
 
   setUp(() {
-    mockSyncDataSource = MockSyncRemoteDataSource();
+    mockFilesDataSource = MockFileRemoteDataSource();
     mockDeviceRegistration = MockDeviceRegistrationService();
     mockMirror = MockSyncMirrorRepository();
     mockFileRepository = MockFileRepository();
     service = PullSyncService(
-      mockSyncDataSource,
+      mockFilesDataSource,
       mockDeviceRegistration,
       mockMirror,
       mockFileRepository,
@@ -77,8 +78,30 @@ void main() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
-  Map<String, dynamic> page(List<Map<String, dynamic>> events, int newCursor) =>
-      {'events': events, 'newCursor': newCursor};
+  ChangeFeedPageDto page(List<Map<String, dynamic>> events, int nextCursor, {bool hasMore = false}) =>
+      ChangeFeedPageDto(
+        changes: events
+            .map((e) => ChangeFeedItemDto(
+                  id: (e['id'] as num).toInt(),
+                  fileId: e['fileId'] as String,
+                  type: e['type'] as String,
+                  occurredAt: DateTime.utc(2026, 1, 1),
+                ))
+            .toList(),
+        nextCursor: nextCursor,
+        hasMore: hasMore,
+      );
+
+  // A Delete feed item is now checked against getFile first (restored-file
+  // handling — see PullSyncService._applyDeleteEvent), so every test below
+  // that means "genuinely gone server-side" stubs getFile to 404 for that
+  // id; a test for the *other* branch (restored) stubs getFile to succeed
+  // instead.
+  DioException notFound(String fileId) => DioException(
+        requestOptions: RequestOptions(path: '/files/$fileId'),
+        response: Response(requestOptions: RequestOptions(path: '/files/$fileId'), statusCode: 404),
+        type: DioExceptionType.badResponse,
+      );
 
   test('applies a Create event: downloads the file, writes it under the sync folder, '
       'and advances the cursor', () async {
@@ -86,8 +109,8 @@ void main() {
     final now = DateTime.utc(2026, 1, 1);
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'file-1', 'eventType': 'Create', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-1', 'type': 'Create', 'metadata': null},
         ], 1));
     when(() => mockFileRepository.getFile('file-1')).thenAnswer((_) async => FileItem(
           id: 'file-1',
@@ -118,15 +141,109 @@ void main() {
     verify(() => mockMirror.setCursor('dev-1', 1)).called(1);
   });
 
+  test('pages through the feed when a page reports hasMore, stopping once '
+      'a page reports none left (test 1)', () async {
+    final bytes1 = Uint8List.fromList(utf8.encode('one'));
+    final bytes2 = Uint8List.fromList(utf8.encode('two'));
+    final now = DateTime.utc(2026, 1, 1);
+
+    // getCursor/setCursor made stateful (instead of the fixed-0 stub used
+    // elsewhere in this file) so the second page request in this test
+    // genuinely reflects the cursor the first page's own apply advanced it
+    // to, not a value this test hand-picked.
+    var cursor = 0;
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => cursor);
+    when(() => mockMirror.setCursor('dev-1', any())).thenAnswer((invocation) async {
+      cursor = invocation.positionalArguments[1] as int;
+    });
+
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-1', 'type': 'Create', 'metadata': null},
+        ], 1, hasMore: true));
+    when(() => mockFilesDataSource.getChanges(1, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 2, 'fileId': 'file-2', 'type': 'Create', 'metadata': null},
+        ], 2, hasMore: false));
+    when(() => mockFileRepository.getFile('file-1')).thenAnswer((_) async => FileItem(
+          id: 'file-1',
+          name: 'one.txt',
+          isFolder: false,
+          sizeBytes: bytes1.length,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
+    when(() => mockMirror.getByServerId('file-1')).thenAnswer((_) async => null);
+    when(() => mockFileRepository.downloadFile('file-1')).thenAnswer((_) async => bytes1);
+    when(() => mockFileRepository.getFile('file-2')).thenAnswer((_) async => FileItem(
+          id: 'file-2',
+          name: 'two.txt',
+          isFolder: false,
+          sizeBytes: bytes2.length,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
+    when(() => mockMirror.getByServerId('file-2')).thenAnswer((_) async => null);
+    when(() => mockFileRepository.downloadFile('file-2')).thenAnswer((_) async => bytes2);
+
+    final applied = await service.pullOnce(tempDir.path);
+
+    expect(applied, 2);
+    expect(File(p.join(tempDir.path, 'one.txt')).readAsBytesSync(), bytes1);
+    expect(File(p.join(tempDir.path, 'two.txt')).readAsBytesSync(), bytes2);
+    verify(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).called(1);
+    verify(() => mockFilesDataSource.getChanges(1, deviceId: 'dev-1')).called(1);
+  });
+
+  test('a Delete feed item for a file that is live again (e.g. restored '
+      'from trash before this device pulled) is applied as an upsert, not '
+      'a delete (test 8)', () async {
+    final bytes = Uint8List.fromList(utf8.encode('restored content'));
+    final now = DateTime.utc(2026, 1, 1);
+
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-restored', 'type': 'Delete', 'metadata': null},
+        ], 1));
+    // Still exists server-side by the time this device gets around to
+    // pulling it — the opposite of every other Delete test in this file,
+    // which stub getFile to 404 (see notFound's doc comment).
+    when(() => mockFileRepository.getFile('file-restored')).thenAnswer((_) async => FileItem(
+          id: 'file-restored',
+          name: 'restored.txt',
+          isFolder: false,
+          sizeBytes: bytes.length,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
+    when(() => mockMirror.getByServerId('file-restored')).thenAnswer((_) async => null);
+    when(() => mockFileRepository.downloadFile('file-restored')).thenAnswer((_) async => bytes);
+
+    final applied = await service.pullOnce(tempDir.path);
+
+    expect(applied, 1);
+    // Downloaded and written like any other upsert — if the getFile check
+    // were removed, a Delete would go straight to _applyDelete, which finds
+    // no mirror row for this never-before-seen id and does nothing, so this
+    // file would never be written.
+    final written = File(p.join(tempDir.path, 'restored.txt'));
+    expect(written.existsSync(), isTrue);
+    expect(written.readAsBytesSync(), bytes);
+    verifyNever(() => mockMirror.deleteByServerId(any()));
+  });
+
   test('applies a Delete event: removes the local file and the mirror row, '
       'and advances the cursor', () async {
     final existingFile = File(p.join(tempDir.path, 'old.txt'))..writeAsStringSync('bye');
     final now = DateTime.utc(2026, 1, 1);
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'file-2', 'eventType': 'Delete', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-2', 'type': 'Delete', 'metadata': null},
         ], 1));
+    // Genuinely gone server-side — not restored (see notFound's doc comment).
+    when(() => mockFileRepository.getFile('file-2')).thenThrow(notFound('file-2'));
     when(() => mockMirror.getByServerId('file-2')).thenAnswer((_) async => SyncMirrorEntry(
           serverId: 'file-2',
           localPath: existingFile.path,
@@ -156,9 +273,10 @@ void main() {
       ..writeAsStringSync('local edit not yet synced');
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'file-edited', 'eventType': 'Delete', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-edited', 'type': 'Delete', 'metadata': null},
         ], 1));
+    when(() => mockFileRepository.getFile('file-edited')).thenThrow(notFound('file-edited'));
     when(() => mockMirror.getByServerId('file-edited')).thenAnswer((_) async => SyncMirrorEntry(
           serverId: 'file-edited',
           localPath: editedFile.path,
@@ -194,9 +312,9 @@ void main() {
     final now = DateTime.utc(2026, 1, 1);
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'file-1', 'eventType': 'Create', 'metadata': null},
-          {'id': 2, 'fileId': 'file-2', 'eventType': 'Create', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-1', 'type': 'Create', 'metadata': null},
+          {'id': 2, 'fileId': 'file-2', 'type': 'Create', 'metadata': null},
         ], 2));
     when(() => mockFileRepository.getFile('file-1')).thenAnswer((_) async => FileItem(
           id: 'file-1',
@@ -228,8 +346,8 @@ void main() {
     final now = DateTime.utc(2026, 1, 1);
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'evil-1', 'eventType': 'Create', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'evil-1', 'type': 'Create', 'metadata': null},
         ], 1));
     // A name that would otherwise let p.join escape the sync folder — see
     // the PR #12 review's `..\..\..\Documents` / `C:\Users\...` examples.
@@ -284,9 +402,9 @@ void main() {
     });
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'evil-2', 'eventType': 'Create', 'metadata': null},
-          {'id': 2, 'fileId': 'evil-2', 'eventType': 'Delete', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'evil-2', 'type': 'Create', 'metadata': null},
+          {'id': 2, 'fileId': 'evil-2', 'type': 'Delete', 'metadata': null},
         ], 2));
     // ".. " is not the literal ".." this app already rejected — it is a
     // folder Win32 treats the same way once trailing dots/spaces are
@@ -325,8 +443,8 @@ void main() {
     final newDir = p.join(tempDir.path, 'newName');
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'folder-1', 'eventType': 'Rename', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'folder-1', 'type': 'Rename', 'metadata': null},
         ], 1));
     when(() => mockFileRepository.getFile('folder-1')).thenAnswer((_) async => FileItem(
           id: 'folder-1',
@@ -364,8 +482,8 @@ void main() {
       ..writeAsStringSync('the user already had this');
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'file-5', 'eventType': 'Create', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-5', 'type': 'Create', 'metadata': null},
         ], 1));
     when(() => mockFileRepository.getFile('file-5')).thenAnswer((_) async => FileItem(
           id: 'file-5',
@@ -401,8 +519,8 @@ void main() {
     final oldFile = File(p.join(tempDir.path, 'old-name.txt'))..writeAsStringSync('content');
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'file-1', 'eventType': 'Rename', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-1', 'type': 'Rename', 'metadata': null},
         ], 1));
     when(() => mockFileRepository.getFile('file-1')).thenAnswer((_) async => FileItem(
           id: 'file-1',
@@ -439,9 +557,9 @@ void main() {
     final goodBytes = Uint8List.fromList(utf8.encode('fine'));
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'bad-1', 'eventType': 'Create', 'metadata': null},
-          {'id': 2, 'fileId': 'good-1', 'eventType': 'Create', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'bad-1', 'type': 'Create', 'metadata': null},
+          {'id': 2, 'fileId': 'good-1', 'type': 'Create', 'metadata': null},
         ], 2));
     when(() => mockFileRepository.getFile('bad-1')).thenAnswer((_) async => FileItem(
           id: 'bad-1',
@@ -512,8 +630,8 @@ void main() {
     when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => quarantine.values.toList());
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-          {'id': 1, 'fileId': 'locked-1', 'eventType': 'Create', 'metadata': null},
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'locked-1', 'type': 'Create', 'metadata': null},
         ], 1));
     when(() => mockFileRepository.getFile('locked-1')).thenAnswer((_) async => FileItem(
           id: 'locked-1',
@@ -544,7 +662,7 @@ void main() {
     // Second poll: nothing new on the wire, but the retry loop at the top
     // of pullOnce re-applies the quarantined entry by fileId — and this
     // time the write succeeds.
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([], 0));
     final secondApplied = await service.pullOnce(tempDir.path);
 
     // Not counted as an "applied event" — it never came from the event log,
@@ -562,12 +680,12 @@ void main() {
     final gate = Completer<void>();
 
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async {
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async {
       // Held open until the test releases it, so both pullOnce calls are
       // guaranteed to overlap in time before either completes.
       await gate.future;
       return page([
-        {'id': 1, 'fileId': 'file-1', 'eventType': 'Create', 'metadata': null},
+        {'id': 1, 'fileId': 'file-1', 'type': 'Create', 'metadata': null},
       ], 1);
     });
     when(() => mockFileRepository.getFile('file-1')).thenAnswer((_) async => FileItem(
@@ -592,7 +710,7 @@ void main() {
     // If the second call had started its own pull cycle instead of awaiting
     // the first's in-flight future, the wire call below would have happened
     // twice against the same starting cursor.
-    verify(() => mockSyncDataSource.pull('dev-1', 0)).called(1);
+    verify(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).called(1);
   });
 
   group('bootstrap', () {
@@ -606,7 +724,7 @@ void main() {
       // Nothing in the event log — this file has never been touched since
       // before sync events existed, which is exactly the gap bootstrap
       // closes (see F8 in the PR #12 review).
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([], 0));
       when(() => mockFileRepository.listChildren(null, page: 1)).thenAnswer((_) async => PagedResult(
             items: [
               FileItem(
@@ -638,7 +756,7 @@ void main() {
     test('does not run again once a device is marked bootstrapped', () async {
       when(() => mockMirror.isBootstrapped('dev-1')).thenAnswer((_) async => true);
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([], 0));
 
       await service.pullOnce(tempDir.path);
 
@@ -655,7 +773,7 @@ void main() {
 
       when(() => mockMirror.isBootstrapped('dev-1')).thenAnswer((_) async => false);
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([], 0));
       when(() => mockFileRepository.listChildren(null, page: 1)).thenAnswer((_) async => PagedResult(
             items: [
               FileItem(
@@ -718,7 +836,7 @@ void main() {
     // Linux CI (they hit the unstubbed downloadFile mock instead of ever
     // exercising the name check).
     PullSyncService serviceWith({required bool isWindows}) => PullSyncService(
-          mockSyncDataSource,
+          mockFilesDataSource,
           mockDeviceRegistration,
           mockMirror,
           mockFileRepository,
@@ -756,8 +874,8 @@ void main() {
       final now = DateTime.utc(2026, 1, 1);
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'bad-name-1', 'eventType': 'Create', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'bad-name-1', 'type': 'Create', 'metadata': null},
           ], 1));
       when(() => mockFileRepository.getFile('bad-name-1')).thenAnswer((_) async => FileItem(
             id: 'bad-name-1',
@@ -785,8 +903,8 @@ void main() {
       final now = DateTime.utc(2026, 1, 1);
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'bad-name-2', 'eventType': 'Create', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'bad-name-2', 'type': 'Create', 'metadata': null},
           ], 1));
       when(() => mockFileRepository.getFile('bad-name-2')).thenAnswer((_) async => FileItem(
             id: 'bad-name-2',
@@ -815,8 +933,8 @@ void main() {
       final existingFoo = Directory(p.join(tempDir.path, 'foo'))..createSync();
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-dot', 'eventType': 'Create', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-dot', 'type': 'Create', 'metadata': null},
           ], 1));
       when(() => mockFileRepository.getFile('folder-dot')).thenAnswer((_) async => FileItem(
             id: 'folder-dot',
@@ -849,8 +967,8 @@ void main() {
         ..writeAsStringSync('never sent to the server');
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-1', 'eventType': 'Rename', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-1', 'type': 'Rename', 'metadata': null},
           ], 1));
       when(() => mockFileRepository.getFile('folder-1')).thenAnswer((_) async => FileItem(
             id: 'folder-1',
@@ -896,8 +1014,8 @@ void main() {
       final bytes = Uint8List.fromList(utf8.encode('not a Win32 client'));
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'ok-on-non-windows', 'eventType': 'Create', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'ok-on-non-windows', 'type': 'Create', 'metadata': null},
           ], 1));
       when(() => mockFileRepository.getFile('ok-on-non-windows')).thenAnswer((_) async => FileItem(
             id: 'ok-on-non-windows',
@@ -941,7 +1059,7 @@ void main() {
       );
       when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => [recent, stale]);
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([], 0));
       when(() => mockFileRepository.getFile('stale-1')).thenAnswer((_) async => FileItem(
             id: 'stale-1',
             name: 'now-available.bin',
@@ -980,7 +1098,7 @@ void main() {
 
       when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => failedEvents);
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([], 0));
       // Every quarantined row fails the same way again — what matters here
       // is how many getFile calls the retry loop issues, not the outcome.
       when(() => mockFileRepository.getFile(any())).thenThrow(Exception('still broken'));
@@ -1017,8 +1135,8 @@ void main() {
       );
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 5, 'fileId': 'fresh-1', 'eventType': 'Create', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 5, 'fileId': 'fresh-1', 'type': 'Create', 'metadata': null},
           ], 5));
       when(() => mockFileRepository.getFile('fresh-1')).thenAnswer((_) async => FileItem(
             id: 'fresh-1',
@@ -1062,9 +1180,10 @@ void main() {
         ..writeAsStringSync('only ever existed on this machine');
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-del-1', 'eventType': 'Delete', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-1', 'type': 'Delete', 'metadata': null},
           ], 1));
+      when(() => mockFileRepository.getFile('folder-del-1')).thenThrow(notFound('folder-del-1'));
       when(() => mockMirror.getByServerId('folder-del-1')).thenAnswer((_) async => SyncMirrorEntry(
             serverId: 'folder-del-1',
             localPath: folderDir.path,
@@ -1114,9 +1233,10 @@ void main() {
         ..writeAsBytesSync(trackedBytes);
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-del-2', 'eventType': 'Delete', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-2', 'type': 'Delete', 'metadata': null},
           ], 1));
+      when(() => mockFileRepository.getFile('folder-del-2')).thenThrow(notFound('folder-del-2'));
       when(() => mockMirror.getByServerId('folder-del-2')).thenAnswer((_) async => SyncMirrorEntry(
             serverId: 'folder-del-2',
             localPath: folderDir.path,
@@ -1159,9 +1279,10 @@ void main() {
       File(p.join(folderDir.path, 'Thumbs.db')).writeAsStringSync('thumbnail cache');
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-del-3', 'eventType': 'Delete', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-3', 'type': 'Delete', 'metadata': null},
           ], 1));
+      when(() => mockFileRepository.getFile('folder-del-3')).thenThrow(notFound('folder-del-3'));
       when(() => mockMirror.getByServerId('folder-del-3')).thenAnswer((_) async => SyncMirrorEntry(
             serverId: 'folder-del-3',
             localPath: folderDir.path,
@@ -1201,9 +1322,10 @@ void main() {
         ..writeAsStringSync('locally edited finder metadata');
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-del-4', 'eventType': 'Delete', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-4', 'type': 'Delete', 'metadata': null},
           ], 1));
+      when(() => mockFileRepository.getFile('folder-del-4')).thenThrow(notFound('folder-del-4'));
       when(() => mockMirror.getByServerId('folder-del-4')).thenAnswer((_) async => SyncMirrorEntry(
             serverId: 'folder-del-4',
             localPath: folderDir.path,
@@ -1252,9 +1374,10 @@ void main() {
         ..writeAsStringSync('finder metadata');
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-del-5', 'eventType': 'Delete', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-5', 'type': 'Delete', 'metadata': null},
           ], 1));
+      when(() => mockFileRepository.getFile('folder-del-5')).thenThrow(notFound('folder-del-5'));
       when(() => mockMirror.getByServerId('folder-del-5')).thenAnswer((_) async => SyncMirrorEntry(
             serverId: 'folder-del-5',
             localPath: folderDir.path,
@@ -1301,9 +1424,10 @@ void main() {
         ..writeAsStringSync('[.ShellClassInfo]');
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
-            {'id': 1, 'fileId': 'folder-del-6', 'eventType': 'Delete', 'metadata': null},
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-6', 'type': 'Delete', 'metadata': null},
           ], 1));
+      when(() => mockFileRepository.getFile('folder-del-6')).thenThrow(notFound('folder-del-6'));
       when(() => mockMirror.getByServerId('folder-del-6')).thenAnswer((_) async => SyncMirrorEntry(
             serverId: 'folder-del-6',
             localPath: folderDir.path,
@@ -1352,7 +1476,7 @@ void main() {
 
       when(() => mockMirror.isBootstrapped('dev-1')).thenAnswer((_) async => false);
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
-      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer((_) async => page([], 0));
       when(() => mockFileRepository.listChildren(null, page: 1)).thenAnswer((_) async => PagedResult(
             items: [
               FileItem(

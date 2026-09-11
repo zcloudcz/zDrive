@@ -14,6 +14,13 @@ import '../domain/sync_mirror_repository.dart';
 import 'device_registration_service.dart';
 import 'sync_name_rules.dart';
 
+/// The one definition of "the same name" for sync: names are
+/// case-insensitive end to end, so every comparison the scanner makes —
+/// including [collidingKeys] — goes through this. Two copies of the rule
+/// could drift apart and silently turn the collision check off (PR #14
+/// review round 5).
+String syncPathKey(String path) => p.normalize(path).toLowerCase();
+
 /// The case-insensitive keys shared by two or more entries of [paths] — the
 /// product rule that names are case-insensitive end to end means the server
 /// (and every other device's disk) can represent only one entry per key, so
@@ -23,13 +30,6 @@ import 'sync_name_rules.dart';
 /// test can exercise the detection on every host without needing an actual
 /// case-sensitive disk to create the collision on (PR #14 review round 4,
 /// R4-4).
-/// The one definition of "the same name" for sync: names are
-/// case-insensitive end to end, so every comparison the scanner makes —
-/// including [collidingKeys] — goes through this. Two copies of the rule
-/// could drift apart and silently turn the collision check off (PR #14
-/// review round 5).
-String syncPathKey(String path) => p.normalize(path).toLowerCase();
-
 Set<String> collidingKeys(Iterable<String> paths) {
   final counts = <String, int>{};
   for (final path in paths) {
@@ -39,31 +39,30 @@ Set<String> collidingKeys(Iterable<String> paths) {
   return {for (final entry in counts.entries) if (entry.value > 1) entry.key};
 }
 
-/// Finds local changes under the designated sync folder and reports them to
-/// the server — the push half of sync. State-based, not event-based: every
-/// call diffs the current disk contents against the mirror
-/// ([SyncMirrorRepository], the same table [PullSyncService] maintains), so
-/// there is no local change queue to lose — anything done while offline is
-/// simply found by the next [scanOnce].
+/// Finds local changes under the designated sync folder and pushes them to
+/// FileService directly — the push half of sync. State-based, not
+/// event-based: every call diffs the current disk contents against the
+/// mirror ([SyncMirrorRepository], the same table [PullSyncService]
+/// maintains), so there is no local change queue to lose — anything done
+/// while offline is simply found by the next [scanOnce]. Every write this
+/// scanner makes carries this device's id as `X-Device-Id` (see
+/// [_originDeviceId]) so FileService's change feed excludes it from this
+/// same device's own future pulls — a device never re-downloads a file it
+/// just uploaded itself.
 ///
 /// Conflicts are last-write-wins: a local edit is uploaded as the new
 /// current version regardless of what else happened to the file server-side
 /// (see [_uploadChangedFile]'s 404 handling and [_uploadNewFile]'s 409
 /// handling for the two ways that surfaces).
 ///
-/// Every server write below is committed to the mirror and enqueued to the
-/// persistent push outbox in one [SyncMirrorRepository.commit] call (PR #14
-/// review round 3) — the mirror is correct the instant the write lands,
-/// with no in-memory "still owed" state to lose on a crash or restart, and
-/// the scan itself never depends on SyncService being reachable (sending is
-/// [PushSyncService.drainOutbox]'s job, run separately by
-/// [SyncCoordinator]). That makes every local change end in exactly one
-/// queued report, except one narrow, documented window: if the app dies
-/// between a server write completing and the `commit` call that follows it,
-/// the mirror never learns the write happened, so the next scan finds the
-/// same local change again and redoes the write (landing as one extra
-/// version, or a second create that 409s into an update) — at most once per
-/// restart.
+/// Every server write below is committed to the mirror via
+/// [SyncMirrorRepository.commit] — the mirror is correct the instant the
+/// write lands, with no in-memory "still owed" state to lose on a crash or
+/// restart. If the app dies between a server write completing and the
+/// `commit` call that follows it, the mirror never learns the write
+/// happened, so the next scan finds the same local change again and redoes
+/// the write (landing as one extra version, or a second create that 409s
+/// into an update) — at most once per restart.
 @lazySingleton
 class LocalChangeScanner {
   final SyncMirrorRepository _mirror;
@@ -154,28 +153,27 @@ class LocalChangeScanner {
   @visibleForTesting
   void debugInjectExtraDiskFile(String path) => _extraDiskFiles.add(path);
 
-  /// This device's pull cursor at the moment of a write — what
-  /// [SyncMirrorRepository.commit]'s enqueued [OutboxItem]s are stamped
-  /// with (see [SyncRemoteDataSource.push]'s doc comment for what the
-  /// server does with it). Uses [DeviceRegistrationService.localDeviceId]
-  /// (PR #14 review round 4), not [DeviceRegistrationService.ensureRegistered]
-  /// — enqueueing a local change must work offline, and the cursor is
-  /// purely local, so no network call belongs here. A `null` id (no device
-  /// registered yet) reads as cursor 0, which is the honest value anyway:
-  /// pull has always registered the device before a scan runs, so this is
-  /// only a first-run edge case.
-  Future<int> _currentBaseCursor() async {
-    final deviceId = await _deviceRegistration.localDeviceId();
-    return deviceId == null ? 0 : await _mirror.getCursor(deviceId);
-  }
+  /// This device's id, tagged onto every FileService write this scanner
+  /// makes (as `X-Device-Id`, via [FileRepository]'s `originDeviceId`
+  /// parameter) so the change-feed row that write produces is excluded from
+  /// this same device's own future pulls (see
+  /// `FileRemoteDataSource.getChanges`'s doc comment) — otherwise a device
+  /// would pull back and re-apply the very change it just made itself. Uses
+  /// [DeviceRegistrationService.localDeviceId] (PR #14 review round 4), not
+  /// [DeviceRegistrationService.ensureRegistered] — a local write must work
+  /// offline, and the id is purely local, so no network call belongs here. A
+  /// `null` id (no device registered yet) means the write is sent untagged,
+  /// which is only a first-run edge case: pull has always registered the
+  /// device before a scan runs.
+  Future<String?> _originDeviceId() => _deviceRegistration.localDeviceId();
 
   /// Diffs [syncFolderPath] against the mirror and pushes whatever differs.
   /// Reads as the ordered list of steps below — each step's own doc comment
   /// explains why that order matters. Returns how many local changes were
-  /// committed this scan (folder creation alone is not counted — it never
-  /// enqueues a report: a pulling device fetches a file's parent folder
-  /// directly by id rather than replaying a folder-create event, so pushing
-  /// one would be dead weight).
+  /// committed this scan (folder creation alone is not counted — a pulling
+  /// device fetches a file's parent folder directly by id rather than
+  /// reading it off the change feed, so counting one here would be
+  /// meaningless).
   Future<int> scanOnce(String syncFolderPath) async {
     final root = syncFolderPath;
 
@@ -432,7 +430,11 @@ class LocalChangeScanner {
     String newPath,
     Map<String, SyncMirrorEntry> mirrorByPath,
   ) async {
-    await _fileRepository.renameFile(folder.serverId, p.basename(newPath));
+    await _fileRepository.renameFile(
+      folder.serverId,
+      p.basename(newPath),
+      originDeviceId: await _originDeviceId(),
+    );
     final updated = _mirrorRow(
       serverId: folder.serverId,
       localPath: newPath,
@@ -442,7 +444,6 @@ class LocalChangeScanner {
     await _mirror.commit(
       rePath: (from: folder.localPath, to: newPath),
       upserts: [updated],
-      enqueue: [await _outboxItem(folder.serverId, SyncChangeType.rename)],
     );
     mirrorByPath.remove(folder.localPath);
     mirrorByPath[newPath] = updated;
@@ -453,7 +454,11 @@ class LocalChangeScanner {
     String newPath,
     Map<String, SyncMirrorEntry> mirrorByPath,
   ) async {
-    await _fileRepository.renameFile(file.serverId, p.basename(newPath));
+    await _fileRepository.renameFile(
+      file.serverId,
+      p.basename(newPath),
+      originDeviceId: await _originDeviceId(),
+    );
     // A case-only rename changes localPath and nothing else — contentHash,
     // sizeBytes and syncedAt are carried over unchanged from the old row
     // (PR #14 review round 4, R4-2), not through _mirrorRow (which always
@@ -471,10 +476,7 @@ class LocalChangeScanner {
       updatedAt: file.updatedAt,
       syncedAt: file.syncedAt,
     );
-    await _mirror.commit(
-      upserts: [updated],
-      enqueue: [await _outboxItem(file.serverId, SyncChangeType.rename)],
-    );
+    await _mirror.commit(upserts: [updated]);
     mirrorByPath.remove(file.localPath);
     mirrorByPath[newPath] = updated;
   }
@@ -523,7 +525,11 @@ class LocalChangeScanner {
     if (!resolution.resolved) return; // parent failed earlier in this same scan
 
     try {
-      final folder = await _fileRepository.createFolder(resolution.parentId, p.basename(dirPath));
+      final folder = await _fileRepository.createFolder(
+        resolution.parentId,
+        p.basename(dirPath),
+        originDeviceId: await _originDeviceId(),
+      );
       final entry = _mirrorRow(
         serverId: folder.id,
         localPath: dirPath,
@@ -537,15 +543,46 @@ class LocalChangeScanner {
     } on DioException catch (e) {
       if (e.response?.statusCode == 409) {
         // Exists server-side already but this device has not pulled it yet
-        // (e.g. created on another device). Not a failure to back off —
-        // the next pull reconciles it into the mirror normally, and the
-        // next scan then finds children under it, if any.
+        // (e.g. created on another device). Adopted straight into the
+        // mirror by name instead of waiting for the next pull — so children
+        // under it can still be uploaded into it this same scan (the
+        // resolveParent lookup above needs a mirror row to find).
+        final existing = await _findExistingFolderByName(resolution.parentId, p.basename(dirPath));
+        if (existing != null) {
+          final entry = _mirrorRow(
+            serverId: existing.id,
+            localPath: dirPath,
+            isFolder: true,
+            updatedAt: existing.updatedAt,
+          );
+          await _mirror.upsert(entry);
+          mirrorByPath[dirPath] = entry;
+          return;
+        }
         log('folder already exists server-side, waiting for pull: $dirPath', name: 'LocalChangeScanner');
         return;
       }
       _recordFailure(dirPath, e, StackTrace.current);
     } catch (e, st) {
       _recordFailure(dirPath, e, st);
+    }
+  }
+
+  /// A folder child named [name] directly under [parentId], if one already
+  /// exists — used by [_createFolder]'s 409 handling to adopt a folder
+  /// another device already created. Case-insensitive and paginated, same
+  /// shape as [_findExistingFileByName] below (FileService rejects a
+  /// case-only sibling duplicate for folders too).
+  Future<FileItem?> _findExistingFolderByName(String? parentId, String name) async {
+    var page = 1;
+    const pageSize = 200;
+    while (true) {
+      final result = await _fileRepository.listChildren(parentId, page: page, pageSize: pageSize);
+      for (final item in result.items) {
+        if (item.name.toLowerCase() == name.toLowerCase() && item.isFolder) return item;
+      }
+      if (!result.hasMore) return null;
+      page++;
     }
   }
 
@@ -668,17 +705,12 @@ class LocalChangeScanner {
       throw StateError('destination folder not resolved this scan: ${p.dirname(newPath)}');
     }
 
-    // What the local diff itself says happened — decided independently of
-    // what getFile reports below, and used only to decide *whether to
-    // report*. getFile still decides *whether to call the server*: a
-    // previous attempt at this exact move may have partially landed
-    // (moveFile succeeded, then renameFile threw, or the app restarted
-    // before this call ever ran) and this call is that retry. Reporting
-    // the local diff even when the server call itself is skipped is what
-    // closes finding 1 (PR #14 review round 2): deciding both from getFile
-    // would let a retry that found the server already caught up silently
-    // skip the report too. A duplicate report is harmless — pull
-    // reconciles through getFile either way.
+    // What the local diff itself says happened — used to decide *whether to
+    // call the server at all*. getFile below decides whether that call is
+    // still needed: a previous attempt at this exact move may have
+    // partially landed (moveFile succeeded, then renameFile threw, or the
+    // app restarted before this call ever ran) and this call is that retry,
+    // so only whatever getFile shows as not-yet-applied is actually sent.
     final movedParent = p.dirname(missing.localPath) != p.dirname(newPath);
     final renamedName = p.basename(missing.localPath) != p.basename(newPath);
 
@@ -697,35 +729,15 @@ class LocalChangeScanner {
       return false;
     }
 
-    final enqueue = <OutboxItem>[];
-    // One baseCursor for both reports below — they describe the same local
-    // diff observed at the same moment, so there is no reason for them to
-    // disagree on what this device had already pulled.
-    final baseCursor = movedParent || renamedName ? await _currentBaseCursor() : 0;
+    final originDeviceId = await _originDeviceId();
 
-    if (movedParent) {
-      if (current.parentId != resolution.parentId) {
-        await _fileRepository.moveFile(missing.serverId, resolution.parentId);
-      }
-      enqueue.add(OutboxItem(
-        fileId: missing.serverId,
-        type: SyncChangeType.move,
-        baseCursor: baseCursor,
-        createdAt: DateTime.now(),
-      ));
+    if (movedParent && current.parentId != resolution.parentId) {
+      await _fileRepository.moveFile(missing.serverId, resolution.parentId, originDeviceId: originDeviceId);
     }
 
     final newName = p.basename(newPath);
-    if (renamedName) {
-      if (current.name != newName) {
-        await _fileRepository.renameFile(missing.serverId, newName);
-      }
-      enqueue.add(OutboxItem(
-        fileId: missing.serverId,
-        type: SyncChangeType.rename,
-        baseCursor: baseCursor,
-        createdAt: DateTime.now(),
-      ));
+    if (renamedName && current.name != newName) {
+      await _fileRepository.renameFile(missing.serverId, newName, originDeviceId: originDeviceId);
     }
 
     final updated = _mirrorRow(
@@ -736,7 +748,7 @@ class LocalChangeScanner {
       contentHash: hashSize.hash,
       updatedAt: missing.updatedAt,
     );
-    await _mirror.commit(upserts: [updated], enqueue: enqueue);
+    await _mirror.commit(upserts: [updated]);
     mirrorByPath.remove(missing.localPath);
     mirrorByPath[newPath] = updated;
     return true;
@@ -773,6 +785,7 @@ class LocalChangeScanner {
 
     final name = p.basename(filePath);
     final file = File(filePath);
+    final originDeviceId = await _originDeviceId();
 
     try {
       final id = await _fileRepository.uploadFile(
@@ -781,8 +794,9 @@ class LocalChangeScanner {
         file.openRead(),
         hashSize.size,
         null,
+        originDeviceId: originDeviceId,
       );
-      await _finishUpload(id, filePath, hashSize, SyncChangeType.create, mirrorByPath);
+      await _finishUpload(id, filePath, hashSize, mirrorByPath);
       return true;
     } on DioException catch (e) {
       if (e.response?.statusCode != 409) rethrow;
@@ -791,29 +805,27 @@ class LocalChangeScanner {
       // upload into it as a new version instead of failing.
       final existing = await _findExistingFileByName(resolution.parentId, name);
       if (existing == null) rethrow;
-      await _fileRepository.uploadNewVersion(existing.id, name, file.openRead(), hashSize.size);
-      await _finishUpload(existing.id, filePath, hashSize, SyncChangeType.update, mirrorByPath);
+      await _fileRepository.uploadNewVersion(
+        existing.id,
+        name,
+        file.openRead(),
+        hashSize.size,
+        originDeviceId: originDeviceId,
+      );
+      await _finishUpload(existing.id, filePath, hashSize, mirrorByPath);
       return true;
     }
   }
 
-  Future<OutboxItem> _outboxItem(String serverId, SyncChangeType type) async => OutboxItem(
-        fileId: serverId,
-        type: type,
-        baseCursor: await _currentBaseCursor(),
-        createdAt: DateTime.now(),
-      );
-
-  /// Shared tail of every "server write is done, now commit the mirror and
-  /// enqueue its report" path: builds the mirror row and commits it with
-  /// [type]'s [OutboxItem] in the same atomic call, so a scan that dies
-  /// right after the write either leaves both in place or neither (see this
-  /// class's own doc comment for the one exception).
+  /// Shared tail of every "server write is done, now commit the mirror"
+  /// path: builds the mirror row and commits it, so a scan that dies right
+  /// after the write either leaves both the server write and the mirror row
+  /// in place, or neither (see this class's own doc comment for the one
+  /// exception).
   Future<void> _finishUpload(
     String serverId,
     String filePath,
     ({String hash, int size}) hashSize,
-    SyncChangeType type,
     Map<String, SyncMirrorEntry> mirrorByPath,
   ) async {
     final entry = _mirrorRow(
@@ -824,7 +836,7 @@ class LocalChangeScanner {
       contentHash: hashSize.hash,
       updatedAt: DateTime.now(),
     );
-    await _mirror.commit(upserts: [entry], enqueue: [await _outboxItem(serverId, type)]);
+    await _mirror.commit(upserts: [entry]);
     mirrorByPath[filePath] = entry;
   }
 
@@ -884,18 +896,20 @@ class LocalChangeScanner {
     final hash = sha256.convert(bytes).toString();
     if (hash == entry.contentHash) return false; // touched (e.g. re-saved), content unchanged
 
+    final originDeviceId = await _originDeviceId();
+
     try {
       await _fileRepository.uploadNewVersion(
         entry.serverId,
         p.basename(entry.localPath),
         file.openRead(),
         bytes.length,
+        originDeviceId: originDeviceId,
       );
       await _finishUpload(
         entry.serverId,
         entry.localPath,
         (hash: hash, size: bytes.length),
-        SyncChangeType.update,
         mirrorByPath,
       );
       return true;
@@ -914,6 +928,7 @@ class LocalChangeScanner {
         file.openRead(),
         bytes.length,
         null,
+        originDeviceId: originDeviceId,
       );
       final newEntry = _mirrorRow(
         serverId: newId,
@@ -926,7 +941,6 @@ class LocalChangeScanner {
       await _mirror.commit(
         deleteServerIds: [entry.serverId],
         upserts: [newEntry],
-        enqueue: [await _outboxItem(newId, SyncChangeType.create)],
       );
       mirrorByPath[entry.localPath] = newEntry;
       return true;
@@ -984,20 +998,20 @@ class LocalChangeScanner {
 
   /// Deletes [entry] server-side (for a folder, FileService trashes the
   /// whole subtree) and commits the matching mirror change — its own row,
-  /// plus (for a folder) every row still tracked under it — atomically with
-  /// the delete report. Shared by the file and folder delete steps; the
-  /// only difference between them is [SyncMirrorEntry.isFolder] deciding
-  /// whether [SyncMirrorRepository.commit] also has to sweep children.
-  /// Returns whether the file/folder was actually deleted server-side by
-  /// this call — false on a 404, since another device (or an earlier,
-  /// only-partially-completed attempt of this same call) already deleted it
-  /// and this device did not cause anything new; a report is sent either
-  /// way (PR #12 review, F6), because another device may not have learned
-  /// about the delete yet if its own delete event never fired.
+  /// plus (for a folder) every row still tracked under it. Shared by the
+  /// file and folder delete steps; the only difference between them is
+  /// [SyncMirrorEntry.isFolder] deciding whether [SyncMirrorRepository
+  /// .commit] also has to sweep children. Returns whether the file/folder
+  /// was actually deleted server-side by this call — false on a 404, since
+  /// another device (or an earlier, only-partially-completed attempt of
+  /// this same call) already deleted it and this device did not cause
+  /// anything new; the mirror is still cleared either way (PR #12 review,
+  /// F6), since this device's own tracking of the item is stale regardless
+  /// of who removed it.
   Future<bool> _deleteMissingEntry(SyncMirrorEntry entry) async {
     var actuallyDeleted = true;
     try {
-      await _fileRepository.deleteFile(entry.serverId);
+      await _fileRepository.deleteFile(entry.serverId, originDeviceId: await _originDeviceId());
     } on DioException catch (e) {
       if (e.response?.statusCode != 404) rethrow;
       actuallyDeleted = false;
@@ -1005,7 +1019,6 @@ class LocalChangeScanner {
     await _mirror.commit(
       deleteServerIds: [entry.serverId],
       deleteUnderPath: entry.isFolder ? entry.localPath : null,
-      enqueue: [await _outboxItem(entry.serverId, SyncChangeType.delete)],
     );
     return actuallyDeleted;
   }

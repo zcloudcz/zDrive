@@ -18,6 +18,25 @@ class FileRemoteDataSource {
     return FileDto.fromJson(unwrapMap(response));
   }
 
+  /// Pulls the server's append-only change feed starting after [cursor].
+  /// [deviceId], when given, is sent as `X-Device-Id` so FileService excludes
+  /// rows this device's own writes produced (see [createFile] and the other
+  /// write methods below, which tag their own writes with the same header).
+  Future<ChangeFeedPageDto> getChanges(int cursor, {int limit = 500, String? deviceId}) async {
+    final response = await _dio.get(
+      '${ApiConstants.files}/changes',
+      queryParameters: {'cursor': cursor, 'limit': limit},
+      options: _deviceIdOptions(deviceId),
+    );
+    return ChangeFeedPageDto.fromJson(unwrapMap(response));
+  }
+
+  /// Builds the `X-Device-Id` header [Options] shared by every write method
+  /// below, or null when [deviceId] is null — Dio treats a null [Options] the
+  /// same as omitting the parameter entirely.
+  Options? _deviceIdOptions(String? deviceId) =>
+      deviceId == null ? null : Options(headers: {'X-Device-Id': deviceId});
+
   /// Lists children of [folderId], or the root when null.
   /// Root has a dedicated route because "{id}/children" cannot express null.
   Future<PagedResultDto> listChildren(
@@ -44,6 +63,12 @@ class FileRemoteDataSource {
     String? parentId,
     int? sizeBytes,
     String? mimeType,
+    // Carried through to FileService as X-Device-Id — see [getChanges]'s doc
+    // comment. Only the sync scanner's own writes pass this; the file
+    // browser's writes leave it null, so pull applies them locally like any
+    // other device's change (LocalChangeScanner tags its own writes; the
+    // file browser never does).
+    String? originDeviceId,
   }) async {
     final response = await _dio.post(
       ApiConstants.files,
@@ -54,32 +79,41 @@ class FileRemoteDataSource {
         if (sizeBytes != null) 'sizeBytes': sizeBytes,
         if (mimeType != null) 'mimeType': mimeType,
       },
+      options: _deviceIdOptions(originDeviceId),
     );
     return FileDto.fromJson(unwrapMap(response));
   }
 
-  Future<FileDto> createFolder(String? parentId, String name) {
-    return createFile(name: name, isFolder: true, parentId: parentId);
+  Future<FileDto> createFolder(String? parentId, String name, {String? originDeviceId}) {
+    return createFile(
+      name: name,
+      isFolder: true,
+      parentId: parentId,
+      originDeviceId: originDeviceId,
+    );
   }
 
-  Future<FileDto> renameFile(String id, String newName) async {
+  Future<FileDto> renameFile(String id, String newName, {String? originDeviceId}) async {
     final response = await _dio.put(
       '${ApiConstants.files}/$id/rename',
       data: {'newName': newName},
+      options: _deviceIdOptions(originDeviceId),
     );
     return FileDto.fromJson(unwrapMap(response));
   }
 
-  Future<FileDto> moveFile(String id, String? newParentId) async {
+  Future<FileDto> moveFile(String id, String? newParentId, {String? originDeviceId}) async {
     final response = await _dio.put(
       '${ApiConstants.files}/$id/move',
       data: {'newParentId': newParentId},
+      options: _deviceIdOptions(originDeviceId),
     );
     return FileDto.fromJson(unwrapMap(response));
   }
 
-  Future<void> deleteFile(String id) async {
-    final response = await _dio.delete('${ApiConstants.files}/$id');
+  Future<void> deleteFile(String id, {String? originDeviceId}) async {
+    final response =
+        await _dio.delete('${ApiConstants.files}/$id', options: _deviceIdOptions(originDeviceId));
     ensureSuccess(response);
   }
 
@@ -149,6 +183,7 @@ class FileRemoteDataSource {
     required int sizeBytes,
     required String manifestHash,
     String? comment,
+    String? originDeviceId,
   }) async {
     final response = await _dio.post(
       '${ApiConstants.files}/$fileId/versions',
@@ -158,6 +193,7 @@ class FileRemoteDataSource {
         'manifestHash': manifestHash,
         if (comment != null) 'comment': comment,
       },
+      options: _deviceIdOptions(originDeviceId),
     );
     return unwrapMap(response);
   }
