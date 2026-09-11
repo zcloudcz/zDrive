@@ -209,52 +209,64 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     // old folder is stale the moment its tail next checks — see
     // _syncGeneration's doc comment.
     _syncGeneration++;
-    final current = state;
-    final previousPath = current is SyncLoaded ? current.syncFolderPath : _preferences.syncFolderPath;
-    if (previousPath != null && previousPath != event.path) {
-      // A different folder than the one already configured starts sync
-      // over from a clean slate — see resetForNewFolder's doc comment. This
-      // awaits the coordinator's mutex, i.e. waits for any pull already in
-      // flight to finish, and now also persists the new path itself, inside
-      // that same lock (PR #16 review round 2, finding 3 — see
-      // resetForNewFolder's doc comment for why).
-      await _syncCoordinator.resetForNewFolder(event.path);
-    } else {
-      await _preferences.setSyncFolderPath(event.path);
-    }
+    try {
+      final current = state;
+      final previousPath = current is SyncLoaded ? current.syncFolderPath : _preferences.syncFolderPath;
+      if (previousPath != null && previousPath != event.path) {
+        // A different folder than the one already configured starts sync
+        // over from a clean slate — see resetForNewFolder's doc comment. This
+        // awaits the coordinator's mutex, i.e. waits for any pull already in
+        // flight to finish, and now also persists the new path itself, inside
+        // that same lock (PR #16 review round 2, finding 3 — see
+        // resetForNewFolder's doc comment for why).
+        await _syncCoordinator.resetForNewFolder(event.path);
+      } else {
+        await _preferences.setSyncFolderPath(event.path);
+      }
 
-    // Reads `state` again here instead of reusing `current`: the in-flight
-    // pull's own handler can land its "pull finished" emit (isPulling:
-    // false, or a pullError) while the await above was pending, and building
-    // this emit from the state captured before it would resurrect a stale
-    // isPulling: true over that update, wedging every later PullRequested
-    // (PR #16 review round 1, F2).
-    final latest = state;
-    if (latest is SyncLoaded) {
-      // isPulling is forced to false here rather than carried over from
-      // `latest` — it describes the OLD folder's pull (if one was still in
-      // flight above), which says nothing about whether this NEW folder
-      // needs to wait. Forcing it in the same statement as this emit, with
-      // no await before _runSync's own guard check runs next, makes that
-      // guard immune to how far the old pull's own finishing sequence
-      // (getDevices/getFailedEvents/its own emit, running concurrently on a
-      // separate event) has gotten by this point — otherwise it could still
-      // see isPulling: true and skip the new folder's first sync entirely
-      // (PR #16 review round 2, finding 4).
-      emit(latest.copyWith(syncFolderPath: event.path, isPulling: false));
-    } else {
-      emit(await _fetchLoadedState());
+      // Reads `state` again here instead of reusing `current`: the in-flight
+      // pull's own handler can land its "pull finished" emit (isPulling:
+      // false, or a pullError) while the await above was pending, and building
+      // this emit from the state captured before it would resurrect a stale
+      // isPulling: true over that update, wedging every later PullRequested
+      // (PR #16 review round 1, F2).
+      final latest = state;
+      if (latest is SyncLoaded) {
+        // isPulling is forced to false here rather than carried over from
+        // `latest` — it describes the OLD folder's pull (if one was still in
+        // flight above), which says nothing about whether this NEW folder
+        // needs to wait. Forcing it in the same statement as this emit, with
+        // no await before _runSync's own guard check runs next, makes that
+        // guard immune to how far the old pull's own finishing sequence
+        // (getDevices/getFailedEvents/its own emit, running concurrently on a
+        // separate event) has gotten by this point — otherwise it could still
+        // see isPulling: true and skip the new folder's first sync entirely
+        // (PR #16 review round 2, finding 4).
+        emit(latest.copyWith(syncFolderPath: event.path, isPulling: false));
+      } else {
+        emit(await _fetchLoadedState());
+      }
+      _startPolling();
+      _startWatching(event.path);
+      // Runs the pull routine directly instead of add(const PullRequested()):
+      // that event is handled concurrently with whatever else the bloc is
+      // doing (bloc's default EventTransformer), so a re-dispatched event's
+      // guard can still observe the old pull as in flight and return without
+      // ever syncing the new folder. Calling the guard-and-run logic
+      // synchronously from here, right after the isPulling override above,
+      // sidesteps that race instead of relying on it resolving in time.
+      await _runSync(emit);
+    } catch (e) {
+      // Mirrors _onLoadSyncStatus's try/catch (PR #16 review round 4, R1): an
+      // uncaught throw here — e.g. resetForNewFolder's sqflite clearAll, or a
+      // SharedPreferences write failure in setSyncFolderPath — used to escape
+      // this handler entirely, which kills the bloc's event processing for
+      // good (a later PullRequested is never handled again, no restart short
+      // of relaunching the app). Emitting the same error state every other
+      // failure in this bloc gets keeps the bloc alive and gives the user the
+      // page's existing Retry button (re-dispatches LoadSyncStatus).
+      emit(SyncError(e.toString()));
     }
-    _startPolling();
-    _startWatching(event.path);
-    // Runs the pull routine directly instead of add(const PullRequested()):
-    // that event is handled concurrently with whatever else the bloc is
-    // doing (bloc's default EventTransformer), so a re-dispatched event's
-    // guard can still observe the old pull as in flight and return without
-    // ever syncing the new folder. Calling the guard-and-run logic
-    // synchronously from here, right after the isPulling override above,
-    // sidesteps that race instead of relying on it resolving in time.
-    await _runSync(emit);
   }
 
   Future<void> _onPullRequested(
@@ -288,18 +300,21 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     emit(current.copyWith(isPulling: true, pullError: () => null));
     try {
       await _syncCoordinator.syncOnce(path);
+      if (generation != _syncGeneration) {
+        // The folder changed via SyncFolderChosen, or this bloc closed,
+        // while this run was pulling — a newer run already owns the sync UI
+        // state, so this tail must not overwrite it with results for a
+        // folder nobody is looking at any more. Checked before the two
+        // calls below (PR #16 review round 4, N1): a stale run has no use
+        // for a fresh device list or failed-events count it is about to
+        // throw away, so there is no reason to spend those requests.
+        log('stale sync run for $path finished after folder change; dropping result', name: 'SyncBloc');
+        return;
+      }
       // A first pull registers the device, so the device list can now
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
       final failedEvents = await _pullService.getFailedEvents();
-      if (generation != _syncGeneration) {
-        // The folder changed (or the session ended) while this run was
-        // pulling — a newer run already owns the sync UI state, so this
-        // tail must not overwrite it with results for a folder nobody is
-        // looking at any more.
-        log('stale sync run for $path finished after folder change; dropping result', name: 'SyncBloc');
-        return;
-      }
       final latest = state;
       if (latest is SyncLoaded) {
         emit(latest.copyWith(
@@ -366,9 +381,9 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
 
   @override
   Future<void> close() {
-    // The session driving this bloc is ending — see _syncGeneration's doc
-    // comment: a run still in flight at this point must not try to emit
-    // into a bloc that is closing.
+    // This bloc itself is closing — see _syncGeneration's doc comment: a
+    // run still in flight at this point must not try to emit into a bloc
+    // that is closing.
     _syncGeneration++;
     _pollTimer?.cancel();
     _stopWatching();
