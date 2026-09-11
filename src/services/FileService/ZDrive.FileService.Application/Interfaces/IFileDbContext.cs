@@ -8,5 +8,6 @@ public interface IFileDbContext
     DbSet<FileNode> FileNodes { get; }
     DbSet<FileVersion> FileVersions { get; }
     DbSet<Share> Shares { get; }
+    DbSet<FileChange> FileChanges { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
