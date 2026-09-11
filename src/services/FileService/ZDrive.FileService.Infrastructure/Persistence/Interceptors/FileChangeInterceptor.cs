@@ -46,7 +46,10 @@ public sealed class FileChangeInterceptor : SaveChangesInterceptor
         var originDeviceId = _changeOrigin.DeviceId;
         var occurredAt = _timeProvider.GetUtcNow().UtcDateTime;
 
-        foreach (var entry in context.ChangeTracker.Entries<FileNode>())
+        // Materialised first: AddChange adds FileChange entities to the same
+        // change tracker, and adding entries while enumerating it can throw
+        // "collection was modified".
+        foreach (var entry in context.ChangeTracker.Entries<FileNode>().ToList())
         {
             var node = entry.Entity;
 
