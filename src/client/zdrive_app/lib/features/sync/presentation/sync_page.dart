@@ -6,29 +6,20 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
-import '../../../core/di/injection.dart';
-import '../../../core/storage/app_preferences.dart';
-import '../data/pull_sync_service.dart';
-import '../data/sync_coordinator.dart';
-import '../data/sync_remote_data_source.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_models.dart';
 import 'sync_bloc.dart';
 
+/// The sync status page. Reads the ancestor [SyncBloc] provided once for the
+/// whole authenticated app shell (`app_router.dart`) instead of creating its
+/// own — sync then runs from login, not from opening this page, and stops
+/// when the shell (and its provided bloc) is disposed on logout.
 class SyncPage extends StatelessWidget {
   const SyncPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) => SyncBloc(
-        dataSource: getIt<SyncRemoteDataSource>(),
-        syncCoordinator: getIt<SyncCoordinator>(),
-        pullService: getIt<PullSyncService>(),
-        preferences: getIt<AppPreferences>(),
-      )..add(const LoadSyncStatus()),
-      child: const _SyncView(),
-    );
+    return const _SyncView();
   }
 }
 
@@ -84,16 +75,14 @@ class _SyncLoadedBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
-    // Nothing has ever synced: no registered devices AND no conflicts. This
-    // is the only case with nothing to list, so it is the only case that
-    // gets a full-page message instead of the device/conflict list below —
-    // a fresh account must not be told "up to date" before anything has
-    // happened.
-    if (state.devices.isEmpty && state.conflicts.isEmpty) {
+    // Nothing has ever synced: no registered devices. This is the only case
+    // with nothing to list, so it is the only case that gets a full-page
+    // message instead of the device list below — a fresh account must not
+    // be told "up to date" before anything has happened.
+    if (state.devices.isEmpty) {
       return Column(
         children: [
           _FolderStatusTile(state: state),
-          if (state.outboxCount > 0) _OutboxPendingTile(count: state.outboxCount),
           Expanded(
             child: Center(
               child: Column(
@@ -114,48 +103,18 @@ class _SyncLoadedBody extends StatelessWidget {
     return ListView(
       children: [
         _FolderStatusTile(state: state),
-        if (state.outboxCount > 0) _OutboxPendingTile(count: state.outboxCount),
-        if (state.conflicts.isEmpty)
-          ListTile(
-            leading: Icon(Icons.sync, color: Theme.of(context).colorScheme.primary),
-            title: Text(l10n.allSynced),
-            subtitle: Text(l10n.syncDescription),
-          )
-        else ...[
-          _SectionHeader(title: l10n.syncConflicts),
-          for (final conflict in state.conflicts) _ConflictTile(conflict: conflict),
-        ],
+        ListTile(
+          leading: Icon(Icons.sync, color: Theme.of(context).colorScheme.primary),
+          title: Text(l10n.allSynced),
+          subtitle: Text(l10n.syncDescription),
+        ),
         if (state.failedEvents.isNotEmpty) ...[
           _SectionHeader(title: l10n.syncSkippedItems),
           for (final failed in state.failedEvents) _FailedEventTile(failed: failed),
         ],
         _SectionHeader(title: l10n.syncDevices),
-        if (state.devices.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(l10n.syncNoDevices),
-          )
-        else
-          for (final device in state.devices) _DeviceTile(device: device),
+        for (final device in state.devices) _DeviceTile(device: device),
       ],
-    );
-  }
-}
-
-/// One line for the push outbox (PR #14 review round 3) — how many local
-/// changes are still queued waiting to be sent to SyncService. Only shown
-/// when there is something queued; an empty outbox says nothing extra.
-class _OutboxPendingTile extends StatelessWidget {
-  final int count;
-
-  const _OutboxPendingTile({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    return ListTile(
-      leading: Icon(Icons.hourglass_top, color: Theme.of(context).colorScheme.primary),
-      title: Text(l10n.syncOutboxPending(count)),
     );
   }
 }
@@ -198,8 +157,8 @@ class _DeviceTile extends StatelessWidget {
   }
 }
 
-/// This device's own pull status — distinct from the account-wide
-/// devices/conflicts lists below it. Honest about what pull-only sync can
+/// This device's own pull status — distinct from the account-wide device
+/// list below it. Honest about what pull-only sync can
 /// and cannot claim yet: no folder picked, actively pulling, failed, or
 /// caught up are all different states, so none of them get to borrow
 /// "Everything is synced" (that line describes the account, not this
@@ -296,21 +255,6 @@ class _FolderStatusTile extends StatelessWidget {
 
     if (!context.mounted) return;
     context.read<SyncBloc>().add(SyncFolderChosen(path));
-  }
-}
-
-class _ConflictTile extends StatelessWidget {
-  final SyncConflict conflict;
-
-  const _ConflictTile({required this.conflict});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(Icons.warning_amber, color: Theme.of(context).colorScheme.error),
-      title: Text(conflict.fileId),
-      subtitle: Text('${conflict.status} · ${timeago.format(conflict.createdAt)}'),
-    );
   }
 }
 

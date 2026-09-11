@@ -7,6 +7,7 @@ import 'core/auth/auth_bloc.dart';
 import 'core/auth/token_storage.dart';
 import 'core/di/injection.dart';
 import 'features/auth/domain/auth_repository.dart';
+import 'features/sync/data/sync_coordinator.dart';
 import 'shared/router/app_router.dart';
 import 'shared/theme/app_theme.dart';
 import 'shared/theme/theme_cubit.dart';
@@ -28,6 +29,9 @@ class ZDriveApp extends StatelessWidget {
     final authBloc = AuthBloc(
       authRepository: getIt<AuthRepository>(),
       tokenStorage: getIt<TokenStorage>(),
+      // core/auth must not depend on the sync feature directly — passed in
+      // as a plain callback instead (see AuthBloc's own doc comment).
+      beforeLogout: getIt<SyncCoordinator>().endSession,
     )..add(const CheckAuthStatus());
 
     final router = createRouter(authBloc);

@@ -45,7 +45,7 @@ void main() {
 
   group('LoadSyncStatus', () {
     blocTest<SyncBloc, SyncState>(
-      'emits [SyncLoading, SyncLoaded] with mapped devices and conflicts',
+      'emits [SyncLoading, SyncLoaded] with mapped devices',
       build: buildBloc,
       setUp: () {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
@@ -54,14 +54,6 @@ void main() {
                 'name': 'Laptop',
                 'platform': 'windows',
                 'lastSyncAt': '2024-06-01T12:00:00Z',
-              },
-            ]);
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => [
-              {
-                'id': 'c-1',
-                'fileId': 'file-1',
-                'status': 'Pending',
-                'createdAt': '2024-06-02T08:00:00Z',
               },
             ]);
       },
@@ -77,53 +69,11 @@ void main() {
               lastSyncAt: DateTime.parse('2024-06-01T12:00:00Z'),
             ),
           ],
-          conflicts: [
-            SyncConflict(
-              id: 'c-1',
-              fileId: 'file-1',
-              status: 'Pending',
-              createdAt: DateTime.parse('2024-06-02T08:00:00Z'),
-            ),
-          ],
         ),
       ],
-    );
-
-    blocTest<SyncBloc, SyncState>(
-      'filters out resolved conflicts, keeping only pending ones',
-      build: buildBloc,
-      setUp: () {
-        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => [
-              {
-                'id': 'c-1',
-                'fileId': 'file-1',
-                'status': 'Pending',
-                'createdAt': '2024-06-02T08:00:00Z',
-              },
-              {
-                'id': 'c-2',
-                'fileId': 'file-2',
-                'status': 'ResolvedLocal',
-                'createdAt': '2024-06-02T09:00:00Z',
-              },
-            ]);
-      },
-      act: (bloc) => bloc.add(const LoadSyncStatus()),
-      expect: () => [
-        const SyncLoading(),
-        SyncLoaded(
-          devices: const [],
-          conflicts: [
-            SyncConflict(
-              id: 'c-1',
-              fileId: 'file-1',
-              status: 'Pending',
-              createdAt: DateTime.parse('2024-06-02T08:00:00Z'),
-            ),
-          ],
-        ),
-      ],
+      // Re-enables syncOnce after a previous session's endSession — see
+      // SyncCoordinator.startSession's doc comment.
+      verify: (_) => verify(() => mockSyncCoordinator.startSession()).called(1),
     );
 
     blocTest<SyncBloc, SyncState>(
@@ -133,7 +83,6 @@ void main() {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
               {'id': 'dev-1', 'name': 'Phone', 'platform': 'android'},
             ]);
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const LoadSyncStatus()),
       expect: () => [
@@ -142,7 +91,6 @@ void main() {
           devices: [
             SyncDevice(id: 'dev-1', name: 'Phone', platform: 'android'),
           ],
-          conflicts: [],
         ),
       ],
     );
@@ -152,7 +100,6 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => mockDataSource.getDevices()).thenThrow(Exception('network down'));
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const LoadSyncStatus()),
       expect: () => [
@@ -169,7 +116,6 @@ void main() {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
               {'id': 'dev-1', 'name': null, 'platform': 'windows'},
             ]);
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const LoadSyncStatus()),
       expect: () => [
@@ -183,7 +129,7 @@ void main() {
     blocTest<SyncBloc, SyncState>(
       'does nothing when no sync folder is configured yet',
       build: buildBloc,
-      seed: () => const SyncLoaded(devices: [], conflicts: []),
+      seed: () => const SyncLoaded(devices: []),
       act: (bloc) => bloc.add(const PullRequested()),
       expect: () => <SyncState>[],
       verify: (_) => verifyNever(() => mockSyncCoordinator.syncOnce(any())),
@@ -192,10 +138,10 @@ void main() {
     blocTest<SyncBloc, SyncState>(
       'syncs once (pull, then push), then refreshes the device list on success',
       build: buildBloc,
-      seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/local/sync'),
       setUp: () {
         when(() => mockSyncCoordinator.syncOnce('/local/sync'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 2, pushed: 1, queued: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 2, pushed: 1));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
               {'id': 'dev-1', 'name': 'This PC', 'platform': 'windows'},
@@ -205,42 +151,12 @@ void main() {
       expect: () => [
         const SyncLoaded(
           devices: [],
-          conflicts: [],
           syncFolderPath: '/local/sync',
           isPulling: true,
         ),
         const SyncLoaded(
           devices: [SyncDevice(id: 'dev-1', name: 'This PC', platform: 'windows')],
-          conflicts: [],
           syncFolderPath: '/local/sync',
-        ),
-      ],
-    );
-
-    blocTest<SyncBloc, SyncState>(
-      'carries the outbox queue length from SyncRunResult.queued into '
-      'SyncLoaded.outboxCount (PR #14 review round 3)',
-      build: buildBloc,
-      seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
-      setUp: () {
-        when(() => mockSyncCoordinator.syncOnce('/local/sync'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 1, queued: 3));
-        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
-        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
-      },
-      act: (bloc) => bloc.add(const PullRequested()),
-      expect: () => [
-        const SyncLoaded(
-          devices: [],
-          conflicts: [],
-          syncFolderPath: '/local/sync',
-          isPulling: true,
-        ),
-        const SyncLoaded(
-          devices: [],
-          conflicts: [],
-          syncFolderPath: '/local/sync',
-          outboxCount: 3,
         ),
       ],
     );
@@ -248,7 +164,7 @@ void main() {
     blocTest<SyncBloc, SyncState>(
       'surfaces the error and clears isPulling when the sync fails',
       build: buildBloc,
-      seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/local/sync'),
       setUp: () {
         when(() => mockSyncCoordinator.syncOnce('/local/sync'))
             .thenThrow(Exception('disk full'));
@@ -257,13 +173,11 @@ void main() {
       expect: () => [
         const SyncLoaded(
           devices: [],
-          conflicts: [],
           syncFolderPath: '/local/sync',
           isPulling: true,
         ),
         const SyncLoaded(
           devices: [],
-          conflicts: [],
           syncFolderPath: '/local/sync',
           pullError: 'Exception: disk full',
         ),
@@ -273,7 +187,7 @@ void main() {
     blocTest<SyncBloc, SyncState>(
       'does not run a second sync while one is already in flight (F4)',
       build: buildBloc,
-      seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/local/sync'),
       setUp: () {
         final completer = Completer<SyncRunResult>();
         when(() => mockSyncCoordinator.syncOnce('/local/sync'))
@@ -285,7 +199,7 @@ void main() {
         // slow sync (a whole-file transfer) is still in flight.
         Future.delayed(
           const Duration(milliseconds: 20),
-          () => completer.complete(const SyncRunResult(pulled: 0, pushed: 0, queued: 0)),
+          () => completer.complete(const SyncRunResult(pulled: 0, pushed: 0)),
         );
       },
       act: (bloc) {
@@ -299,34 +213,75 @@ void main() {
 
   group('SyncFolderChosen', () {
     blocTest<SyncBloc, SyncState>(
-      'persists the chosen folder and triggers a sync',
+      'persists the chosen folder and triggers a sync, when no folder was '
+      'configured before (nothing to reset)',
       build: buildBloc,
-      seed: () => const SyncLoaded(devices: [], conflicts: []),
+      seed: () => const SyncLoaded(devices: []),
       setUp: () {
         when(() => mockPreferences.setSyncFolderPath('/new/folder'))
             .thenAnswer((_) async {});
         when(() => mockSyncCoordinator.syncOnce('/new/folder'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const SyncFolderChosen('/new/folder')),
       expect: () => [
-        const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/new/folder'),
+        const SyncLoaded(devices: [], syncFolderPath: '/new/folder'),
         const SyncLoaded(
           devices: [],
-          conflicts: [],
           syncFolderPath: '/new/folder',
           isPulling: true,
         ),
         const SyncLoaded(
           devices: [],
-          conflicts: [],
           syncFolderPath: '/new/folder',
         ),
       ],
-      verify: (_) =>
-          verify(() => mockPreferences.setSyncFolderPath('/new/folder')).called(1),
+      verify: (_) {
+        verify(() => mockPreferences.setSyncFolderPath('/new/folder')).called(1);
+        verifyNever(() => mockSyncCoordinator.resetForNewFolder());
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'resets the mirror before persisting a different folder than the '
+      'one already configured',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old/folder'),
+      setUp: () {
+        when(() => mockSyncCoordinator.resetForNewFolder()).thenAnswer((_) async {});
+        when(() => mockPreferences.setSyncFolderPath('/new/folder'))
+            .thenAnswer((_) async {});
+        when(() => mockSyncCoordinator.syncOnce('/new/folder'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+      },
+      act: (bloc) => bloc.add(const SyncFolderChosen('/new/folder')),
+      verify: (_) {
+        verifyInOrder([
+          () => mockSyncCoordinator.resetForNewFolder(),
+          () => mockPreferences.setSyncFolderPath('/new/folder'),
+        ]);
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'does not reset when the "new" folder is the same one already '
+      'configured',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/same/folder'),
+      setUp: () {
+        when(() => mockPreferences.setSyncFolderPath('/same/folder'))
+            .thenAnswer((_) async {});
+        when(() => mockSyncCoordinator.syncOnce('/same/folder'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+      },
+      act: (bloc) => bloc.add(const SyncFolderChosen('/same/folder')),
+      verify: (_) => verifyNever(() => mockSyncCoordinator.resetForNewFolder()),
     );
   });
 
@@ -357,10 +312,9 @@ void main() {
       build: () => buildBloc(watch: (_) => watchController.stream),
       setUp: () {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
         when(() => mockPreferences.syncFolderPath).thenReturn('/watched/folder');
         when(() => mockSyncCoordinator.syncOnce('/watched/folder'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
       },
       act: (bloc) async {
@@ -389,11 +343,11 @@ void main() {
       ),
       setUp: () {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
         when(() => mockPreferences.syncFolderPath).thenReturn('/old/folder');
+        when(() => mockSyncCoordinator.resetForNewFolder()).thenAnswer((_) async {});
         when(() => mockPreferences.setSyncFolderPath('/new/folder')).thenAnswer((_) async {});
         when(() => mockSyncCoordinator.syncOnce(any()))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
       },
       act: (bloc) async {
@@ -425,10 +379,9 @@ void main() {
       build: () => buildBloc(watch: (_) => watchController.stream),
       setUp: () {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
-        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
         when(() => mockPreferences.syncFolderPath).thenReturn('/watched/folder');
         when(() => mockSyncCoordinator.syncOnce('/watched/folder'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
       },
       act: (bloc) async {

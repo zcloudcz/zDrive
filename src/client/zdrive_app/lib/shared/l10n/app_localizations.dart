@@ -470,12 +470,6 @@ abstract class AppLocalizations {
   /// **'Devices'**
   String get syncDevices;
 
-  /// No description provided for @syncConflicts.
-  ///
-  /// In en, this message translates to:
-  /// **'Conflicts'**
-  String get syncConflicts;
-
   /// No description provided for @syncNoDevices.
   ///
   /// In en, this message translates to:
@@ -535,12 +529,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.'**
   String get syncFolderNotEmptyMessage;
-
-  /// No description provided for @syncOutboxPending.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, one{1 change waiting to be sent} other{{count} changes waiting to be sent}}'**
-  String syncOutboxPending(int count);
 
   /// No description provided for @versionHistory.
   ///

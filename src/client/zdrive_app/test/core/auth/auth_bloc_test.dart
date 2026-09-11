@@ -139,5 +139,40 @@ void main() {
       act: (bloc) => bloc.add(const LogoutRequested()),
       expect: () => [const Unauthenticated()],
     );
+
+    test('calls beforeLogout before AuthRepository.logout, when one is '
+        'given — wired in main.dart to SyncCoordinator.endSession so the '
+        'sync feature\'s state is cleared before the account actually logs '
+        'out', () async {
+      final callOrder = <String>[];
+      when(() => mockAuthRepository.logout()).thenAnswer((_) async {
+        callOrder.add('logout');
+      });
+      final bloc = AuthBloc(
+        authRepository: mockAuthRepository,
+        tokenStorage: mockTokenStorage,
+        beforeLogout: () async {
+          callOrder.add('beforeLogout');
+        },
+      );
+      addTearDown(bloc.close);
+
+      bloc.add(const LogoutRequested());
+      await bloc.stream.firstWhere((s) => s is Unauthenticated);
+
+      expect(callOrder, ['beforeLogout', 'logout']);
+    });
+
+    blocTest<AuthBloc, AuthState>(
+      'still logs out normally when no beforeLogout is given — it is '
+      'optional',
+      build: () {
+        when(() => mockAuthRepository.logout())
+            .thenAnswer((_) async {});
+        return buildBloc(); // no beforeLogout passed
+      },
+      act: (bloc) => bloc.add(const LogoutRequested()),
+      expect: () => [const Unauthenticated()],
+    );
   });
 }

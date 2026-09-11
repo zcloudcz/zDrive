@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:zdrive_app/core/di/injection.dart';
 import 'package:zdrive_app/core/storage/app_preferences.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
+import 'package:zdrive_app/features/sync/domain/sync_mirror_entry.dart';
+import 'package:zdrive_app/features/sync/presentation/sync_bloc.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
@@ -20,20 +22,23 @@ class MockAppPreferences extends Mock implements AppPreferences {}
 
 void main() {
   late MockSyncRemoteDataSource mockDataSource;
+  late MockPullSyncService mockPullService;
+  late MockSyncCoordinator mockCoordinator;
+  late MockAppPreferences mockPreferences;
 
   setUp(() {
     mockDataSource = MockSyncRemoteDataSource();
-    getIt.registerLazySingleton<SyncRemoteDataSource>(() => mockDataSource);
-    getIt.registerLazySingleton<PullSyncService>(() => MockPullSyncService());
-    getIt.registerLazySingleton<SyncCoordinator>(() => MockSyncCoordinator());
+    mockPullService = MockPullSyncService();
+    mockCoordinator = MockSyncCoordinator();
+    mockPreferences = MockAppPreferences();
     // No stubbing of syncFolderPath: mocktail returns null for an unstubbed
     // nullable getter, matching "no folder chosen yet" — the state every
     // existing scenario below assumes, since none of them are about pulling.
-    getIt.registerLazySingleton<AppPreferences>(() => MockAppPreferences());
   });
 
-  tearDown(() => getIt.reset());
-
+  // SyncPage now reads the ancestor SyncBloc provided once for the whole
+  // authenticated app shell (app_router.dart) instead of creating its own —
+  // this test wraps it the same way, with a real SyncBloc over mocks.
   Widget buildTestWidget() {
     return MaterialApp(
       localizationsDelegates: const [
@@ -44,76 +49,34 @@ void main() {
       ],
       supportedLocales: AppLocalizations.supportedLocales,
       locale: const Locale('en'),
-      home: const SyncPage(),
+      home: BlocProvider<SyncBloc>(
+        create: (_) => SyncBloc(
+          dataSource: mockDataSource,
+          syncCoordinator: mockCoordinator,
+          pullService: mockPullService,
+          preferences: mockPreferences,
+        )..add(const LoadSyncStatus()),
+        child: const SyncPage(),
+      ),
     );
   }
 
   group('SyncPage', () {
-    testWidgets('shows the registered devices and pending conflicts', (tester) async {
+    testWidgets('shows the registered devices', (tester) async {
       when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
             {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
-          ]);
-      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => [
-            {
-              'id': 'c-1',
-              'fileId': 'file-1',
-              'status': 'Pending',
-              'createdAt': '2024-06-02T08:00:00Z',
-            },
           ]);
 
       await tester.pumpWidget(buildTestWidget());
       await tester.pumpAndSettle();
 
       expect(find.text('Laptop'), findsOneWidget);
-      expect(find.text('file-1'), findsOneWidget);
-      expect(find.textContaining('Pending'), findsOneWidget);
-    });
-
-    testWidgets(
-        'shows the all-synced empty state when devices exist with no conflicts, '
-        'and keeps the device list visible', (tester) async {
-      when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
-            {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
-          ]);
-      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
-
-      await tester.pumpWidget(buildTestWidget());
-      await tester.pumpAndSettle();
-
       expect(find.text('Everything is synced'), findsOneWidget);
-      // The commonest state (a registered device, no conflicts) must still
-      // list the device — this regressed in round 2 when the empty-state
-      // gate was widened to `conflicts.isEmpty` alone.
-      expect(find.text('Laptop'), findsOneWidget);
-    });
-
-    testWidgets('resolved conflicts do not block the all-synced state',
-        (tester) async {
-      when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
-            {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
-          ]);
-      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => [
-            {
-              'id': 'c-1',
-              'fileId': 'file-1',
-              'status': 'ResolvedLocal',
-              'createdAt': '2024-06-02T08:00:00Z',
-            },
-          ]);
-
-      await tester.pumpWidget(buildTestWidget());
-      await tester.pumpAndSettle();
-
-      expect(find.text('Everything is synced'), findsOneWidget);
-      expect(find.text('Laptop'), findsOneWidget);
-      expect(find.text('file-1'), findsNothing);
     });
 
     testWidgets('shows the no-devices state when nothing has ever synced',
         (tester) async {
       when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
-      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
 
       await tester.pumpWidget(buildTestWidget());
       await tester.pumpAndSettle();
@@ -124,28 +87,8 @@ void main() {
       expect(find.text('Everything is synced'), findsNothing);
     });
 
-    testWidgets('shows conflicts alongside the no-devices message when devices are empty',
-        (tester) async {
-      when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
-      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => [
-            {
-              'id': 'c-1',
-              'fileId': 'file-1',
-              'status': 'Pending',
-              'createdAt': '2024-06-02T08:00:00Z',
-            },
-          ]);
-
-      await tester.pumpWidget(buildTestWidget());
-      await tester.pumpAndSettle();
-
-      expect(find.text('file-1'), findsOneWidget);
-      expect(find.text('No devices registered'), findsOneWidget);
-    });
-
     testWidgets('shows an error with retry when loading fails', (tester) async {
       when(() => mockDataSource.getDevices()).thenThrow(Exception('network down'));
-      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
 
       await tester.pumpWidget(buildTestWidget());
       await tester.pumpAndSettle();
@@ -162,29 +105,28 @@ void main() {
       expect(find.text('Laptop'), findsOneWidget);
     });
 
-    testWidgets('shows how many changes are still queued in the push '
-        'outbox after a sync run (PR #14 review round 3)', (tester) async {
-      // Grab (not re-register) the mocks setUp() already wired into getIt —
-      // registerLazySingleton hands back the same instance on every
-      // resolve, so this is the one SyncPage itself will construct its
-      // SyncBloc with.
-      final mockCoordinator = getIt<SyncCoordinator>() as MockSyncCoordinator;
-      final mockPreferences = getIt<AppPreferences>() as MockAppPreferences;
-      final mockPullService = getIt<PullSyncService>() as MockPullSyncService;
-
+    testWidgets('shows skipped items when pull quarantined something',
+        (tester) async {
       when(() => mockPreferences.syncFolderPath).thenReturn('/local/sync');
       when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
             {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
           ]);
-      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
       when(() => mockCoordinator.syncOnce('/local/sync'))
-          .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 3));
-      when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+          .thenAnswer((_) async => const SyncRunResult(pulled: 1, pushed: 0));
+      when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => [
+            SyncFailedEvent(
+              fileId: 'file-1',
+              eventId: 1,
+              reason: 'unsafe remote name',
+              failedAt: DateTime.utc(2026, 1, 1),
+            ),
+          ]);
 
       await tester.pumpWidget(buildTestWidget());
       await tester.pumpAndSettle();
 
-      expect(find.text('3 changes waiting to be sent'), findsOneWidget);
+      expect(find.text('Skipped items'), findsOneWidget);
+      expect(find.text('file-1'), findsOneWidget);
     });
   });
 }

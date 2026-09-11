@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/auth/auth_bloc.dart';
+import '../../core/di/injection.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
 import '../../features/files/presentation/pages/file_browser_page.dart';
@@ -10,6 +12,11 @@ import '../../features/files/presentation/pages/trash_page.dart';
 import '../../features/home/presentation/home_page.dart';
 import '../../features/photos/presentation/pages/albums_page.dart';
 import '../../features/photos/presentation/pages/photos_tab.dart';
+import '../../features/sync/data/pull_sync_service.dart';
+import '../../features/sync/data/sync_coordinator.dart';
+import '../../features/sync/data/sync_remote_data_source.dart';
+import '../../core/storage/app_preferences.dart';
+import '../../features/sync/presentation/sync_bloc.dart';
 import '../../features/sync/presentation/sync_page.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
@@ -31,8 +38,20 @@ GoRouter createRouter(AuthBloc authBloc) {
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
       GoRoute(path: '/register', builder: (_, _) => const RegisterPage()),
       StatefulShellRoute.indexedStack(
-        builder: (_, _, navigationShell) =>
-            HomePage(navigationShell: navigationShell),
+        // SyncBloc lives here, not inside SyncPage: sync then runs for the
+        // whole authenticated session (from login, via LoadSyncStatus)
+        // rather than only while the sync page happens to be open, and
+        // logout disposes this shell — stopping the poll timer and folder
+        // watch along with it — instead of leaving them running headless.
+        builder: (_, _, navigationShell) => BlocProvider<SyncBloc>(
+          create: (_) => SyncBloc(
+            dataSource: getIt<SyncRemoteDataSource>(),
+            syncCoordinator: getIt<SyncCoordinator>(),
+            pullService: getIt<PullSyncService>(),
+            preferences: getIt<AppPreferences>(),
+          )..add(const LoadSyncStatus()),
+          child: HomePage(navigationShell: navigationShell),
+        ),
         branches: [
           StatefulShellBranch(
             routes: [

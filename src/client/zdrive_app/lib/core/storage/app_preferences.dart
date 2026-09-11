@@ -43,4 +43,12 @@ class AppPreferences {
   Future<void> setSyncFolderPath(String path) async {
     await _box.put(_syncFolderPathKey, path);
   }
+
+  /// Forgets the chosen sync folder — called on logout
+  /// ([SyncCoordinator.endSession]) so the next account that logs in on this
+  /// machine is asked to choose its own folder instead of inheriting this
+  /// one's.
+  Future<void> clearSyncFolderPath() async {
+    await _box.delete(_syncFolderPathKey);
+  }
 }

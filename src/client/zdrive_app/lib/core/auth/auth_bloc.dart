@@ -91,12 +91,20 @@ final class AuthError extends AuthState {
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthRepository _authRepository;
   final TokenStorage _tokenStorage;
+  // Called before the repository logout, so the sync feature's own state
+  // (mirror, device id, chosen folder) is cleared before the account is
+  // actually logged out — wired in main.dart to
+  // getIt<SyncCoordinator>().endSession so core/auth does not depend on the
+  // sync feature directly. Optional: nothing in this class requires it.
+  final Future<void> Function()? _beforeLogout;
 
   AuthBloc({
     required AuthRepository authRepository,
     required TokenStorage tokenStorage,
+    Future<void> Function()? beforeLogout,
   })  : _authRepository = authRepository,
         _tokenStorage = tokenStorage,
+        _beforeLogout = beforeLogout,
         super(const AuthInitial()) {
     on<CheckAuthStatus>(_onCheckAuthStatus);
     on<LoginRequested>(_onLoginRequested);
@@ -159,6 +167,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     LogoutRequested event,
     Emitter<AuthState> emit,
   ) async {
+    await _beforeLogout?.call();
     await _authRepository.logout();
     emit(const Unauthenticated());
   }

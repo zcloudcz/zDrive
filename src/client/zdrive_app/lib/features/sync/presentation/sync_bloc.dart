@@ -62,50 +62,37 @@ final class SyncLoading extends SyncState {
 
 final class SyncLoaded extends SyncState {
   final List<SyncDevice> devices;
-  final List<SyncConflict> conflicts;
   final String? syncFolderPath;
   final bool isPulling;
   final String? pullError;
   final List<SyncFailedEvent> failedEvents;
 
-  /// How many local changes are still queued in the push outbox, waiting to
-  /// be sent — [SyncRunResult.queued] from the most recent sync run (0
-  /// until the first one completes).
-  final int outboxCount;
-
   const SyncLoaded({
     required this.devices,
-    required this.conflicts,
     this.syncFolderPath,
     this.isPulling = false,
     this.pullError,
     this.failedEvents = const [],
-    this.outboxCount = 0,
   });
 
   SyncLoaded copyWith({
     List<SyncDevice>? devices,
-    List<SyncConflict>? conflicts,
     String? syncFolderPath,
     bool? isPulling,
     String? Function()? pullError,
     List<SyncFailedEvent>? failedEvents,
-    int? outboxCount,
   }) {
     return SyncLoaded(
       devices: devices ?? this.devices,
-      conflicts: conflicts ?? this.conflicts,
       syncFolderPath: syncFolderPath ?? this.syncFolderPath,
       isPulling: isPulling ?? this.isPulling,
       pullError: pullError != null ? pullError() : this.pullError,
       failedEvents: failedEvents ?? this.failedEvents,
-      outboxCount: outboxCount ?? this.outboxCount,
     );
   }
 
   @override
-  List<Object?> get props =>
-      [devices, conflicts, syncFolderPath, isPulling, pullError, failedEvents, outboxCount];
+  List<Object?> get props => [devices, syncFolderPath, isPulling, pullError, failedEvents];
 }
 
 final class SyncError extends SyncState {
@@ -119,10 +106,12 @@ final class SyncError extends SyncState {
 
 // --- Bloc ---
 
-/// Status page for the (Phase 2) sync engine: registered devices, pending
-/// conflicts, and the designated sync folder and the sync loop that keeps
-/// it up to date — pull, then push local changes, via [SyncCoordinator] so
-/// the two never interleave (see its class doc comment).
+/// Status page for the (Phase 2) sync engine: registered devices, the
+/// designated sync folder, and the sync loop that keeps it up to date —
+/// pull, then push local changes, via [SyncCoordinator] so the two never
+/// interleave (see its class doc comment). Provided once for the whole
+/// authenticated app shell (`app_router.dart`), not per-visit to the sync
+/// page — see [LoadSyncStatus] and [_onLoadSyncStatus].
 class SyncBloc extends Bloc<SyncEvent, SyncState> {
   final SyncRemoteDataSource _dataSource;
   final SyncCoordinator _syncCoordinator;
@@ -174,6 +163,10 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     LoadSyncStatus event,
     Emitter<SyncState> emit,
   ) async {
+    // Re-enables syncOnce after a previous session's endSession — see
+    // SyncCoordinator.startSession's doc comment. A no-op the very first
+    // time this app has ever loaded (nothing has ended a session yet).
+    _syncCoordinator.startSession();
     emit(const SyncLoading());
     try {
       final loaded = await _fetchLoadedState();
@@ -192,8 +185,14 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     SyncFolderChosen event,
     Emitter<SyncState> emit,
   ) async {
-    await _preferences.setSyncFolderPath(event.path);
     final current = state;
+    final previousPath = current is SyncLoaded ? current.syncFolderPath : _preferences.syncFolderPath;
+    if (previousPath != null && previousPath != event.path) {
+      // A different folder than the one already configured starts sync
+      // over from a clean slate — see resetForNewFolder's doc comment.
+      await _syncCoordinator.resetForNewFolder();
+    }
+    await _preferences.setSyncFolderPath(event.path);
     if (current is SyncLoaded) {
       emit(current.copyWith(syncFolderPath: event.path));
     } else {
@@ -221,7 +220,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
 
     emit(current.copyWith(isPulling: true, pullError: () => null));
     try {
-      final result = await _syncCoordinator.syncOnce(current.syncFolderPath!);
+      await _syncCoordinator.syncOnce(current.syncFolderPath!);
       // A first pull registers the device, so the device list can now
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
@@ -232,7 +231,6 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
           devices: devices.map(SyncDevice.fromJson).toList(),
           isPulling: false,
           failedEvents: failedEvents,
-          outboxCount: result.queued,
         ));
       }
     } catch (e) {
@@ -244,22 +242,9 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   }
 
   Future<SyncLoaded> _fetchLoadedState() async {
-    final results = await Future.wait([
-      _dataSource.getDevices(),
-      _dataSource.getConflicts(),
-    ]);
+    final devices = await _dataSource.getDevices();
     return SyncLoaded(
-      devices: results[0].map(SyncDevice.fromJson).toList(),
-      // GetConflictsQueryHandler (SyncService) filters only on user, not
-      // status, because the same endpoint backs a resolved-conflict
-      // integration check (SyncFlowTests.ResolveConflict_StatusUpdated).
-      // This page only cares about conflicts still needing action, so the
-      // filter lives here instead of narrowing the shared query. Wire
-      // value is "Pending" (ConflictStatus.ToString()), not lowercase.
-      conflicts: results[1]
-          .map(SyncConflict.fromJson)
-          .where((c) => c.status == 'Pending')
-          .toList(),
+      devices: devices.map(SyncDevice.fromJson).toList(),
       syncFolderPath: _preferences.syncFolderPath,
     );
   }

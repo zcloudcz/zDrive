@@ -20,22 +20,3 @@ class SyncDevice extends Equatable {
   @override
   List<Object?> get props => [id, name, platform];
 }
-
-class SyncConflict extends Equatable {
-  final String id;
-  final String fileId;
-  final String status;
-  final DateTime createdAt;
-
-  const SyncConflict({required this.id, required this.fileId, required this.status, required this.createdAt});
-
-  factory SyncConflict.fromJson(Map<String, dynamic> json) => SyncConflict(
-        id: json['id'] as String,
-        fileId: json['fileId'] as String,
-        status: json['status'] as String,
-        createdAt: DateTime.parse(json['createdAt'] as String),
-      );
-
-  @override
-  List<Object?> get props => [id, fileId, status];
-}

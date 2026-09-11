@@ -4,21 +4,29 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
+import 'package:zdrive_app/core/storage/app_preferences.dart';
+import 'package:zdrive_app/features/sync/data/device_id_storage.dart';
 import 'package:zdrive_app/features/sync/data/local_change_scanner.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
-import 'package:zdrive_app/features/sync/data/push_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
+import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart';
 
 class MockPullSyncService extends Mock implements PullSyncService {}
 
 class MockLocalChangeScanner extends Mock implements LocalChangeScanner {}
 
-class MockPushSyncService extends Mock implements PushSyncService {}
+class MockSyncMirrorRepository extends Mock implements SyncMirrorRepository {}
+
+class MockDeviceIdStorage extends Mock implements DeviceIdStorage {}
+
+class MockAppPreferences extends Mock implements AppPreferences {}
 
 void main() {
   late MockPullSyncService mockPull;
   late MockLocalChangeScanner mockScanner;
-  late MockPushSyncService mockPush;
+  late MockSyncMirrorRepository mockMirror;
+  late MockDeviceIdStorage mockDeviceIdStorage;
+  late MockAppPreferences mockPreferences;
   late SyncCoordinator coordinator;
   late Directory tempDir;
   late String syncPath;
@@ -26,27 +34,28 @@ void main() {
   setUp(() {
     mockPull = MockPullSyncService();
     mockScanner = MockLocalChangeScanner();
-    mockPush = MockPushSyncService();
-    coordinator = SyncCoordinator(mockPull, mockScanner, mockPush);
-    // A real, existing directory — syncOnce now checks for that before
-    // doing anything else (F3), so a bare string like '/local/sync' that
-    // does not exist on the test runner's filesystem would fail every
-    // test in this file, not just the one added for that check below.
+    mockMirror = MockSyncMirrorRepository();
+    mockDeviceIdStorage = MockDeviceIdStorage();
+    mockPreferences = MockAppPreferences();
+    coordinator = SyncCoordinator(mockPull, mockScanner, mockMirror, mockDeviceIdStorage, mockPreferences);
+    // A real, existing directory — syncOnce checks for that before doing
+    // anything else (F3), so a bare string like '/local/sync' that does
+    // not exist on the test runner's filesystem would fail every test in
+    // this file, not just the one added for that check below.
     tempDir = Directory.systemTemp.createTempSync('sync_coordinator_test_');
     syncPath = tempDir.path;
 
-    // Baseline every test below assumes unless it says otherwise: the
-    // scan's own writes drain cleanly and nothing is left queued.
-    when(() => mockPush.drainOutbox()).thenAnswer((_) async => 0);
-    when(() => mockPush.outboxCount()).thenAnswer((_) async => 0);
+    when(() => mockMirror.clearAll()).thenAnswer((_) async {});
+    when(() => mockDeviceIdStorage.clear()).thenAnswer((_) async {});
+    when(() => mockPreferences.clearSyncFolderPath()).thenAnswer((_) async {});
   });
 
   tearDown(() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
-  test('syncOnce pulls, then scans, then drains the outbox — each step '
-      'strictly completes before the next starts', () async {
+  test('syncOnce pulls, then scans — each step strictly completes before '
+      'the next starts', () async {
     final callOrder = <String>[];
     when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async {
       callOrder.add('pull');
@@ -56,41 +65,12 @@ void main() {
       callOrder.add('scan');
       return 2;
     });
-    when(() => mockPush.drainOutbox()).thenAnswer((_) async {
-      callOrder.add('drain');
-      return 2;
-    });
 
     final result = await coordinator.syncOnce(syncPath);
 
-    expect(callOrder, ['pull', 'scan', 'drain']);
+    expect(callOrder, ['pull', 'scan']);
     expect(result.pulled, 3);
     expect(result.pushed, 2);
-    expect(result.queued, 0);
-  });
-
-  test('drainOutbox failure does not throw out of syncOnce — the queue '
-      'retries next cycle', () async {
-    when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
-    when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 1);
-    when(() => mockPush.drainOutbox()).thenThrow(Exception('SyncService unreachable'));
-    when(() => mockPush.outboxCount()).thenAnswer((_) async => 4);
-
-    final result = await coordinator.syncOnce(syncPath);
-
-    expect(result.pushed, 1);
-    expect(result.queued, 4);
-  });
-
-  test('queued reflects what is left in the outbox after the drain', () async {
-    when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
-    when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 0);
-    when(() => mockPush.drainOutbox()).thenAnswer((_) async => 1);
-    when(() => mockPush.outboxCount()).thenAnswer((_) async => 2);
-
-    final result = await coordinator.syncOnce(syncPath);
-
-    expect(result.queued, 2);
   });
 
   test('two concurrent syncOnce calls run pull and scan exactly once — the '
@@ -101,7 +81,7 @@ void main() {
     when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async {
       pullCalls++;
       // Held open until the test releases it, so both syncOnce calls are
-      // guaranteed to overlap before either completes.
+      // guaranteed to overlap in time before either completes.
       return gate.future;
     });
     when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async {
@@ -156,5 +136,80 @@ void main() {
 
     verifyNever(() => mockPull.pullOnce(any()));
     verifyNever(() => mockScanner.scanOnce(any()));
+  });
+
+  group('endSession (test 5)', () {
+    test('clears the mirror, the device id, and the chosen sync folder',
+        () async {
+      await coordinator.endSession();
+
+      verify(() => mockMirror.clearAll()).called(1);
+      verify(() => mockDeviceIdStorage.clear()).called(1);
+      verify(() => mockPreferences.clearSyncFolderPath()).called(1);
+    });
+
+    test('syncOnce is a no-op after endSession, until startSession '
+        're-enables it', () async {
+      await coordinator.endSession();
+
+      final result = await coordinator.syncOnce(syncPath);
+
+      expect(result.pulled, 0);
+      expect(result.pushed, 0);
+      verifyNever(() => mockPull.pullOnce(any()));
+      verifyNever(() => mockScanner.scanOnce(any()));
+
+      coordinator.startSession();
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 1);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 1);
+
+      final afterRestart = await coordinator.syncOnce(syncPath);
+
+      expect(afterRestart.pulled, 1);
+      expect(afterRestart.pushed, 1);
+    });
+  });
+
+  group('resetForNewFolder (test 6)', () {
+    test('clears the mirror (rows, cursor, bootstrap state, failed events '
+        '— all wiped by the same clearAll call)', () async {
+      await coordinator.resetForNewFolder();
+
+      verify(() => mockMirror.clearAll()).called(1);
+      // Switching folders keeps the session alive, unlike endSession —
+      // device id and chosen folder are not touched by this call.
+      verifyNever(() => mockDeviceIdStorage.clear());
+      verifyNever(() => mockPreferences.clearSyncFolderPath());
+    });
+  });
+
+  group('mutex (test 7)', () {
+    test('endSession called while syncOnce is in flight runs only after it '
+        'completes', () async {
+      final pullGate = Completer<int>();
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) => pullGate.future);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 0);
+
+      final syncFuture = coordinator.syncOnce(syncPath);
+      // syncOnce is now mid-pull, held open by pullGate.
+      await Future<void>.delayed(Duration.zero);
+
+      final endSessionFuture = coordinator.endSession();
+      var endSessionCompleted = false;
+      unawaited(endSessionFuture.whenComplete(() => endSessionCompleted = true));
+
+      // endSession must not have run yet — the mutex holds it behind the
+      // in-flight syncOnce.
+      await Future<void>.delayed(Duration.zero);
+      expect(endSessionCompleted, isFalse);
+      verifyNever(() => mockMirror.clearAll());
+
+      pullGate.complete(0);
+      await syncFuture;
+      await endSessionFuture;
+
+      expect(endSessionCompleted, isTrue);
+      verify(() => mockMirror.clearAll()).called(1);
+    });
   });
 }

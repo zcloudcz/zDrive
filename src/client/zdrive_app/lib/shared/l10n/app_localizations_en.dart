@@ -197,9 +197,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncDevices => 'Devices';
 
   @override
-  String get syncConflicts => 'Conflicts';
-
-  @override
   String get syncNoDevices => 'No devices registered';
 
   @override
@@ -230,17 +227,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get syncFolderNotEmptyMessage =>
       'This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.';
-
-  @override
-  String syncOutboxPending(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count changes waiting to be sent',
-      one: '1 change waiting to be sent',
-    );
-    return '$_temp0';
-  }
 
   @override
   String get versionHistory => 'Version history';
