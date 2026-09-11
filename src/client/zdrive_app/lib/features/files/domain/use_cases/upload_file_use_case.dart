@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:injectable/injectable.dart';
 
 import '../file_repository.dart';
@@ -13,9 +11,10 @@ class UploadFileUseCase {
   Future<String> call(
     String? parentId,
     String fileName,
-    Uint8List bytes, {
+    Stream<List<int>> content,
+    int sizeBytes, {
     void Function(double progress)? onProgress,
   }) {
-    return _repository.uploadFile(parentId, fileName, bytes, onProgress);
+    return _repository.uploadFile(parentId, fileName, content, sizeBytes, onProgress);
   }
 }

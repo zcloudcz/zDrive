@@ -47,10 +47,34 @@ class ManifestChunkIndexException implements Exception {
       'ManifestChunkIndexException: expected chunk index $expectedIndex, got $actualIndex';
 }
 
+/// Thrown when the stream handed to [FileUploadDataSource.uploadFile]
+/// produced a different number of bytes than the caller declared as
+/// [FileUploadDataSource.uploadFile]'s `sizeBytes`. StorageService only
+/// checks chunk *count* and index completeness, never byte length (see the
+/// doc comment on `uploadFile`), so a stream that changed size between being
+/// picked and being read would otherwise complete as a corrupt upload with
+/// no error anywhere — this is the client-side check that catches it.
+class UploadSizeMismatchException implements Exception {
+  final int expectedSize;
+  final int actualSize;
+
+  const UploadSizeMismatchException(this.expectedSize, this.actualSize);
+
+  @override
+  String toString() =>
+      'UploadSizeMismatchException: declared $expectedSize bytes, stream produced $actualSize';
+}
+
 /// Thin transport over StorageService's chunked-upload API. Orchestration
 /// (creating the file node, recording the version) lives in the repository.
 @lazySingleton
 class FileUploadDataSource {
+  /// Matches `ZDrive.BackupCli/Backup/Chunking.cs`'s `ChunkSize` — not
+  /// because the server enforces a particular chunk size (it doesn't; each
+  /// chunk's actual byte count is recorded as uploaded), but so uploads from
+  /// this client and from the backup CLI produce comparably-shaped manifests.
+  static const chunkSize = 4 * 1024 * 1024;
+
   final Dio _dio;
 
   FileUploadDataSource(this._dio);
@@ -102,6 +126,85 @@ class FileUploadDataSource {
       '${ApiConstants.storage}/upload/$sessionId/complete',
     );
     return UploadCompleteDto.fromJson(unwrapMap(response));
+  }
+
+  /// Uploads [content] for [fileId] as a real multi-chunk session: splits it
+  /// into [chunkSize] windows and streams each one from [content] straight
+  /// into a PUT, without ever holding more than one chunk in memory — the
+  /// counterpart to [downloadFile] below, which reassembles the same shape
+  /// back. [sizeBytes] must be the exact byte count [content] will produce;
+  /// it is used both to compute totalChunks up front (required by
+  /// [initUpload] before any chunk is sent) and, once the stream is fully
+  /// read, to check against the actual byte count. That second check matters
+  /// because StorageService only verifies chunk *count* and index
+  /// completeness ([UploadChunkCommandHandler], [CompleteUploadCommandHandler])
+  /// — never byte length — so a stream that turns out shorter or longer than
+  /// [sizeBytes] but still produces the same number of chunks (e.g. the
+  /// picked file changed size between pick and upload) would otherwise
+  /// complete silently with mismatched metadata instead of failing loudly.
+  Future<UploadCompleteDto> uploadFile(
+    String fileId,
+    String fileName,
+    Stream<List<int>> content,
+    int sizeBytes, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final totalChunks = sizeBytes == 0 ? 1 : (sizeBytes / chunkSize).ceil();
+    final session = await initUpload(fileId, fileName, totalChunks);
+
+    var index = 0;
+    var uploadedBytes = 0;
+    await for (final chunk in _splitIntoChunks(content)) {
+      await uploadChunk(
+        session.sessionId,
+        index,
+        chunk,
+        onProgress: onProgress == null
+            ? null
+            : (sent, total) {
+                if (sizeBytes > 0) {
+                  onProgress((uploadedBytes + sent) / sizeBytes);
+                }
+              },
+      );
+      uploadedBytes += chunk.length;
+      index++;
+    }
+
+    if (uploadedBytes != sizeBytes) {
+      throw UploadSizeMismatchException(sizeBytes, uploadedBytes);
+    }
+
+    return completeUpload(session.sessionId);
+  }
+
+  /// Buffers [source] into exactly [chunkSize]-byte windows (the last one
+  /// may be shorter), regardless of how the underlying platform stream
+  /// happens to deliver bytes — file_picker reads web files in 1 MB windows
+  /// and native files via dart:io's own buffer size, neither of which lines
+  /// up with chunkSize on its own. A source that yields nothing produces one
+  /// empty chunk, matching Chunking.cs's handling of zero-byte files (a
+  /// session needs totalChunks > 0).
+  static Stream<Uint8List> _splitIntoChunks(Stream<List<int>> source) async* {
+    final buffer = BytesBuilder(copy: false);
+    var yielded = false;
+
+    await for (final piece in source) {
+      buffer.add(piece);
+      while (buffer.length >= chunkSize) {
+        final bytes = buffer.toBytes();
+        buffer.clear();
+        yield Uint8List.sublistView(bytes, 0, chunkSize);
+        yielded = true;
+        if (bytes.length > chunkSize) {
+          buffer.add(bytes.sublist(chunkSize));
+        }
+      }
+    }
+
+    if (buffer.isNotEmpty || !yielded) {
+      yield buffer.toBytes();
+    }
   }
 
   /// Fetches the chunk manifest for a file.
@@ -156,10 +259,11 @@ class FileUploadDataSource {
     }
 
     // ponytail: whole file is buffered in memory (this BytesBuilder plus the
-    // copy toBytes() makes), peak ~2-3x file size. Pre-existing ceiling —
-    // upload is already whole-file/single-chunk, so nothing this client
-    // uploads is bigger than that today. Upgrade path if that changes:
-    // stream to a temp file on native, File System Access API on web.
+    // copy toBytes() makes), peak ~2-3x file size. uploadFile above streams
+    // chunk-by-chunk and never holds more than one chunk at a time, so this
+    // client can now upload a file it cannot download back — asymmetric, not
+    // a matched pair. Upgrade path: stream to a temp file on native, File
+    // System Access API on web.
     final builder = BytesBuilder(copy: false);
     for (final chunk in chunks) {
       final bytes = await downloadChunkBytes(fileId, chunk.hash);

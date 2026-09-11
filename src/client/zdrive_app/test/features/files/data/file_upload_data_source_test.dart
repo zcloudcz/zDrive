@@ -73,6 +73,139 @@ void main() {
     expect(result.totalSize, 1234);
   });
 
+  group('uploadFile (multi-chunk upload)', () {
+    // Session/chunk-PUT/complete stubs generic enough to serve any of the
+    // sizes/streams below — these tests care about totalChunks and the
+    // byte-count check, not about individual chunk paths.
+    void stubUploadSession() {
+      when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer(
+          (_) async => ok({'sessionId': 's1', 'sasUploadUrl': 'x'}, apiInit));
+      when(() => dio.put(
+            any(),
+            data: any(named: 'data'),
+            options: any(named: 'options'),
+            onSendProgress: any(named: 'onSendProgress'),
+          )).thenAnswer((_) async => ok(
+          {'sessionId': 's1', 'chunkIndex': 0, 'chunkHash': 'h', 'accepted': true}, ''));
+      when(() => dio.post('/storage/upload/s1/complete')).thenAnswer((_) async =>
+          ok({'blobPath': 'p', 'manifestHash': 'h1', 'totalSize': 0}, ''));
+    }
+
+    test('derives totalChunks from sizeBytes instead of hard-coding 1, when '
+        'the stream actually produces that many bytes', () async {
+      stubUploadSession();
+      const chunkSize = FileUploadDataSource.chunkSize;
+
+      for (final size in [0, chunkSize, chunkSize + 1, chunkSize * 3]) {
+        await ds.uploadFile('f1', 'x.bin', Stream.value(Uint8List(size)), size);
+      }
+
+      final totalChunksSent = verify(
+        () => dio.post(apiInit, data: captureAny(named: 'data')),
+      ).captured.map((data) => (data as Map)['totalChunks']).toList();
+
+      expect(totalChunksSent, [1, 1, 2, 3]);
+    });
+
+    test(
+        'throws UploadSizeMismatchException when the stream produces fewer '
+        'bytes than sizeBytes declared, even though the chunk count still '
+        'comes out to 1 either way (round-3 review finding 2 — this used to '
+        'be exactly the input the old "derives totalChunks" test fed in and '
+        'expected to succeed)', () async {
+      stubUploadSession();
+
+      await expectLater(
+        ds.uploadFile('f1', 'x.bin', const Stream<List<int>>.empty(),
+            FileUploadDataSource.chunkSize),
+        throwsA(isA<UploadSizeMismatchException>()),
+      );
+
+      verifyNever(() => dio.post('/storage/upload/s1/complete'));
+    });
+
+    test(
+        'throws UploadSizeMismatchException when the stream is short by a '
+        'few bytes but still produces the same chunk count as declared — '
+        'the input that distinguishes a byte-count check from a chunk-count '
+        'check (round-3 review finding 2)', () async {
+      stubUploadSession();
+      const chunkSize = FileUploadDataSource.chunkSize;
+      final shortContent = Uint8List(chunkSize - 100);
+
+      await expectLater(
+        ds.uploadFile('f1', 'x.bin', Stream.value(shortContent), chunkSize),
+        throwsA(isA<UploadSizeMismatchException>()),
+      );
+
+      verifyNever(() => dio.post('/storage/upload/s1/complete'));
+    });
+
+    test('a multi-chunk upload round-trips through downloadFile', () async {
+      // Two chunks: one full ChunkSize window plus a short remainder — big
+      // enough that a hard-coded single-chunk upload (the old behaviour)
+      // would silently drop everything past the first ChunkSize bytes.
+      final content = Uint8List.fromList(
+          List.generate(FileUploadDataSource.chunkSize + 10, (i) => i % 256));
+
+      when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer(
+          (_) async => ok({'sessionId': 's1', 'sasUploadUrl': 'x'}, apiInit));
+
+      final uploadedChunks = <int, Uint8List>{};
+      for (final index in [0, 1]) {
+        when(() => dio.put(
+              '/storage/upload/s1/chunk/$index',
+              data: any(named: 'data'),
+              options: any(named: 'options'),
+              onSendProgress: any(named: 'onSendProgress'),
+            )).thenAnswer((invocation) async {
+          final stream = invocation.namedArguments[#data] as Stream<List<int>>;
+          final bytes = Uint8List.fromList((await stream.toList()).expand((e) => e).toList());
+          uploadedChunks[index] = bytes;
+          return ok({'sessionId': 's1', 'chunkIndex': index, 'chunkHash': 'h', 'accepted': true},
+              '/storage/upload/s1/chunk/$index');
+        });
+      }
+
+      when(() => dio.post('/storage/upload/s1/complete')).thenAnswer((_) async =>
+          ok({'blobPath': 'p', 'manifestHash': 'h1', 'totalSize': content.length}, ''));
+
+      final complete = await ds.uploadFile('f1', 'big.bin', Stream.value(content), content.length);
+
+      expect(complete.totalSize, content.length);
+      expect(uploadedChunks.keys.toSet(), {0, 1});
+      expect(uploadedChunks[0]!.length, FileUploadDataSource.chunkSize);
+      expect(uploadedChunks[1]!.length, 10);
+      expect([...uploadedChunks[0]!, ...uploadedChunks[1]!], content);
+
+      // Now serve those same chunks back through the manifest/download
+      // endpoints downloadFile already exercises (see the group below), and
+      // check the round trip reproduces the exact original bytes.
+      when(() => dio.get('/storage/download/f1/manifest')).thenAnswer((_) async => ok({
+            'totalSize': content.length,
+            'chunks': [
+              for (final entry in uploadedChunks.entries)
+                {'hash': sha256.convert(entry.value).toString(), 'index': entry.key},
+            ],
+          }, '/storage/download/f1/manifest'));
+      for (final entry in uploadedChunks.entries) {
+        final hash = sha256.convert(entry.value).toString();
+        when(() => dio.get<List<int>>(
+              '/storage/download/f1/chunk/$hash/bytes',
+              options: any(named: 'options'),
+            )).thenAnswer((_) async => Response<List<int>>(
+              data: entry.value,
+              statusCode: 200,
+              requestOptions:
+                  RequestOptions(path: '/storage/download/f1/chunk/$hash/bytes'),
+            ));
+      }
+
+      final downloaded = await ds.downloadFile('f1');
+      expect(downloaded, content);
+    });
+  });
+
   group('downloadFile (chunk reassembly)', () {
     // Manifest and chunks now come through this app's own API (proxied by
     // StorageService), camelCase like every other controller response — see

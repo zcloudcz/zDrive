@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
+using ZDrive.ApiGateway;
 using ZDrive.Shared.Extensions;
 using ZDrive.Shared.Middleware;
 
@@ -57,26 +58,76 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// Rate limiting
+// Rate limiting — partitioned per caller (see RateLimiterPartitioning) rather
+// than one global counter: a 1 GB upload is ~256 chunk requests, and a single
+// global window meant one large transfer would 429 itself halfway through
+// and starve every other user at the same time.
+//
+// A rejected request is answered immediately (QueueLimit = 0) rather than
+// held in the limiter's internal queue: the previous QueueLimit could hold a
+// request for up to the full window (~60s) while Dio's receiveTimeout
+// (dio_client.dart) is 15s, so the client gave up first and saw a
+// DioException with no response — no status code, so RetryInterceptor could
+// not even recognise it as a rate-limit rejection to retry. An immediate 429
+// always carries a status code and, via OnRejected below, a Retry-After
+// header (the fixed window's length, not the time actually left in it — see
+// RateLimiterPartitioning.GetRetryAfterSeconds), which the client honours
+// instead of guessing a backoff against a window length it doesn't know.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    options.AddFixedWindowLimiter("fixed", limiterOptions =>
+    options.OnRejected = (context, _) =>
     {
-        limiterOptions.PermitLimit = 100;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 10;
-    });
+        var retryAfterSeconds = RateLimiterPartitioning.GetRetryAfterSeconds(context.Lease);
+        if (retryAfterSeconds != null)
+        {
+            context.HttpContext.Response.Headers.RetryAfter = retryAfterSeconds;
+        }
+        return ValueTask.CompletedTask;
+    };
 
-    options.AddFixedWindowLimiter("auth", limiterOptions =>
-    {
-        limiterOptions.PermitLimit = 20;
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 5;
-    });
+    options.AddPolicy("fixed", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 100,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        }));
+
+    options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        }));
+
+    // Chunk PUTs (storage-upload-route, /api/v1/storage/upload/**) get their
+    // own budget instead of sharing "fixed": clients (this app and BackupCli)
+    // use 4 MiB chunks by convention, so a 1 GB upload is already ~256 of
+    // them, and sharing "fixed" meant a transfer in progress could 429 the
+    // same user's own file list, thumbnails, etc. 4 MiB is not enforced
+    // anywhere server-side, though — StorageController.UploadChunk allows up
+    // to 50 MB per request, and Kestrel's own 30 MB default applies first —
+    // so 600/min is a budget for the well-behaved chunk size clients
+    // actually use, not a bandwidth cap backed by a real per-request limit.
+    // A fixed window is used (instead of e.g. a ConcurrencyLimiter) so it
+    // keeps producing the same RetryAfter metadata the OnRejected handler
+    // above already relies on.
+    options.AddPolicy("chunk", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 600,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        }));
 });
 
 // YARP reverse proxy
@@ -105,8 +156,16 @@ var app = builder.Build();
 // Middleware
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors();
-app.UseRateLimiter();
+// Authentication runs before the rate limiter so the partitioner above can
+// read the authenticated user's id off HttpContext.User — it would always
+// see an empty principal (and fall back to IP) if this ran the other way.
+// Trade-off: a flood of well-formed but wrongly-signed bearer tokens now
+// pays for RSA signature validation before the limiter can shed it, where
+// previously the limiter ran first. Partitioning by user id requires this
+// order; there is no rate limiting on unauthenticated request volume as a
+// result, only on the responses each partition key produces.
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapReverseProxy();
 

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:injectable/injectable.dart';
 
 import '../domain/file_item.dart';
@@ -13,6 +14,20 @@ import 'file_upload_data_source.dart';
 class FileRepositoryImpl implements FileRepository {
   final FileRemoteDataSource _remoteDataSource;
   final FileUploadDataSource _uploadDataSource;
+
+  /// Ids of nodes *this app instance* created via [_remoteDataSource.createFile]
+  /// and then failed to finish uploading into (chunk upload, complete, or
+  /// createFileVersion threw after the node existed). Used by
+  /// [_createOrReuseNode] to decide whether a 409's conflicting node is safe
+  /// to reuse: `manifestHash == null` alone is not enough, since it is also
+  /// true while an upload into that node is still running right now, from
+  /// this device or another (round-3 review finding 1 — reusing on
+  /// `manifestHash == null` alone could silently merge two independent
+  /// uploads). In-memory and per-instance (this class is a `@LazySingleton`)
+  /// on purpose: an app restart clears it, so an orphan from a previous run
+  /// gets the 409 instead of a silent reuse — loud over silent, the rule
+  /// this repo has followed since PR #10.
+  final Set<String> _failedUploadNodeIds = {};
 
   FileRepositoryImpl(this._remoteDataSource, this._uploadDataSource);
 
@@ -126,43 +141,112 @@ class FileRepositoryImpl implements FileRepository {
   Future<String> uploadFile(
     String? parentId,
     String fileName,
-    Uint8List bytes,
+    Stream<List<int>> content,
+    int sizeBytes,
     void Function(double progress)? onProgress,
   ) async {
     // Client-orchestrated upload across two services:
-    //  1. FileService — create the file node (gives us the id).
+    //  1. FileService — create the file node (gives us the id), or reuse one
+    //     an earlier attempt already created (see _createOrReuseNode below).
     //  2. StorageService — open a session, push chunks, complete (returns the
     //     manifest hash that identifies this content).
     //  3. FileService — record the version, binding the manifest to the file.
-    final node = await _remoteDataSource.createFile(
-      name: fileName,
-      isFolder: false,
-      parentId: parentId,
-      sizeBytes: bytes.length,
-    );
+    final node = await _createOrReuseNode(parentId, fileName, sizeBytes);
 
-    // MVP: single-chunk upload.
-    final session = await _uploadDataSource.initUpload(node.id, fileName, 1);
-    await _uploadDataSource.uploadChunk(
-      session.sessionId,
-      0,
-      bytes,
-      onProgress: onProgress != null
-          ? (sent, total) {
-              if (total > 0) onProgress(sent / total);
-            }
-          : null,
-    );
-    final complete = await _uploadDataSource.completeUpload(session.sessionId);
+    try {
+      final complete = await _uploadDataSource.uploadFile(
+        node.id,
+        fileName,
+        content,
+        sizeBytes,
+        onProgress: onProgress,
+      );
 
-    await _remoteDataSource.createFileVersion(
-      node.id,
-      blobVersionId: complete.manifestHash,
-      sizeBytes: complete.totalSize,
-      manifestHash: complete.manifestHash,
-    );
+      await _remoteDataSource.createFileVersion(
+        node.id,
+        blobVersionId: complete.manifestHash,
+        sizeBytes: complete.totalSize,
+        manifestHash: complete.manifestHash,
+      );
 
-    return node.id;
+      _failedUploadNodeIds.remove(node.id);
+      return node.id;
+    } catch (_) {
+      // Record the node as ours-and-failed *before* rethrowing, so a
+      // same-instance retry of the same name can recognise and reuse it on
+      // the next 409 (see _createOrReuseNode).
+      _failedUploadNodeIds.add(node.id);
+      rethrow;
+    }
+  }
+
+  /// Creates the file node for [fileName], or — only when FileService
+  /// rejects it as a duplicate (409, CreateFileCommandHandler.cs) — reuses
+  /// the conflicting node, but only when both hold:
+  ///  - [FileDto.manifestHash] is null (no upload has completed for it yet),
+  ///    and
+  ///  - its id is in [_failedUploadNodeIds] — this app instance is the one
+  ///    that created it and then failed to finish uploading into it.
+  /// The first check alone is not enough: it is also true while an upload
+  /// into the node is still running right now, from this device or another,
+  /// so reusing on it alone could silently merge two independent uploads
+  /// (round-3 review finding 1). Anything that fails either check is treated
+  /// as a genuine duplicate as far as this instance can tell — the 409 is
+  /// rethrown unchanged, so the user sees the same "already exists" failure
+  /// as before this reuse logic existed, instead of a silent overwrite of
+  /// someone else's file.
+  ///
+  /// The id is *removed* from the set when it is reused, so each failed node
+  /// is handed out at most once. Checking membership without removing left
+  /// the node claimable for as long as the retry ran, and a third upload of
+  /// the same name took it too (round-4 review). This holds for uploads from
+  /// this app instance only: ZDrive.BackupCli reuses nodes by name on its own
+  /// terms and is not bound by this set.
+  ///
+  /// Looking this up only after a 409 (instead of listing children before
+  /// every upload) keeps the common case a single request and avoids a
+  /// lookup-then-create race between two concurrent uploads of the same name.
+  Future<FileDto> _createOrReuseNode(
+    String? parentId,
+    String fileName,
+    int sizeBytes,
+  ) async {
+    try {
+      return await _remoteDataSource.createFile(
+        name: fileName,
+        isFolder: false,
+        parentId: parentId,
+        sizeBytes: sizeBytes,
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 409) rethrow;
+      final conflicting = await _findExistingFile(parentId, fileName);
+      if (conflicting == null || conflicting.manifestHash != null) rethrow;
+      if (!_failedUploadNodeIds.remove(conflicting.id)) rethrow;
+      return conflicting;
+    }
+  }
+
+  /// A non-folder child named [fileName] directly under [parentId], if one
+  /// already exists — paginated, since a folder can hold more than one page.
+  Future<FileDto?> _findExistingFile(String? parentId, String fileName) async {
+    var page = 1;
+    const pageSize = 200;
+    while (true) {
+      final result = await _remoteDataSource.listChildren(
+        parentId,
+        page: page,
+        pageSize: pageSize,
+      );
+      for (final item in result.items) {
+        final dto = FileDto.fromJson(item as Map<String, dynamic>);
+        if (dto.name == fileName && !dto.isFolder) return dto;
+      }
+      if (result.items.isEmpty || page * pageSize >= result.totalCount) {
+        return null;
+      }
+      page++;
+    }
   }
 
   @override
