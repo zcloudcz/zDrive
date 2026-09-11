@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:developer';
+import 'dart:io';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/storage/app_preferences.dart';
 import '../data/pull_sync_service.dart';
+import '../data/sync_coordinator.dart';
 import '../data/sync_remote_data_source.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_models.dart';
@@ -109,31 +112,50 @@ final class SyncError extends SyncState {
 // --- Bloc ---
 
 /// Status page for the (Phase 2) sync engine: registered devices, pending
-/// conflicts, and — as of this change — the designated sync folder and the
-/// pull loop that keeps it up to date. Push (uploading local changes) is a
-/// separate, later task: this bloc only ever pulls.
+/// conflicts, and the designated sync folder and the sync loop that keeps
+/// it up to date — pull, then push local changes, via [SyncCoordinator] so
+/// the two never interleave (see its class doc comment).
 class SyncBloc extends Bloc<SyncEvent, SyncState> {
   final SyncRemoteDataSource _dataSource;
+  final SyncCoordinator _syncCoordinator;
   final PullSyncService _pullService;
   final AppPreferences _preferences;
+  final Stream<FileSystemEvent> Function(String path) _watchFolder;
 
   // Polling, not SignalR: the hub has no backplane configured at
   // max_replicas=3, so a client subscribed to one replica would miss events
   // raised on another. 30s balances "changes show up promptly" against
   // hammering the gateway from every idle desktop client; short enough that
   // a user waiting on a sync does not perceive it as stalled, long enough
-  // that it is not a meaningful load source at MVP scale.
+  // that it is not a meaningful load source at MVP scale. The folder watch
+  // below makes most syncs faster than this, but the poll stays as the
+  // fallback for whatever the watch misses (e.g. Linux has no recursive
+  // watch support at all).
   static const _pollInterval = Duration(seconds: 30);
 
+  /// How long to wait after the *last* watch event before syncing — a save
+  /// touches a folder several times in quick succession (temp file, rename,
+  /// metadata), and a multi-file drag-and-drop fires one event per file;
+  /// without debouncing, each of those would trigger its own sync.
+  static const _watchDebounce = Duration(seconds: 2);
+
   Timer? _pollTimer;
+  StreamSubscription<FileSystemEvent>? _watchSubscription;
+  Timer? _watchDebounceTimer;
 
   SyncBloc({
     required SyncRemoteDataSource dataSource,
+    required SyncCoordinator syncCoordinator,
     required PullSyncService pullService,
     required AppPreferences preferences,
+    Stream<FileSystemEvent> Function(String path)? watch,
   })  : _dataSource = dataSource,
+        _syncCoordinator = syncCoordinator,
         _pullService = pullService,
         _preferences = preferences,
+        // Defaults to a real recursive folder watch; tests inject a fake so
+        // they can drive events without touching the filesystem.
+        _watchFolder = watch ?? ((path) => Directory(path).watch(recursive: true)),
         super(const SyncInitial()) {
     on<LoadSyncStatus>(_onLoadSyncStatus);
     on<SyncFolderChosen>(_onSyncFolderChosen);
@@ -150,6 +172,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       emit(loaded);
       if (loaded.syncFolderPath != null) {
         _startPolling();
+        _startWatching(loaded.syncFolderPath!);
         add(const PullRequested());
       }
     } catch (e) {
@@ -169,6 +192,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       emit(await _fetchLoadedState());
     }
     _startPolling();
+    _startWatching(event.path);
     add(const PullRequested());
   }
 
@@ -189,7 +213,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
 
     emit(current.copyWith(isPulling: true, pullError: () => null));
     try {
-      await _pullService.pullOnce(current.syncFolderPath!);
+      await _syncCoordinator.syncOnce(current.syncFolderPath!);
       // A first pull registers the device, so the device list can now
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
@@ -236,9 +260,41 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     _pollTimer = Timer.periodic(_pollInterval, (_) => add(const PullRequested()));
   }
 
+  /// Subscribes to filesystem change events for [path], debounced so a burst
+  /// of events (a save, a multi-file copy) triggers one sync, not several.
+  /// Cancels any previous subscription first — used both on first load and
+  /// whenever the folder changes, so switching folders never leaves the old
+  /// one's watch running.
+  void _startWatching(String path) {
+    _stopWatching();
+    try {
+      _watchSubscription = _watchFolder(path).listen(
+        (_) {
+          _watchDebounceTimer?.cancel();
+          _watchDebounceTimer = Timer(_watchDebounce, () => add(const PullRequested()));
+        },
+        // Recursive watching is not supported on every platform (e.g.
+        // Linux throws asynchronously via the stream rather than on this
+        // call) — not fatal either way, since the poll timer above is the
+        // fallback regardless of why the watch failed.
+        onError: (Object e) => log('sync folder watch failed: $path', error: e, name: 'SyncBloc'),
+      );
+    } catch (e) {
+      log('failed to watch sync folder: $path', error: e, name: 'SyncBloc');
+    }
+  }
+
+  void _stopWatching() {
+    _watchDebounceTimer?.cancel();
+    _watchDebounceTimer = null;
+    _watchSubscription?.cancel();
+    _watchSubscription = null;
+  }
+
   @override
   Future<void> close() {
     _pollTimer?.cancel();
+    _stopWatching();
     return super.close();
   }
 }

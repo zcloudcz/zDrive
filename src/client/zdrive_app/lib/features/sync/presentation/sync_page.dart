@@ -9,6 +9,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/storage/app_preferences.dart';
 import '../data/pull_sync_service.dart';
+import '../data/sync_coordinator.dart';
 import '../data/sync_remote_data_source.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_models.dart';
@@ -22,6 +23,7 @@ class SyncPage extends StatelessWidget {
     return BlocProvider(
       create: (_) => SyncBloc(
         dataSource: getIt<SyncRemoteDataSource>(),
+        syncCoordinator: getIt<SyncCoordinator>(),
         pullService: getIt<PullSyncService>(),
         preferences: getIt<AppPreferences>(),
       )..add(const LoadSyncStatus()),
