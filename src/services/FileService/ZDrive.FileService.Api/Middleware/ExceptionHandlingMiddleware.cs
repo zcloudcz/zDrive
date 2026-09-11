@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using ZDrive.FileService.Infrastructure.Persistence.Configurations;
 using ZDrive.Shared.DTOs;
 using ZDrive.Shared.Exceptions;
 
@@ -82,7 +83,7 @@ public sealed class ExceptionHandlingMiddleware
                 InnerException: PostgresException
                 {
                     SqlState: PostgresErrorCodes.UniqueViolation,
-                    ConstraintName: "ix_file_nodes_tenant_id_user_id_parent_id_name_normalized"
+                    ConstraintName: FileNodeConfiguration.NameUniqueIndexName
                 }
             } => (
                 HttpStatusCode.Conflict,

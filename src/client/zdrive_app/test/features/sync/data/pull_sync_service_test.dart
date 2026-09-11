@@ -1102,7 +1102,7 @@ void main() {
     });
 
     test('removes the folder even when only OS metadata files (.DS_Store, '
-        'Thumbs.db, desktop.ini) are left behind alongside a matching '
+        'Thumbs.db) are left behind alongside a matching '
         'tracked file', () async {
       final now = DateTime.utc(2026, 1, 1);
       final folderDir = Directory(p.join(tempDir.path, 'Opened-in-finder'))..createSync();
@@ -1113,7 +1113,6 @@ void main() {
       // by the mirror.
       File(p.join(folderDir.path, '.DS_Store')).writeAsStringSync('finder metadata');
       File(p.join(folderDir.path, 'Thumbs.db')).writeAsStringSync('thumbnail cache');
-      File(p.join(folderDir.path, 'desktop.ini')).writeAsStringSync('[.ShellClassInfo]');
 
       when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
       when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
@@ -1145,6 +1144,148 @@ void main() {
       verify(() => mockMirror.deleteByServerId('tracked-file-3')).called(1);
       verify(() => mockMirror.deleteByServerId('folder-del-3')).called(1);
       verifyNever(() => mockMirror.recordFailedEvent(any(), any(), any()));
+    });
+
+    test('keeps a tracked .DS_Store the user changed — the hash guard wins '
+        'over the metadata sweep', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final folderDir = Directory(p.join(tempDir.path, 'Edited-ds-store'))..createSync();
+      // Tracked, but the on-disk bytes no longer match the mirror's
+      // contentHash — the hash guard keeps this in place, same as any
+      // other locally-edited tracked file.
+      final dsStore = File(p.join(folderDir.path, '.DS_Store'))
+        ..writeAsStringSync('locally edited finder metadata');
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-4', 'eventType': 'Delete', 'metadata': null},
+          ], 1));
+      when(() => mockMirror.getByServerId('folder-del-4')).thenAnswer((_) async => SyncMirrorEntry(
+            serverId: 'folder-del-4',
+            localPath: folderDir.path,
+            isFolder: true,
+            updatedAt: now,
+            syncedAt: now,
+          ));
+      when(() => mockMirror.getChildrenUnder(folderDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'ds-store-1',
+              localPath: dsStore.path,
+              isFolder: false,
+              contentHash: sha256.convert(utf8.encode('server-synced finder metadata')).toString(),
+              updatedAt: now,
+              syncedAt: now,
+            ),
+          ]);
+
+      await service.pullOnce(tempDir.path);
+
+      expect(dsStore.existsSync(), isTrue);
+      expect(dsStore.readAsStringSync(), 'locally edited finder metadata');
+      expect(folderDir.existsSync(), isTrue);
+      verifyNever(() => mockMirror.deleteByServerId('ds-store-1'));
+      verifyNever(() => mockMirror.deleteByServerId('folder-del-4'));
+      verify(() => mockMirror.recordFailedEvent(
+            'folder-del-4',
+            1,
+            any(that: contains('untracked or locally modified content')),
+          )).called(1);
+    });
+
+    test('leaves a folder that also holds a user file completely untouched, '
+        'metadata included', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final folderDir = Directory(p.join(tempDir.path, 'Has-user-file'))..createSync();
+      final trackedBytes = Uint8List.fromList(utf8.encode('server content'));
+      final trackedFile = File(p.join(folderDir.path, 'tracked.jpg'))
+        ..writeAsBytesSync(trackedBytes);
+      final notesFile = File(p.join(folderDir.path, 'notes.txt'))
+        ..writeAsStringSync('user notes');
+      final dsStore = File(p.join(folderDir.path, '.DS_Store'))
+        ..writeAsStringSync('finder metadata');
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-5', 'eventType': 'Delete', 'metadata': null},
+          ], 1));
+      when(() => mockMirror.getByServerId('folder-del-5')).thenAnswer((_) async => SyncMirrorEntry(
+            serverId: 'folder-del-5',
+            localPath: folderDir.path,
+            isFolder: true,
+            updatedAt: now,
+            syncedAt: now,
+          ));
+      when(() => mockMirror.getChildrenUnder(folderDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'tracked-file-5',
+              localPath: trackedFile.path,
+              isFolder: false,
+              contentHash: sha256.convert(trackedBytes).toString(),
+              updatedAt: now,
+              syncedAt: now,
+            ),
+          ]);
+      when(() => mockMirror.deleteByServerId('tracked-file-5')).thenAnswer((_) async {});
+
+      await service.pullOnce(tempDir.path);
+
+      expect(trackedFile.existsSync(), isFalse);
+      verify(() => mockMirror.deleteByServerId('tracked-file-5')).called(1);
+      expect(notesFile.existsSync(), isTrue);
+      expect(dsStore.existsSync(), isTrue);
+      expect(folderDir.existsSync(), isTrue);
+      verifyNever(() => mockMirror.deleteByServerId('folder-del-5'));
+      verify(() => mockMirror.recordFailedEvent(
+            'folder-del-5',
+            1,
+            any(that: contains('untracked or locally modified content')),
+          )).called(1);
+    });
+
+    test('leaves a customized Windows folder (desktop.ini) in place', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final folderDir = Directory(p.join(tempDir.path, 'Customized-folder'))..createSync();
+      final trackedBytes = Uint8List.fromList(utf8.encode('server content'));
+      final trackedFile = File(p.join(folderDir.path, 'tracked.jpg'))
+        ..writeAsBytesSync(trackedBytes);
+      final desktopIni = File(p.join(folderDir.path, 'desktop.ini'))
+        ..writeAsStringSync('[.ShellClassInfo]');
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-6', 'eventType': 'Delete', 'metadata': null},
+          ], 1));
+      when(() => mockMirror.getByServerId('folder-del-6')).thenAnswer((_) async => SyncMirrorEntry(
+            serverId: 'folder-del-6',
+            localPath: folderDir.path,
+            isFolder: true,
+            updatedAt: now,
+            syncedAt: now,
+          ));
+      when(() => mockMirror.getChildrenUnder(folderDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'tracked-file-6',
+              localPath: trackedFile.path,
+              isFolder: false,
+              contentHash: sha256.convert(trackedBytes).toString(),
+              updatedAt: now,
+              syncedAt: now,
+            ),
+          ]);
+      when(() => mockMirror.deleteByServerId('tracked-file-6')).thenAnswer((_) async {});
+
+      await service.pullOnce(tempDir.path);
+
+      expect(trackedFile.existsSync(), isFalse);
+      verify(() => mockMirror.deleteByServerId('tracked-file-6')).called(1);
+      expect(desktopIni.existsSync(), isTrue);
+      expect(folderDir.existsSync(), isTrue);
+      verifyNever(() => mockMirror.deleteByServerId('folder-del-6'));
+      verify(() => mockMirror.recordFailedEvent(
+            'folder-del-6',
+            1,
+            any(that: contains('untracked or locally modified content')),
+          )).called(1);
     });
   });
 

@@ -6,6 +6,11 @@ namespace ZDrive.FileService.Infrastructure.Persistence.Configurations;
 
 public sealed class FileNodeConfiguration : IEntityTypeConfiguration<FileNode>
 {
+    // Shared with ExceptionHandlingMiddleware, which matches this index's
+    // name in the unique-violation constraint pattern (PR #12 review round
+    // 5, N2) — keeping both in sync by hand was a magic-string trap.
+    public const string NameUniqueIndexName = "ix_file_nodes_tenant_id_user_id_parent_id_name_normalized";
+
     public void Configure(EntityTypeBuilder<FileNode> builder)
     {
         builder.ToTable("file_nodes");
@@ -64,7 +69,7 @@ public sealed class FileNodeConfiguration : IEntityTypeConfiguration<FileNode>
             .IsUnique()
             .HasFilter("is_deleted = false")
             .AreNullsDistinct(false)
-            .HasDatabaseName("ix_file_nodes_tenant_id_user_id_parent_id_name_normalized");
+            .HasDatabaseName(NameUniqueIndexName);
 
         // Self-referencing relationship
         builder.HasOne(f => f.Parent)
