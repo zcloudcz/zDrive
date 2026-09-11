@@ -254,11 +254,15 @@ void main() {
   });
 
   group('SyncFolderChosen', () {
-    // Shared by the F2/finding-4 race tests below only — reassigned fresh in
-    // each test's own setUp, like watchController in the 'folder watch'
-    // group.
+    // Shared by the F2/finding-4/finding-1 race tests below only —
+    // reassigned fresh in each test's own setUp, like watchController in the
+    // 'folder watch' group.
     late Completer<SyncRunResult> pullGate;
     late Completer<List<Map<String, dynamic>>> oldDevicesGate;
+    // Gates syncOnce('/new') for the round-3 finding-1 generation tests
+    // below, so the new folder's own run can be held open independently of
+    // the stale old run's pullGate.
+    late Completer<SyncRunResult> newSyncGate;
 
     blocTest<SyncBloc, SyncState>(
       'persists the chosen folder and triggers a sync, when no folder was '
@@ -425,6 +429,96 @@ void main() {
         expect(state.syncFolderPath, '/new');
         expect(state.isPulling, isFalse);
         verify(() => mockSyncCoordinator.syncOnce('/new')).called(1);
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'a stale old-folder pull tail does not clobber the new folder\'s '
+      'state once the new run has already reported its own result (PR #16 '
+      'review round 3, finding 1) — nothing ties a run\'s tail to the '
+      'folder it started for, so whichever of the two settles last used to '
+      'win, even when it belongs to a folder nobody is looking at any more',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        pullGate = Completer<SyncRunResult>();
+        newSyncGate = Completer<SyncRunResult>();
+        when(() => mockSyncCoordinator.syncOnce('/old')).thenAnswer((_) => pullGate.future);
+        when(() => mockSyncCoordinator.resetForNewFolder('/new')).thenAnswer((_) async {});
+        when(() => mockSyncCoordinator.syncOnce('/new')).thenAnswer((_) => newSyncGate.future);
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        // Distinguishes which tail's device list actually landed in state:
+        // the FIRST call belongs to the new run (it settles first below),
+        // the second to the stale old run.
+        var getDevicesCalls = 0;
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async {
+          getDevicesCalls++;
+          return getDevicesCalls == 1
+              ? [
+                  {'id': 'dev-new', 'name': 'New device', 'platform': 'windows'},
+                ]
+              : [
+                  {'id': 'dev-old', 'name': 'Old device', 'platform': 'windows'},
+                ];
+        });
+      },
+      act: (bloc) async {
+        bloc.add(const PullRequested());
+        await bloc.stream.firstWhere((s) => s is SyncLoaded && s.syncFolderPath == '/old' && s.isPulling);
+        bloc.add(const SyncFolderChosen('/new'));
+        await bloc.stream.firstWhere((s) => s is SyncLoaded && s.syncFolderPath == '/new' && s.isPulling);
+        // The new folder's own run finishes and settles first...
+        newSyncGate.complete(const SyncRunResult(pulled: 1, pushed: 0));
+        await bloc.stream.firstWhere((s) => s is SyncLoaded && s.syncFolderPath == '/new' && !s.isPulling);
+        // ...*then* the stale old run's pull resolves. Its tail
+        // (getDevices/getFailedEvents/its own emit) runs entirely after the
+        // new folder's own result is already in state.
+        pullGate.complete(const SyncRunResult(pulled: 9, pushed: 9));
+      },
+      wait: const Duration(milliseconds: 20),
+      verify: (bloc) {
+        final state = bloc.state as SyncLoaded;
+        expect(state.syncFolderPath, '/new');
+        expect(state.isPulling, isFalse);
+        // Only the stale run's device list would appear here if its
+        // "finished" emit had been allowed through.
+        expect(state.devices, const [SyncDevice(id: 'dev-new', name: 'New device', platform: 'windows')]);
+        verify(() => mockSyncCoordinator.syncOnce('/old')).called(1);
+        verify(() => mockSyncCoordinator.syncOnce('/new')).called(1);
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'an error from a stale old-folder run does not surface as the new '
+      'folder\'s pullError once the new run has already succeeded (PR #16 '
+      'review round 3, finding 1)',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        pullGate = Completer<SyncRunResult>();
+        newSyncGate = Completer<SyncRunResult>();
+        when(() => mockSyncCoordinator.syncOnce('/old')).thenAnswer((_) => pullGate.future);
+        when(() => mockSyncCoordinator.resetForNewFolder('/new')).thenAnswer((_) async {});
+        when(() => mockSyncCoordinator.syncOnce('/new')).thenAnswer((_) => newSyncGate.future);
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+      },
+      act: (bloc) async {
+        bloc.add(const PullRequested());
+        await bloc.stream.firstWhere((s) => s is SyncLoaded && s.syncFolderPath == '/old' && s.isPulling);
+        bloc.add(const SyncFolderChosen('/new'));
+        await bloc.stream.firstWhere((s) => s is SyncLoaded && s.syncFolderPath == '/new' && s.isPulling);
+        newSyncGate.complete(const SyncRunResult(pulled: 1, pushed: 0));
+        await bloc.stream.firstWhere((s) => s is SyncLoaded && s.syncFolderPath == '/new' && !s.isPulling);
+        // The stale old run now fails — its error must not be attributed to
+        // a folder nobody is even looking at any more.
+        pullGate.completeError(Exception('disk full'));
+      },
+      wait: const Duration(milliseconds: 20),
+      verify: (bloc) {
+        final state = bloc.state as SyncLoaded;
+        expect(state.syncFolderPath, '/new');
+        expect(state.pullError, isNull);
       },
     );
   });

@@ -141,6 +141,17 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   StreamSubscription<FileSystemEvent>? _watchSubscription;
   Timer? _watchDebounceTimer;
 
+  // Ties a sync run's tail back to the run that started it. Bumped on every
+  // SyncFolderChosen and on close() — see _runSync: a run captures this at
+  // the top and only its OWN tail (the one still holding the current
+  // generation) is allowed to write isPulling/pullError/devices/failedEvents
+  // into state. Without this, the OLD folder's pull finishing after the
+  // switch would clobber the NEW folder's state with stale results, and the
+  // guard in _runSync would then see a wrong isPulling and let a poll tick
+  // start a second, concurrent syncOnce for the new folder (PR #16 review
+  // round 3, finding 1).
+  int _syncGeneration = 0;
+
   SyncBloc({
     required SyncRemoteDataSource dataSource,
     required SyncCoordinator syncCoordinator,
@@ -194,6 +205,10 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     SyncFolderChosen event,
     Emitter<SyncState> emit,
   ) async {
+    // Bumped before anything else here so any run already in flight for the
+    // old folder is stale the moment its tail next checks — see
+    // _syncGeneration's doc comment.
+    _syncGeneration++;
     final current = state;
     final previousPath = current is SyncLoaded ? current.syncFolderPath : _preferences.syncFolderPath;
     if (previousPath != null && previousPath != event.path) {
@@ -263,13 +278,28 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       return;
     }
 
+    // Captured now, before any await: if a folder switch bumps
+    // _syncGeneration while this run is in flight, comparing against the
+    // live field below tells this run's tail it no longer owns the sync UI
+    // state (PR #16 review round 3, finding 1).
+    final generation = _syncGeneration;
+    final path = current.syncFolderPath!;
+
     emit(current.copyWith(isPulling: true, pullError: () => null));
     try {
-      await _syncCoordinator.syncOnce(current.syncFolderPath!);
+      await _syncCoordinator.syncOnce(path);
       // A first pull registers the device, so the device list can now
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
       final failedEvents = await _pullService.getFailedEvents();
+      if (generation != _syncGeneration) {
+        // The folder changed (or the session ended) while this run was
+        // pulling — a newer run already owns the sync UI state, so this
+        // tail must not overwrite it with results for a folder nobody is
+        // looking at any more.
+        log('stale sync run for $path finished after folder change; dropping result', name: 'SyncBloc');
+        return;
+      }
       final latest = state;
       if (latest is SyncLoaded) {
         emit(latest.copyWith(
@@ -279,6 +309,10 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         ));
       }
     } catch (e) {
+      if (generation != _syncGeneration) {
+        log('stale sync run for $path failed after folder change; dropping error', name: 'SyncBloc');
+        return;
+      }
       final latest = state;
       if (latest is SyncLoaded) {
         emit(latest.copyWith(isPulling: false, pullError: () => e.toString()));
@@ -332,6 +366,10 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
 
   @override
   Future<void> close() {
+    // The session driving this bloc is ending — see _syncGeneration's doc
+    // comment: a run still in flight at this point must not try to emit
+    // into a bloc that is closing.
+    _syncGeneration++;
     _pollTimer?.cancel();
     _stopWatching();
     return super.close();
