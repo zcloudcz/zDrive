@@ -281,6 +281,60 @@ void main() {
     });
   });
 
+  group('syncOnce single-flight dedupe is per-path (PR #16 review round 3, '
+      'finding 2)', () {
+    test('a syncOnce for a different path gets its own run instead of '
+        "joining another path's in-flight future — a stale syncOnce('/a') "
+        "queued behind resetForNewFolder('/b') must not swallow "
+        "syncOnce('/b') into '/a''s (no-op) future, which would leave "
+        'neither folder pulled or scanned', () async {
+      const stalePath = '/stale/a';
+      // The path AppPreferences reports changes the moment
+      // resetForNewFolder's setSyncFolderPath call actually lands — a
+      // static stub would not let the two queued syncOnce calls below
+      // observe that change the way the real preferences store would.
+      var storedPath = stalePath;
+      when(() => mockPreferences.syncFolderPath).thenAnswer((_) => storedPath);
+      when(() => mockPreferences.setSyncFolderPath(any())).thenAnswer((invocation) async {
+        storedPath = invocation.positionalArguments[0] as String;
+      });
+      final clearGate = Completer<void>();
+      when(() => mockMirror.clearAll()).thenAnswer((_) => clearGate.future);
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 1);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 1);
+
+      // resetForNewFolder('/b') grabs the mutex first and blocks mid-clear.
+      final resetFuture = coordinator.resetForNewFolder(syncPath);
+      // A stale syncOnce('/a') — captured before the switch — queues behind
+      // it on the same mutex.
+      final staleA = coordinator.syncOnce(stalePath);
+      // syncOnce('/b') must get its own future, not '/a''s: with path-blind
+      // dedupe this would be identical() to staleA, and pull/scan would
+      // never run for either folder.
+      final syncB = coordinator.syncOnce(syncPath);
+
+      expect(identical(staleA, syncB), isFalse);
+
+      clearGate.complete();
+      final staleResult = await staleA;
+      final bResult = await syncB;
+      await resetFuture;
+
+      // '/a' ran after the switch, saw the stored path had already moved
+      // to '/b', and no-opped instead of pulling/scanning against either
+      // folder.
+      expect(staleResult.pulled, 0);
+      expect(staleResult.pushed, 0);
+      // '/b' actually ran, exactly once.
+      expect(bResult.pulled, 1);
+      expect(bResult.pushed, 1);
+      verify(() => mockPull.pullOnce(syncPath)).called(1);
+      verify(() => mockScanner.scanOnce(syncPath)).called(1);
+      verifyNever(() => mockPull.pullOnce(stalePath));
+      verifyNever(() => mockScanner.scanOnce(stalePath));
+    });
+  });
+
   group('mutex (test 7)', () {
     test('endSession called while syncOnce is in flight runs only after it '
         'completes', () async {

@@ -51,7 +51,15 @@ class SyncCoordinator {
 
   SyncCoordinator(this._pull, this._scanner, this._mirror, this._deviceIdStorage, this._preferences);
 
-  Future<SyncRunResult>? _inFlight;
+  // Dedupe is scoped to the path it was started for — not "whatever run is
+  // currently in flight" — because the mutex below can queue a stale
+  // syncOnce(A) behind a resetForNewFolder(B): if a concurrent syncOnce(B)
+  // just joined A's future instead of starting its own, B would never
+  // actually run pull/scan for its own folder at all (PR #16 review round
+  // 3, finding 2). A call for a different path always gets its own future;
+  // the mutex still serializes the actual work, so it simply waits its turn
+  // behind whatever is already queued.
+  ({String path, Future<SyncRunResult> future})? _inFlight;
 
   // A small async mutex: every critical section below (syncOnce's own body,
   // startSession, endSession, resetForNewFolder) chains onto this future in
@@ -82,7 +90,21 @@ class SyncCoordinator {
   bool _sessionEnded = false;
 
   Future<SyncRunResult> syncOnce(String syncFolderPath) {
-    return _inFlight ??= _withLock(() => _syncOnce(syncFolderPath)).whenComplete(() => _inFlight = null);
+    final current = _inFlight;
+    if (current != null && current.path == syncFolderPath) {
+      return current.future;
+    }
+    final future = _withLock(() => _syncOnce(syncFolderPath));
+    final entry = (path: syncFolderPath, future: future);
+    _inFlight = entry;
+    // Only clear the slot if it still holds THIS entry — a call for a
+    // different path may already have replaced it by the time this one
+    // finishes, and that entry must not be wiped out from under it.
+    return future.whenComplete(() {
+      if (_inFlight == entry) {
+        _inFlight = null;
+      }
+    });
   }
 
   Future<SyncRunResult> _syncOnce(String syncFolderPath) async {
