@@ -31,13 +31,21 @@ public static class RateLimiterPartitioning
             ?? "unknown";
 
     /// <summary>
-    /// The Retry-After header value (whole seconds, rounded up so a caller
-    /// never retries a fraction of a second early) for a rejected lease, or
-    /// null if the limiter didn't attach a RetryAfter estimate. Program.cs's
-    /// OnRejected puts this on the 429 response; dio_client.dart's
-    /// RetryInterceptor reads it to know exactly how long the fixed window
-    /// has left, instead of guessing a backoff against a window length it
-    /// cannot see.
+    /// The Retry-After header value (whole seconds, rounded up) for a
+    /// rejected lease, or null if the limiter didn't attach a RetryAfter
+    /// estimate. Program.cs's OnRejected puts this on the 429 response;
+    /// dio_client.dart's RetryInterceptor reads it instead of guessing a
+    /// backoff against a window length it cannot see.
+    ///
+    /// This is the *whole* fixed window, not the time remaining in it:
+    /// FixedWindowRateLimiter's RetryAfter metadata is a constant equal to
+    /// the window length, computed without regard to how far into the
+    /// window the rejection happened (verified against
+    /// System.Threading.RateLimiting 8.0.0 — a rejection 7s into a 10s
+    /// window still reports 10s, not 3s; see
+    /// RateLimiterPartitioningTests.GetRetryAfterSeconds_RejectedPartwayThroughWindow_ReturnsFullWindowNotRemaining).
+    /// A caller can therefore wait up to one window longer than strictly
+    /// necessary after being rejected late in a window.
     /// </summary>
     public static string? GetRetryAfterSeconds(RateLimitLease lease) =>
         lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)

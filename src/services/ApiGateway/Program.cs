@@ -70,7 +70,8 @@ builder.Services.AddAuthorization();
 // DioException with no response — no status code, so RetryInterceptor could
 // not even recognise it as a rate-limit rejection to retry. An immediate 429
 // always carries a status code and, via OnRejected below, a Retry-After
-// header naming exactly when the window frees up, which the client honours
+// header (the fixed window's length, not the time actually left in it — see
+// RateLimiterPartitioning.GetRetryAfterSeconds), which the client honours
 // instead of guessing a backoff against a window length it doesn't know.
 builder.Services.AddRateLimiter(options =>
 {

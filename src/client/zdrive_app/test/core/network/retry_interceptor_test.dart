@@ -142,5 +142,41 @@ void main() {
       await expectLater(putChunk(), throwsA(isA<DioException>()));
       expect(adapter.callCount, 1, reason: '400 is not 429 or >=500, so no retry');
     });
+
+    test(
+        'retryAfterDelay_HeaderAboveTheCeiling_IsClampedInsteadOfHonouredAsIs',
+        () {
+      // Nothing between the app and the gateway (ingress, a WAF, a CDN — or
+      // our own middleware misconfigured) is trusted to send a sane
+      // Retry-After. Checked directly against the pure function rather than
+      // by actually waiting the delay out: the production ceiling is 120s,
+      // and a test that really awaited that (let alone an unclamped 86400s)
+      // would be useless as a fast regression check.
+      final interceptor = RetryInterceptor(dio: Dio());
+      final response = Response<void>(
+        requestOptions: RequestOptions(path: '/x'),
+        headers: Headers.fromMap({
+          'retry-after': ['86400'], // a full day
+        }),
+      );
+
+      expect(
+        interceptor.retryAfterDelay(response),
+        const Duration(seconds: 120),
+        reason: 'a hostile or misconfigured Retry-After must not be honoured as-is',
+      );
+    });
+
+    test('retryAfterDelay_HeaderUnderTheCeiling_IsHonouredAsIs', () {
+      final interceptor = RetryInterceptor(dio: Dio());
+      final response = Response<void>(
+        requestOptions: RequestOptions(path: '/x'),
+        headers: Headers.fromMap({
+          'retry-after': ['5'],
+        }),
+      );
+
+      expect(interceptor.retryAfterDelay(response), const Duration(seconds: 5));
+    });
   });
 }

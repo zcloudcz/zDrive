@@ -36,6 +36,15 @@ class RetryInterceptor extends Interceptor {
   final Dio dio;
   final int maxRetries;
 
+  // A cap on how long a Retry-After header can pause a request. Nothing
+  // between here and the gateway is trusted to send a sane value — a
+  // misconfigured or hostile 429 from ingress/a WAF/a CDN could otherwise
+  // park an upload for as long as it likes, with no cancel path and no
+  // receiveTimeout (that only covers time waiting on a response, not the
+  // delay between requests). 120s is 2x the gateway's 1-minute fixed window,
+  // so it never cuts off a legitimate wait.
+  static const _maxRetryAfter = Duration(seconds: 120);
+
   RetryInterceptor({required this.dio, this.maxRetries = 3});
 
   @override
@@ -61,7 +70,7 @@ class RetryInterceptor extends Interceptor {
         // the exponential schedule for a 429 with no header, and use it
         // unconditionally for 5xx.
         final delay = statusCode == 429
-            ? _retryAfterDelay(err.response) ??
+            ? retryAfterDelay(err.response) ??
                 Duration(milliseconds: 200 * (1 << retryCount))
             : Duration(milliseconds: 200 * (1 << retryCount));
         await Future<void>.delayed(delay);
@@ -78,11 +87,15 @@ class RetryInterceptor extends Interceptor {
     return handler.next(err);
   }
 
-  Duration? _retryAfterDelay(Response<dynamic>? response) {
+  // Not private so the ceiling can be asserted directly without waiting out
+  // a real 120s delay in a test.
+  @visibleForTesting
+  Duration? retryAfterDelay(Response<dynamic>? response) {
     final header = response?.headers.value('retry-after');
     if (header == null) return null;
     final seconds = int.tryParse(header);
     if (seconds == null) return null;
-    return Duration(seconds: seconds);
+    final delay = Duration(seconds: seconds);
+    return delay > _maxRetryAfter ? _maxRetryAfter : delay;
   }
 }

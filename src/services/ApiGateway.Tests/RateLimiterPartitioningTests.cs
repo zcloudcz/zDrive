@@ -86,6 +86,36 @@ public sealed class RateLimiterPartitioningTests
     }
 
     [Fact]
+    public async Task GetRetryAfterSeconds_RejectedPartwayThroughWindow_ReturnsFullWindowNotRemaining()
+    {
+        // AutoReplenishment=true (a real timer, unlike the other tests here)
+        // is what makes this case meaningful: rejecting immediately after
+        // acquiring the only permit can't distinguish "reports the full
+        // window" from "reports the time remaining", because at t=0 those
+        // are the same number. Waiting partway into the window before
+        // rejecting is the only way to tell them apart — and the doc comment
+        // on GetRetryAfterSeconds says it reports the *whole* window, so this
+        // must still read the window length (4s), not the ~2s actually left.
+        using var limiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 1,
+            Window = TimeSpan.FromSeconds(4),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        });
+        limiter.AttemptAcquire(1).IsAcquired.Should().BeTrue("the first permit must succeed for this test to mean anything");
+
+        await Task.Delay(TimeSpan.FromSeconds(2));
+
+        var rejected = limiter.AttemptAcquire(1);
+
+        rejected.IsAcquired.Should().BeFalse();
+        RateLimiterPartitioning.GetRetryAfterSeconds(rejected).Should().Be(
+            "4",
+            "a rejection 2s into a 4s window still reports the full 4s, not the ~2s actually left");
+    }
+
+    [Fact]
     public void GetRetryAfterSeconds_AcquiredLeaseCarriesNoRetryAfterMetadata_ReturnsNull()
     {
         using var limiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
