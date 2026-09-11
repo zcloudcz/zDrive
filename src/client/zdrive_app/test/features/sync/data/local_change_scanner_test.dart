@@ -123,6 +123,24 @@ class _StatefulMirror {
   List<OutboxItem> outboxFor(String fileId) => outbox.where((o) => o.fileId == fileId).toList();
 }
 
+/// Whether this host's filesystem folds case (Windows, default macOS) —
+/// computed once, synchronously, before any test registers, by creating
+/// `probe.txt` and checking whether `PROBE.TXT` resolves to the same file
+/// (PR #14 review round 4, R4-4). A real a.txt/A.txt collision test only
+/// means anything on a case-sensitive host (Linux CI); on this host it is
+/// skipped instead of silently passing for the wrong reason.
+bool _probeCaseInsensitiveHost() {
+  final probeDir = Directory.systemTemp.createTempSync('case_probe_');
+  try {
+    File(p.join(probeDir.path, 'probe.txt')).writeAsStringSync('x');
+    return File(p.join(probeDir.path, 'PROBE.TXT')).existsSync();
+  } finally {
+    probeDir.deleteSync(recursive: true);
+  }
+}
+
+final _isCaseInsensitiveHost = _probeCaseInsensitiveHost();
+
 void main() {
   late MockSyncMirrorRepository mockMirror;
   late MockFileRepository mockFileRepository;
@@ -1269,5 +1287,76 @@ void main() {
 
       await (await mirror.debugDatabase).close();
     });
+  });
+
+  group('collidingKeys (PR #14 review round 4, R4-4)', () {
+    test('two paths differing only by case collide on one key', () {
+      final a = p.join('sync', 'a.txt');
+      final upperA = p.join('sync', 'A.txt');
+      expect(collidingKeys([a, upperA]), {a.toLowerCase()});
+    });
+
+    test('paths that differ by more than case do not collide', () {
+      expect(collidingKeys([p.join('sync', 'a.txt'), p.join('sync', 'b.txt')]), isEmpty);
+    });
+
+    test('a single path, or none at all, has no collisions', () {
+      expect(collidingKeys([p.join('sync', 'a.txt')]), isEmpty);
+      expect(collidingKeys(const []), isEmpty);
+    });
+
+    test('a three-way collision is still just one key', () {
+      final a = p.join('sync', 'a.txt');
+      expect(
+        collidingKeys([a, p.join('sync', 'A.txt'), p.join('sync', 'A.TXT')]),
+        {a.toLowerCase()},
+      );
+    });
+  });
+
+  group('R4-4: case collisions on disk are skipped entirely, not touched', () {
+    test('a real file plus an injected case-colliding path: no server call '
+        'for either — the collision skip does not need a real '
+        'case-sensitive host to be exercised (teeth: disabling the skip in '
+        '_classify makes this fail on an unexpected uploadFile call)',
+        () async {
+      File(p.join(tempDir.path, 'a.txt')).writeAsStringSync('one');
+      stateful([]);
+      // Stands in for the second disk entry a real walk could only produce
+      // on a case-sensitive filesystem — see LocalChangeScanner
+      // .debugInjectExtraDiskFile's doc comment. Goes through the exact
+      // same collidingKeys() call _classify makes on a real walk's result.
+      scanner.debugInjectExtraDiskFile(p.join(tempDir.path, 'A.txt'));
+
+      final pushed = await scanner.scanOnce(tempDir.path);
+
+      expect(pushed, 0);
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any()));
+      verifyNever(() => mockFileRepository.createFolder(any(), any()));
+      verifyNever(() => mockFileRepository.deleteFile(any()));
+      verifyNever(() => mockFileRepository.renameFile(any(), any()));
+      verifyNever(() => mockFileRepository.moveFile(any(), any()));
+    });
+
+    test(
+      'a real filesystem case collision: no server call for either file',
+      () async {
+        File(p.join(tempDir.path, 'a.txt')).writeAsStringSync('one');
+        File(p.join(tempDir.path, 'A.txt')).writeAsStringSync('two');
+        stateful([]);
+
+        final pushed = await scanner.scanOnce(tempDir.path);
+
+        expect(pushed, 0);
+        verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any()));
+        verifyNever(() => mockFileRepository.createFolder(any(), any()));
+      },
+      // Only a case-sensitive filesystem can hold both spellings at once —
+      // this host cannot, so the two writeAsStringSync calls above would
+      // just overwrite the same file and the test would pass for the wrong
+      // reason. Runs for real on Linux CI (see CLAUDE.md: "CI is Linux
+      // (case-sensitive)").
+      skip: _isCaseInsensitiveHost ? 'host filesystem is case-insensitive' : false,
+    );
   });
 }

@@ -14,6 +14,24 @@ import '../domain/sync_mirror_repository.dart';
 import 'device_registration_service.dart';
 import 'sync_name_rules.dart';
 
+/// The case-insensitive keys shared by two or more entries of [paths] — the
+/// product rule that names are case-insensitive end to end means the server
+/// (and every other device's disk) can represent only one entry per key, so
+/// this is ambiguous input, not two distinct items. Only a case-sensitive
+/// filesystem can produce it: `a.txt` and `A.txt` cannot coexist on NTFS or
+/// default APFS. A free function, not a [LocalChangeScanner] method, so a
+/// test can exercise the detection on every host without needing an actual
+/// case-sensitive disk to create the collision on (PR #14 review round 4,
+/// R4-4).
+Set<String> collidingKeys(Iterable<String> paths) {
+  final counts = <String, int>{};
+  for (final path in paths) {
+    final key = p.normalize(path).toLowerCase();
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return {for (final entry in counts.entries) if (entry.value > 1) entry.key};
+}
+
 /// Finds local changes under the designated sync folder and reports them to
 /// the server — the push half of sync. State-based, not event-based: every
 /// call diffs the current disk contents against the mirror
@@ -115,6 +133,20 @@ class LocalChangeScanner {
   @visibleForTesting
   void debugForceUnknownSize(String path) => _forcedUnknownSizePaths.add(path);
 
+  /// Extra file paths added to this scan's disk walk result as if they had
+  /// actually been found there — the only portable way to exercise the R4-4
+  /// case-collision skip (see [collidingKeys]) in a test, since a genuinely
+  /// colliding pair (e.g. `a.txt` and `A.txt` coexisting) needs a
+  /// case-sensitive host filesystem this machine may not have. Same
+  /// rationale as [debugBackOff]/[debugForceUnknownSize]: a test adds one
+  /// real file plus one injected path here, and [_classify] runs
+  /// [collidingKeys] over the combined set exactly as it would on a real
+  /// case-sensitive walk (PR #14 review round 4, R4-4).
+  final Set<String> _extraDiskFiles = {};
+
+  @visibleForTesting
+  void debugInjectExtraDiskFile(String path) => _extraDiskFiles.add(path);
+
   /// This device's pull cursor at the moment of a write — what
   /// [SyncMirrorRepository.commit]'s enqueued [OutboxItem]s are stamped
   /// with (see [SyncRemoteDataSource.push]'s doc comment for what the
@@ -187,7 +219,7 @@ class LocalChangeScanner {
   /// used as the "what is actually on disk right now" side of [_classify].
   Future<({Set<String> dirs, Set<String> files})> _walkDisk(String root) async {
     final dirs = <String>{};
-    final files = <String>{};
+    final files = <String>{..._extraDiskFiles}; // test seam, see debugInjectExtraDiskFile
     await for (final entity in Directory(root).list(recursive: true, followLinks: false)) {
       if (entity is Link) continue; // never followed, never reported
       if (!_isSyncablePath(root, entity.path)) continue;
@@ -235,17 +267,53 @@ class LocalChangeScanner {
     final mirrorDirEntries =
         mirrorEntries.where((e) => e.isFolder && _isSyncablePath(root, e.localPath)).toList();
 
-    final mirrorDirByKey = {for (final e in mirrorDirEntries) _key(e.localPath): e};
-    final mirrorFileByKey = {for (final e in mirrorFileEntries) _key(e.localPath): e};
-    final diskDirByKey = {for (final d in disk.dirs) _key(d): d};
-    final diskFileByKey = {for (final f in disk.files) _key(f): f};
+    // R4-4: two or more disk entries that fold to the same case-insensitive
+    // key (`a.txt` and `A.txt`) are ambiguous — only a case-sensitive
+    // filesystem can produce this (Windows and default macOS cannot), and
+    // there is no locally-safe way to decide which one is "the" file at
+    // that key. Every key this finds is excluded below from every list —
+    // disk-side and mirror-side alike — so this scan does not touch any of
+    // them or the mirror row at that key at all.
+    final collidingFileKeys = collidingKeys(disk.files);
+    final collidingDirKeys = collidingKeys(disk.dirs);
+    for (final key in collidingFileKeys) {
+      final paths = disk.files.where((f) => _key(f) == key).join(', ');
+      log('case collision on disk, skipping this scan: $paths', name: 'LocalChangeScanner', level: 900);
+    }
+    for (final key in collidingDirKeys) {
+      final paths = disk.dirs.where((d) => _key(d) == key).join(', ');
+      log('case collision on disk, skipping this scan: $paths', name: 'LocalChangeScanner', level: 900);
+    }
+
+    final mirrorDirByKey = {
+      for (final e in mirrorDirEntries)
+        if (!collidingDirKeys.contains(_key(e.localPath))) _key(e.localPath): e,
+    };
+    final mirrorFileByKey = {
+      for (final e in mirrorFileEntries)
+        if (!collidingFileKeys.contains(_key(e.localPath))) _key(e.localPath): e,
+    };
+    final diskDirByKey = {
+      for (final d in disk.dirs)
+        if (!collidingDirKeys.contains(_key(d))) _key(d): d,
+    };
+    final diskFileByKey = {
+      for (final f in disk.files)
+        if (!collidingFileKeys.contains(_key(f))) _key(f): f,
+    };
 
     // Shallowest first so a parent folder always exists in the mirror
     // before a child under it is processed (path length is a sufficient
     // depth ordering — same trick PullSyncService's folder delete uses).
-    final newDirs = disk.dirs.where((d) => !mirrorDirByKey.containsKey(_key(d))).toList()
+    final newDirs = disk.dirs
+        .where((d) => !collidingDirKeys.contains(_key(d)))
+        .where((d) => !mirrorDirByKey.containsKey(_key(d)))
+        .toList()
       ..sort((a, b) => a.length.compareTo(b.length));
-    final newFiles = disk.files.where((f) => !mirrorFileByKey.containsKey(_key(f))).toList();
+    final newFiles = disk.files
+        .where((f) => !collidingFileKeys.contains(_key(f)))
+        .where((f) => !mirrorFileByKey.containsKey(_key(f)))
+        .toList();
 
     // Only the basename itself differing in case counts as a rename
     // candidate for *this* item — if some ancestor segment's case is what
@@ -273,9 +341,20 @@ class LocalChangeScanner {
     // synced) falls out of both the file-present and dir-present checks
     // above for its old kind and into the new-dir/new-file checks for its
     // new kind — "missing" and "new" at once.
-    var missingFiles = mirrorFileEntries.where((e) => !diskFileByKey.containsKey(_key(e.localPath))).toList();
-    final missingDirEntries =
-        mirrorDirEntries.where((e) => !diskDirByKey.containsKey(_key(e.localPath))).toList();
+    //
+    // A mirror entry whose own key collides on disk is excluded here too
+    // (R4-4, not just from diskFileByKey/diskDirByKey above): it is not
+    // actually missing — it is one of the ambiguous disk entries — and
+    // must not be deleted just because the collision hid it from the keyed
+    // map.
+    var missingFiles = mirrorFileEntries
+        .where((e) => !collidingFileKeys.contains(_key(e.localPath)))
+        .where((e) => !diskFileByKey.containsKey(_key(e.localPath)))
+        .toList();
+    final missingDirEntries = mirrorDirEntries
+        .where((e) => !collidingDirKeys.contains(_key(e.localPath)))
+        .where((e) => !diskDirByKey.containsKey(_key(e.localPath)))
+        .toList();
 
     newDirs.removeWhere(_isBackedOff);
     changeCandidates.removeWhere((e) => _isBackedOff(e.localPath));
