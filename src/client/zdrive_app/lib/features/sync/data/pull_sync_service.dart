@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:path/path.dart' as p;
 
@@ -12,6 +11,7 @@ import '../../files/domain/file_repository.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
 import 'device_registration_service.dart';
+import 'sync_name_rules.dart';
 import 'sync_remote_data_source.dart';
 
 /// The server returns at most this many events per pull
@@ -477,27 +477,11 @@ class PullSyncService {
     return _tryRemoveEmptyDir(path, sweepOsMetadata: !keptAny);
   }
 
-  /// OS-regenerated metadata files that hold no user data — Finder writes
-  /// `.DS_Store` whenever a folder is opened, and Explorer writes
-  /// `Thumbs.db` (thumbnail cache). Left in place, either would make a
-  /// folder that pull otherwise emptied out look "not empty" forever,
-  /// wedging every remote delete of a folder that was ever opened in
-  /// Finder / Explorer (PR #12 review round 4, C1). `desktop.ini`
-  /// (Explorer's folder-view settings) is deliberately NOT in this list:
-  /// unlike the other two, the OS does not regenerate it on its own — it
-  /// is written when a user customizes a folder's view, which is user
-  /// intent, not OS noise, and Explorer marks such folders ReadOnly, so
-  /// the containing folder would fail to delete anyway once the
-  /// customization is gone (PR #12 review round 5, D1). A customized
-  /// Windows folder therefore stays in place and is reported as skipped,
-  /// same as any other folder pull cannot fully empty.
-  static const _osMetadataFileNames = ['.DS_Store', 'Thumbs.db'];
-
   /// Non-recursive directory removal that treats "not empty" as a normal
   /// outcome, not an error — see [_deleteTrackedFolder]. When
   /// [sweepOsMetadata] is true, first lists [path] non-recursively; if
   /// every entry is a plain file (not a directory or link) named in
-  /// [_osMetadataFileNames], those files are deleted and removal proceeds
+  /// [osMetadataFileNames], those files are deleted and removal proceeds
   /// as normal. Otherwise nothing is deleted and this returns false
   /// immediately — a folder holding anything else (a user file, a
   /// subdirectory, or a tracked file the hash guard kept, see
@@ -520,7 +504,7 @@ class PullSyncService {
         return true; // Already gone.
       }
       final allMetadata = entries.every(
-        (e) => e is File && _osMetadataFileNames.contains(p.basename(e.path)),
+        (e) => e is File && osMetadataFileNames.contains(p.basename(e.path)),
       );
       if (!allMetadata) {
         return false; // Something else is in here; leave it all alone.
@@ -660,80 +644,17 @@ class PullSyncService {
   }
 }
 
-/// Windows and POSIX both forbid `/`; Windows additionally forbids `\` and
-/// `:` (drive letters), and treats a bare `.`/`..` as a directory reference
-/// rather than a real entry. That second point is broader than just those
-/// two literals: Win32 trims trailing dots and spaces off a path component
-/// before resolving it, so `".. "`, `"..."`, `". "` and `"   "` all resolve
-/// the *same way* `.`/`..` do even though none of them equal those literals
-/// as strings — verified directly against this app's own path handling
-/// (`Directory(p.join(root, '.. ')).delete(recursive: true)` deletes `root`
-/// itself, and `p.canonicalize`/`p.isWithin` do not catch it, because they
-/// only special-case the exact strings `.`/`..`; see PR #12 review round 2,
-/// R1). Rejecting anything that is *only* dots and spaces closes that
-/// without needing the two literal checks separately. A server-supplied
-/// name has to be exactly one plain path segment for `p.join` to be safe.
-bool _isPlainSegment(String name, bool isWindows) =>
-    name.isNotEmpty &&
-    !RegExp(r'^[. ]+$').hasMatch(name) &&
-    !name.contains('/') &&
-    !name.contains('\\') &&
-    !name.contains(':') &&
-    // Win32-specific unwritable names (a trailing dot/space, a reserved
-    // device stem, an illegal character) are rejected only on Windows —
-    // per the PR #12 review round 3 human decision, the server does not
-    // enforce these and a macOS client syncs such names normally. [isWindows]
-    // is [PullSyncService]'s injected platform decision (defaulting to
-    // [Platform.isWindows]), not a direct read of the host here, so tests can
-    // exercise both branches without depending on the OS they happen to run
-    // on. See [violatesWin32NameRules].
-    !(isWindows && violatesWin32NameRules(name));
-
-/// Characters Win32 forbids in a path segment beyond the ones already
-/// checked above (`/`, `\`, `:`): `< > " | ? *` and the C0 control range.
-/// macOS and Linux allow all of these in a filename.
-final RegExp _win32IllegalChars = RegExp(r'[<>"|?*\x00-\x1F]');
-
-/// `CON`, `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9`, case-insensitive,
-/// with or without an extension — `nul.txt` is just as reserved as bare
-/// `nul` to this check. Whether a given one of these actually fails to
-/// write is Windows version- and build-dependent (on the machine the PR #12
-/// review ran its probes on, only bare `nul` failed — `aux`, `com1` and
-/// `nul.txt` all wrote fine), and that dependence is exactly why they are
-/// rejected up front instead of discovered at write time.
-const _win32ReservedStems = {
-  'con', 'prn', 'aux', 'nul', //
-  'com0', 'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9', //
-  'lpt0', 'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
-};
-
-/// True if Win32 cannot write [name] as given: a trailing dot or space
-/// (Win32 silently trims these off before resolving a path component,
-/// which is what let a remote `foo.` alias the local `foo` a sibling
-/// already occupies — PR #12 review round 3, B1), one of
-/// [_win32IllegalChars], or a reserved device stem. Deliberately
-/// platform-agnostic: the only production call site ([_isPlainSegment])
-/// gates it behind [PullSyncService]'s injected `isWindows` decision, but the
-/// rule table itself is exercised directly in tests without needing to fake
-/// the host OS.
-@visibleForTesting
-bool violatesWin32NameRules(String name) =>
-    name.endsWith('.') ||
-    name.endsWith(' ') ||
-    _win32IllegalChars.hasMatch(name) ||
-    _win32ReservedStems.contains(name.split('.').first.toLowerCase());
-
 /// Joins [name] under [dirPath], rejecting it outright if it is not a safe
-/// path segment, then asserting the canonicalised result still lands inside
-/// [syncFolderPath]. [_isPlainSegment] is the primary control; the
-/// canonicalised containment check is the backstop — it is checked on the
-/// resolved result, not as a string prefix on the raw input. The *returned*
-/// path is the plain join, not the canonicalised one: on Windows,
-/// `p.canonicalize` lowercases the whole path, and that is not the path
-/// this app should be writing to, storing in the mirror, or showing the
-/// user.
+/// path segment (see [isSyncableName]), then asserting the canonicalised
+/// result still lands inside [syncFolderPath]. [isSyncableName] is the
+/// primary control; the canonicalised containment check is the backstop —
+/// it is checked on the resolved result, not as a string prefix on the raw
+/// input. The *returned* path is the plain join, not the canonicalised one:
+/// on Windows, `p.canonicalize` lowercases the whole path, and that is not
+/// the path this app should be writing to, storing in the mirror, or
+/// showing the user.
 String _safeChildPath(String syncFolderPath, String dirPath, String name, bool isWindows) {
-  if (!_isPlainSegment(name, isWindows)) {
+  if (!isSyncableName(name, isWindows: isWindows)) {
     throw UnsafeRemoteNameException(name);
   }
   final joined = p.join(dirPath, name);
