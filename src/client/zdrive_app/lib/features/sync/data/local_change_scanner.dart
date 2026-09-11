@@ -89,6 +89,83 @@ class LocalChangeScanner {
   @visibleForTesting
   void debugBackOff(String path) => _failedPaths[path] = DateTime.now();
 
+  /// Paths this test run is forcing to behave as if `File.stat()` reported
+  /// "size unknown" (type == notFound, size == -1) in the unhashed-new-file
+  /// check inside [_applyMoves] — the real trigger (PR #14 review round 2,
+  /// finding 6) needs a file to vanish or become unreadable in the narrow
+  /// window between the disk walk and that later stat call, which a
+  /// portable test cannot reliably race. Same rationale as [debugBackOff].
+  final Set<String> _forcedUnknownSizePaths = {};
+
+  @visibleForTesting
+  void debugForceUnknownSize(String path) => _forcedUnknownSizePaths.add(path);
+
+  /// Server writes that succeeded this session but whose report is still
+  /// owed, keyed by serverId — flushed as step 0 of every [scanOnce] before
+  /// anything else runs (PR #14 review round 2, findings 1-3). In memory
+  /// only: an app restart loses this map. That is safe, not silent data
+  /// loss, because the matching mirror row was deliberately never written
+  /// (see [_MirrorEffect]) — after a restart the affected path still looks
+  /// exactly like it did before the write, so it is simply retried as a
+  /// fresh operation: a changed/new file looks changed/new again and is
+  /// re-uploaded (accepting at most one extra identical version — see
+  /// [_uploadChangedFile]'s 404 branch), and a move/rename or delete is
+  /// caught by [_applyMove]/[_deleteMissingFolder]'s own "already applied
+  /// server-side" handling. Every path still ends in exactly one report,
+  /// just not always via the cheaper flush below.
+  final Map<String, _PendingReport> _pendingReports = {};
+
+  /// Attempts [type] for [serverId]; on failure, logs and returns false
+  /// instead of throwing. Every call site here has already made the
+  /// matching server write, so a caller that gets false records a
+  /// [_PendingReport] rather than losing the event outright (PR #14 review
+  /// round 2, findings 1-3).
+  Future<bool> _tryReport(String serverId, SyncChangeType type) async {
+    try {
+      await _push.reportChange(serverId, type);
+      return true;
+    } catch (e, st) {
+      log('report deferred for $serverId ($type): SyncService unreachable',
+          error: e, stackTrace: st, name: 'LocalChangeScanner');
+      return false;
+    }
+  }
+
+  /// Step 0 of every [scanOnce]: sends whatever reports are still owed from
+  /// a previous scan's already-completed server writes, in order, then
+  /// applies each one's mirror effect once its reports land. Stops at the
+  /// first failure (see the comment inside) instead of pushing on to the
+  /// rest of the scan.
+  Future<({int pushed, bool ok})> _flushPendingReports() async {
+    var pushed = 0;
+    // Snapshot the keys: entries are removed from _pendingReports as they
+    // flush successfully, and the loop must not revisit one just removed.
+    for (final serverId in _pendingReports.keys.toList()) {
+      final pending = _pendingReports[serverId]!;
+      try {
+        for (final type in pending.reports) {
+          await _push.reportChange(serverId, type);
+        }
+        await pending.effect.apply(_mirror, serverId);
+        _pendingReports.remove(serverId);
+        pushed++;
+      } catch (e, st) {
+        // SyncService is still unreachable (or otherwise erroring): stop
+        // the whole scan here rather than moving on to steps 1-6, which
+        // would make brand new server writes whose reports could fail the
+        // exact same way, compounding the backlog this flush exists to
+        // drain. This entry stays in _pendingReports for the next scan;
+        // whatever flushed earlier in this same loop is already gone from
+        // the map, its report sent and its mirror effect applied.
+        log('SyncService unreachable, scan paused with '
+            '${_pendingReports.length} report(s) still owed',
+            error: e, stackTrace: st, name: 'LocalChangeScanner');
+        return (pushed: pushed, ok: false);
+      }
+    }
+    return (pushed: pushed, ok: true);
+  }
+
   /// Diffs [syncFolderPath] against the mirror and pushes whatever differs.
   /// Reads as the ordered list of steps below — each step's own doc comment
   /// explains why that order matters. Returns how many local changes were
@@ -99,6 +176,16 @@ class LocalChangeScanner {
   Future<int> scanOnce(String syncFolderPath) async {
     final root = syncFolderPath;
 
+    // --- Step 0: flush reports still owed from a previous scan's server
+    // writes (PR #14 review round 2, findings 1-3) ---
+    // Must run before anything below reads the mirror or disk. An item
+    // with a pending report has a deliberately stale mirror row (see
+    // _PendingReport) and must not be touched by the rest of this scan —
+    // that invariant holds automatically here, because a flush failure
+    // returns immediately, before step 1 even starts.
+    final flush = await _flushPendingReports();
+    if (!flush.ok) return flush.pushed;
+
     final mirrorEntries = await _mirror.getChildrenUnder(root);
     final mirrorByPath = <String, SyncMirrorEntry>{
       for (final e in mirrorEntries) e.localPath: e,
@@ -106,22 +193,20 @@ class LocalChangeScanner {
     final disk = await _walkDisk(root);
     final c = _classify(root, mirrorEntries, disk);
 
-    // --- 0. Case-only folder rename (F4) ---
+    // --- 0b. Case-only folder rename (F4) ---
     // Must run before anything below creates or deletes a folder: on a
     // case-insensitive platform, a "new" directory that differs from a
     // missing tracked one only by case is that folder renamed in place, not
     // a fresh folder plus a delete of the old one (createFolder would 409
     // on the server's own case-insensitive name check, and the scanner has
     // nothing else that explains that 409). Ends the scan immediately on a
-    // match: the snapshot above is now stale (the renamed folder and
-    // everything under it moved), so the next scan recomputes cleanly
-    // against the updated mirror instead of this one working off data that
-    // no longer matches disk.
-    if (await _applyCaseRenameIfAny(c.newDirs, c.missingDirEntries, mirrorByPath)) {
-      return 1;
-    }
+    // match, win or lose (see [_applyCaseRenameIfAny]): the snapshot above
+    // is now stale either way, so the next scan recomputes cleanly instead
+    // of this one working off data a partial rename may have invalidated.
+    final caseRenamePushed = await _applyCaseRenameIfAny(c.newDirs, c.missingDirEntries, mirrorByPath);
+    if (caseRenamePushed != null) return flush.pushed + caseRenamePushed;
 
-    var pushed = 0;
+    var pushed = flush.pushed;
 
     // --- 1. Create folders ---
     for (final dir in c.newDirs) {
@@ -224,22 +309,49 @@ class LocalChangeScanner {
     );
   }
 
-  Future<bool> _applyCaseRenameIfAny(
+  /// Returns null if no case-only rename candidate was found (the rest of
+  /// the scan proceeds normally); otherwise the scan ends immediately with
+  /// this as its pushed count — 1 on success, 0 on failure (finding 4, PR
+  /// #14 review round 2: a failure here must not throw out of [scanOnce],
+  /// but it also did not push anything, so scanOnce's return value must
+  /// say so accurately).
+  Future<int?> _applyCaseRenameIfAny(
     List<String> newDirs,
     List<SyncMirrorEntry> missingDirEntries,
     Map<String, SyncMirrorEntry> mirrorByPath,
   ) async {
-    if (!_isCaseInsensitive) return false;
+    if (!_isCaseInsensitive) return null;
 
     for (final newDir in newDirs) {
       for (final missingDir in missingDirEntries) {
+        // missingDirEntries is intentionally the unfiltered list from
+        // _classify (its ancestor check for topMostMissingDirs needs the
+        // full picture) — so backoff has to be checked here instead,
+        // otherwise a candidate whose rename just failed would be retried
+        // again on the very next scan regardless (finding 4).
+        if (_isBackedOff(missingDir.localPath)) continue;
         if (newDir != missingDir.localPath && newDir.toLowerCase() == missingDir.localPath.toLowerCase()) {
-          await _renameFolderCase(missingDir, newDir, mirrorByPath);
-          return true;
+          try {
+            await _renameFolderCase(missingDir, newDir, mirrorByPath);
+            return 1;
+          } catch (e, st) {
+            // Finding 4: this step runs before every other step in
+            // scanOnce with no try/catch of its own — an unhandled
+            // failure here (e.g. renameFile 404s because the folder was
+            // trashed from the web UI, which raises no sync event) used
+            // to blow up the whole scan and silently stop every unrelated
+            // upload/change/delete on every cycle after it. Back the path
+            // off like every other write path does, and still end the
+            // scan early — the disk snapshot this scan took may already
+            // be half-invalidated by whichever part of the rename did
+            // land, so the next scan should recompute it fresh either way.
+            _recordFailure(missingDir.localPath, e, st);
+            return 0;
+          }
         }
       }
     }
-    return false;
+    return null;
   }
 
   Future<void> _renameFolderCase(
@@ -386,8 +498,7 @@ class LocalChangeScanner {
           // ordinary "missing" file by the delete step later in this scan.
           missingFiles.remove(missing);
           try {
-            await _applyMove(filePath, missing, root, mirrorByPath, hs);
-            pushed++;
+            if (await _applyMove(filePath, missing, root, mirrorByPath, hs)) pushed++;
           } catch (e, st) {
             _recordFailure(filePath, e, st);
             protectedMissingFiles.add(missing);
@@ -400,12 +511,21 @@ class LocalChangeScanner {
 
     final unhashedNewFiles = newFiles.where((f) => !hashes.containsKey(f));
     final unhashedSizes = <int>{};
+    // File.stat() never throws (finding 6, PR #14 review round 2) — a
+    // vanished or unreadable file comes back as type == notFound with
+    // size == -1, not an exception, so that is the condition to check for
+    // instead of a try/catch that can never fire. A file that stays
+    // unreadable keeps protecting every same-size missing file (and their
+    // missing parent folders) on every scan until it can finally be read
+    // — deliberate, this never guesses at a file's id from a size match
+    // alone.
     var unknownSize = false;
     for (final f in unhashedNewFiles) {
-      try {
-        unhashedSizes.add((await File(f).stat()).size);
-      } catch (_) {
+      final size = _forcedUnknownSizePaths.contains(f) ? -1 : (await File(f).stat()).size;
+      if (size < 0) {
         unknownSize = true;
+      } else {
+        unhashedSizes.add(size);
       }
     }
     if (unknownSize) {
@@ -422,7 +542,15 @@ class LocalChangeScanner {
     );
   }
 
-  Future<void> _applyMove(
+  /// Applies one move/rename candidate matched by content hash in
+  /// [_applyMoves]. Returns whether a report was actually sent this call
+  /// (used only so the caller can count it toward [scanOnce]'s pushed
+  /// total) — false covers two different "nothing to finish this call"
+  /// cases: [missing] turned out not to be a move at all (finding 5 — a
+  /// 404 from getFile means the server node is simply gone), and a report
+  /// that had to be deferred rather than lost (finding 1 — see
+  /// [_PendingReport]).
+  Future<bool> _applyMove(
     String newPath,
     SyncMirrorEntry missing,
     String root,
@@ -434,24 +562,54 @@ class LocalChangeScanner {
       throw StateError('destination folder not resolved this scan: ${p.dirname(newPath)}');
     }
 
-    // Ask the server what this file's parent/name actually are right now,
-    // instead of trusting this scan's own before/after path comparison — a
+    // What the local diff itself says happened — decided independently of
+    // what getFile reports below, and used only to decide *whether to
+    // report*. getFile still decides *whether to call the server*: a
     // previous attempt at this exact move may have partially landed
     // (moveFile succeeded, then renameFile or reportChange threw) and this
-    // call is that retry. Skipping whichever half already landed is what
-    // keeps a retry idempotent instead of redoing (or double-reporting)
-    // work that already happened (PR #12 review, F2).
-    final current = await _fileRepository.getFile(missing.serverId);
+    // call is that retry. Reporting the local diff even when the server
+    // call itself is skipped is what closes finding 1 (PR #14 review round
+    // 2): the old code decided both from getFile, so a retry that found
+    // the server already caught up silently skipped the report too, and
+    // the event was never sent. A duplicate report is harmless — pull
+    // reconciles through getFile either way.
+    final movedParent = p.dirname(missing.localPath) != p.dirname(newPath);
+    final renamedName = p.basename(missing.localPath) != p.basename(newPath);
 
-    if (current.parentId != resolution.parentId) {
-      await _fileRepository.moveFile(missing.serverId, resolution.parentId);
-      await _push.reportChange(missing.serverId, SyncChangeType.move);
+    FileItem current;
+    try {
+      current = await _fileRepository.getFile(missing.serverId);
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 404) rethrow;
+      // Finding 5: the file is gone server-side (e.g. trashed from the web
+      // UI, which raises no sync event) — not a move to retry. Drop the
+      // stale record; the new local file is left for the next scan to
+      // pick up as an ordinary new file, simpler than threading it back
+      // into this scan's own upload step from here.
+      await _mirror.deleteByServerId(missing.serverId);
+      mirrorByPath.remove(missing.localPath);
+      return false;
+    }
+
+    final pendingTypes = <SyncChangeType>[];
+
+    if (movedParent) {
+      if (current.parentId != resolution.parentId) {
+        await _fileRepository.moveFile(missing.serverId, resolution.parentId);
+      }
+      if (!await _tryReport(missing.serverId, SyncChangeType.move)) {
+        pendingTypes.add(SyncChangeType.move);
+      }
     }
 
     final newName = p.basename(newPath);
-    if (current.name != newName) {
-      await _fileRepository.renameFile(missing.serverId, newName);
-      await _push.reportChange(missing.serverId, SyncChangeType.rename);
+    if (renamedName) {
+      if (current.name != newName) {
+        await _fileRepository.renameFile(missing.serverId, newName);
+      }
+      if (!await _tryReport(missing.serverId, SyncChangeType.rename)) {
+        pendingTypes.add(SyncChangeType.rename);
+      }
     }
 
     final updated = _mirrorRow(
@@ -462,9 +620,23 @@ class LocalChangeScanner {
       contentHash: hashSize.hash,
       updatedAt: missing.updatedAt,
     );
+
+    if (pendingTypes.isNotEmpty) {
+      // At least one report above failed even though its server write
+      // already landed — remember it instead of losing it (finding 1) and
+      // leave the mirror row exactly as it was; mirrorByPath.remove keeps
+      // a child under the new path from resolving against it this same
+      // scan (see _pendingReports' doc comment: this row is stale by
+      // design until the flush applies it).
+      _pendingReports[missing.serverId] = _PendingReport(pendingTypes, _MirrorEffect.upsert(updated));
+      mirrorByPath.remove(missing.localPath);
+      return false;
+    }
+
     await _mirror.upsert(updated);
     mirrorByPath.remove(missing.localPath);
     mirrorByPath[newPath] = updated;
+    return true;
   }
 
   Future<int> _uploadNewFiles(
@@ -476,8 +648,7 @@ class LocalChangeScanner {
     var pushed = 0;
     for (final filePath in remainingNewFiles) {
       try {
-        await _uploadNewFile(filePath, root, mirrorByPath, hashes[filePath]!);
-        pushed++;
+        if (await _uploadNewFile(filePath, root, mirrorByPath, hashes[filePath]!)) pushed++;
       } catch (e, st) {
         _recordFailure(filePath, e, st);
       }
@@ -485,14 +656,17 @@ class LocalChangeScanner {
     return pushed;
   }
 
-  Future<void> _uploadNewFile(
+  /// Returns whether this call fully completed (write and report both
+  /// landed) — used only so the caller can count it toward [scanOnce]'s
+  /// pushed total; see [_finishUpload].
+  Future<bool> _uploadNewFile(
     String filePath,
     String root,
     Map<String, SyncMirrorEntry> mirrorByPath,
     ({String hash, int size}) hashSize,
   ) async {
     final resolution = _resolveParent(filePath, root, mirrorByPath);
-    if (!resolution.resolved) return; // parent folder failed earlier this scan
+    if (!resolution.resolved) return false; // parent folder failed earlier this scan
 
     final name = p.basename(filePath);
     final file = File(filePath);
@@ -505,23 +679,7 @@ class LocalChangeScanner {
         hashSize.size,
         null,
       );
-      // Report before the mirror commit (PR #12 review, F6): if
-      // reportChange throws, no mirror row is written for this file, so
-      // the next scan still sees it as "new" and retries the whole upload
-      // — which then 409s into the existing-file branch below and uploads
-      // a duplicate version, harmless since the file is already there
-      // either way. The same ordering is used by every write path below.
-      await _push.reportChange(id, SyncChangeType.create);
-      final entry = _mirrorRow(
-        serverId: id,
-        localPath: filePath,
-        isFolder: false,
-        sizeBytes: hashSize.size,
-        contentHash: hashSize.hash,
-        updatedAt: DateTime.now(),
-      );
-      await _mirror.upsert(entry);
-      mirrorByPath[filePath] = entry;
+      return await _finishUpload(id, filePath, hashSize, SyncChangeType.create, mirrorByPath);
     } on DioException catch (e) {
       if (e.response?.statusCode != 409) rethrow;
       // Last write wins: a file with this name already exists server-side
@@ -530,18 +688,39 @@ class LocalChangeScanner {
       final existing = await _findExistingFileByName(resolution.parentId, name);
       if (existing == null) rethrow;
       await _fileRepository.uploadNewVersion(existing.id, name, file.openRead(), hashSize.size);
-      await _push.reportChange(existing.id, SyncChangeType.update);
-      final entry = _mirrorRow(
-        serverId: existing.id,
-        localPath: filePath,
-        isFolder: false,
-        sizeBytes: hashSize.size,
-        contentHash: hashSize.hash,
-        updatedAt: DateTime.now(),
-      );
+      return await _finishUpload(existing.id, filePath, hashSize, SyncChangeType.update, mirrorByPath);
+    }
+  }
+
+  /// Shared tail of every "server write is done, now report + commit the
+  /// mirror" path (PR #14 review round 2, findings 1-3): reports [type]
+  /// for [serverId] and, only if that succeeds, upserts the mirror row —
+  /// so a scan that dies right after the write always leaves a consistent
+  /// trail: either both the report and the mirror commit landed, or
+  /// neither did (the report is remembered instead, see [_PendingReport],
+  /// so the very next scan retries just the report, not the write).
+  Future<bool> _finishUpload(
+    String serverId,
+    String filePath,
+    ({String hash, int size}) hashSize,
+    SyncChangeType type,
+    Map<String, SyncMirrorEntry> mirrorByPath,
+  ) async {
+    final entry = _mirrorRow(
+      serverId: serverId,
+      localPath: filePath,
+      isFolder: false,
+      sizeBytes: hashSize.size,
+      contentHash: hashSize.hash,
+      updatedAt: DateTime.now(),
+    );
+    if (await _tryReport(serverId, type)) {
       await _mirror.upsert(entry);
       mirrorByPath[filePath] = entry;
+      return true;
     }
+    _pendingReports[serverId] = _PendingReport([type], _MirrorEffect.upsert(entry));
+    return false;
   }
 
   /// A non-folder child named [name] directly under [parentId], if one
@@ -604,23 +783,24 @@ class LocalChangeScanner {
         file.openRead(),
         bytes.length,
       );
-      await _push.reportChange(entry.serverId, SyncChangeType.update);
-      final updated = _mirrorRow(
-        serverId: entry.serverId,
-        localPath: entry.localPath,
-        isFolder: false,
-        sizeBytes: bytes.length,
-        contentHash: hash,
-        updatedAt: DateTime.now(),
+      return await _finishUpload(
+        entry.serverId,
+        entry.localPath,
+        (hash: hash, size: bytes.length),
+        SyncChangeType.update,
+        mirrorByPath,
       );
-      await _mirror.upsert(updated);
-      mirrorByPath[entry.localPath] = updated;
-      return true;
     } on DioException catch (e) {
       if (e.response?.statusCode != 404) rethrow;
       // Last write wins: the file was deleted server-side (e.g. by another
       // device) while this one still had it. Re-create it as a new file
       // under the same local parent rather than losing the local edit.
+      // The stale mirror row is cleared right away, independent of
+      // whether the report below lands this call or is deferred (finding
+      // 3, PR #14 review round 2) — if the app restarts before a deferred
+      // report ever flushes, this path then looks like a brand new file
+      // on the next scan and is uploaded again as one extra version
+      // (known limit, see _pendingReports' doc comment).
       final resolution = _resolveParent(entry.localPath, root, mirrorByPath);
       final newId = await _fileRepository.uploadFile(
         resolution.resolved ? resolution.parentId : null,
@@ -629,19 +809,14 @@ class LocalChangeScanner {
         bytes.length,
         null,
       );
-      await _push.reportChange(newId, SyncChangeType.create);
       await _mirror.deleteByServerId(entry.serverId);
-      final created = _mirrorRow(
-        serverId: newId,
-        localPath: entry.localPath,
-        isFolder: false,
-        sizeBytes: bytes.length,
-        contentHash: hash,
-        updatedAt: DateTime.now(),
+      return await _finishUpload(
+        newId,
+        entry.localPath,
+        (hash: hash, size: bytes.length),
+        SyncChangeType.create,
+        mirrorByPath,
       );
-      await _mirror.upsert(created);
-      mirrorByPath[entry.localPath] = created;
-      return true;
     }
   }
 
@@ -685,8 +860,7 @@ class LocalChangeScanner {
 
     for (final dir in dirsToDelete) {
       try {
-        await _deleteMissingFolder(dir);
-        pushed++;
+        if (await _deleteMissingFolder(dir)) pushed++;
       } catch (e, st) {
         _recordFailure(dir.localPath, e, st);
       }
@@ -695,41 +869,60 @@ class LocalChangeScanner {
     return pushed;
   }
 
-  /// Returns whether a delete was actually reported — used only so the
-  /// delete step can count it toward [scanOnce]'s returned total. A report
-  /// happens either way (PR #12 review, F6): even on a 404 (already gone
-  /// server-side too) it is still sent, because another device may not
-  /// have learned about the delete yet if its own delete event never fired.
+  /// Returns whether the file was actually deleted server-side by this
+  /// call (used only so the delete step can count it toward [scanOnce]'s
+  /// returned total) — false on a 404, since another device (or an
+  /// earlier, only-partially-completed attempt of this same call) already
+  /// deleted it and this device did not cause anything new. A report is
+  /// sent either way (PR #12 review, F6): even on that 404, another device
+  /// may not have learned about the delete yet if its own delete event
+  /// never fired.
   Future<bool> _deleteMissingFile(SyncMirrorEntry entry) async {
+    var actuallyDeleted = true;
     try {
       await _fileRepository.deleteFile(entry.serverId);
     } on DioException catch (e) {
       if (e.response?.statusCode != 404) rethrow;
-      await _push.reportChange(entry.serverId, SyncChangeType.delete);
-      await _mirror.deleteByServerId(entry.serverId);
-      return false;
+      actuallyDeleted = false;
     }
-    // Report before the mirror commit (F6): if reportChange throws, the
-    // mirror row is left in place, so the next scan finds the file
-    // "missing" again and retries — deleteFile then 404s into the branch
-    // above, which still reports, so the event is never lost either way.
-    await _push.reportChange(entry.serverId, SyncChangeType.delete);
-    await _mirror.deleteByServerId(entry.serverId);
-    return true;
+    final reported = await _finishDelete(entry.serverId, entry.localPath, isFolder: false);
+    return actuallyDeleted && reported;
   }
 
-  Future<void> _deleteMissingFolder(SyncMirrorEntry dir) async {
-    await _fileRepository.deleteFile(dir.serverId); // FileService trashes the whole subtree
-    // Read before removing anything so this still sees every mirror row
-    // that lived under this folder.
-    final children = await _mirror.getChildrenUnder(dir.localPath);
-    // Report before the mirror commit (F6), same reasoning as
-    // _deleteMissingFile above.
-    await _push.reportChange(dir.serverId, SyncChangeType.delete);
-    await _mirror.deleteByServerId(dir.serverId);
-    for (final child in children) {
-      await _mirror.deleteByServerId(child.serverId);
+  /// Finding 2 (PR #14 review round 2): a retried deleteFile 404s once the
+  /// server already trashed this folder on an earlier, only-partially-
+  /// completed attempt — handled the same way [_deleteMissingFile] handles
+  /// it for files, instead of having no 404 branch of its own and retrying
+  /// forever. Same "counts toward pushed" contract as [_deleteMissingFile]:
+  /// false on a 404, since this device did not cause anything new.
+  Future<bool> _deleteMissingFolder(SyncMirrorEntry dir) async {
+    var actuallyDeleted = true;
+    try {
+      await _fileRepository.deleteFile(dir.serverId); // FileService trashes the whole subtree
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 404) rethrow;
+      actuallyDeleted = false;
     }
+    final reported = await _finishDelete(dir.serverId, dir.localPath, isFolder: true);
+    return actuallyDeleted && reported;
+  }
+
+  /// Shared tail of a delete write (findings 1-3 pattern, applied to
+  /// deletes): reports the delete and, only if that succeeds, clears the
+  /// mirror row(s) at [localPath] via [_MirrorEffect.delete] — the entry
+  /// itself, plus (if [isFolder]) everything still tracked under it. A
+  /// failed report is deferred instead (see [_PendingReport]) so the very
+  /// next scan's flush retries the *report*, not a server delete that
+  /// already happened (and, for a folder, would just 404 again). Returns
+  /// whether the report landed this call.
+  Future<bool> _finishDelete(String serverId, String localPath, {required bool isFolder}) async {
+    final effect = _MirrorEffect.delete(localPath, isFolder: isFolder);
+    if (await _tryReport(serverId, SyncChangeType.delete)) {
+      await effect.apply(_mirror, serverId);
+      return true;
+    }
+    _pendingReports[serverId] = _PendingReport([SyncChangeType.delete], effect);
+    return false;
   }
 
   /// Builds a mirror row stamped with the current time as [SyncMirrorEntry
@@ -754,4 +947,61 @@ class LocalChangeScanner {
         updatedAt: updatedAt,
         syncedAt: DateTime.now(),
       );
+}
+
+/// The local mirror change to make once every report in a [_PendingReport]
+/// has finally landed — either "upsert this row" (a create/update/move/
+/// rename whose server write already succeeded) or "clear this row, plus
+/// everything under it if it turns out to be a folder" (a delete whose
+/// server write already succeeded). Exactly one of the two factories is
+/// used at a time; see [LocalChangeScanner._pendingReports].
+class _MirrorEffect {
+  final SyncMirrorEntry? _upsertEntry;
+  final String? _deleteLocalPath;
+  final bool _deleteIsFolder;
+
+  const _MirrorEffect.upsert(SyncMirrorEntry entry)
+      : _upsertEntry = entry,
+        _deleteLocalPath = null,
+        _deleteIsFolder = false;
+
+  // isFolder gates the getChildrenUnder lookup below: a file can never have
+  // mirror rows under it, so skipping that call for a file delete is not
+  // just an optimisation — a plain file's own path was never a valid
+  // argument to getChildrenUnder in the first place (no other call site
+  // ever queried one).
+  const _MirrorEffect.delete(String localPath, {required bool isFolder})
+      : _upsertEntry = null,
+        _deleteLocalPath = localPath,
+        _deleteIsFolder = isFolder;
+
+  Future<void> apply(SyncMirrorRepository mirror, String serverId) async {
+    if (_upsertEntry != null) {
+      await mirror.upsert(_upsertEntry);
+      return;
+    }
+    if (!_deleteIsFolder) {
+      await mirror.deleteByServerId(serverId);
+      return;
+    }
+    // Read the children before removing anything, so this still sees
+    // every mirror row that lived under this folder (same ordering
+    // _deleteMissingFolder always used).
+    final children = await mirror.getChildrenUnder(_deleteLocalPath!);
+    await mirror.deleteByServerId(serverId);
+    for (final child in children) {
+      await mirror.deleteByServerId(child.serverId);
+    }
+  }
+}
+
+/// One server write whose write already landed but whose
+/// [PushSyncService.reportChange] call threw — kept only in memory (see
+/// [LocalChangeScanner._pendingReports]) so the very next [LocalChangeScanner
+/// .scanOnce] retries just the report, never the write (PR #14 review round
+/// 2, findings 1-3).
+class _PendingReport {
+  final List<SyncChangeType> reports;
+  final _MirrorEffect effect;
+  const _PendingReport(this.reports, this.effect);
 }
