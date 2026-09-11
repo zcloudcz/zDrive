@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -189,5 +190,67 @@ void main() {
     // (round-2 review finding 3).
     verifyNever(() => upload.uploadFile(any(), any(), any(), any(),
         onProgress: any(named: 'onProgress')));
+  });
+
+  test(
+      'uploadFile hands a failed node out at most once: while one retry is '
+      'still uploading into it, a third upload of the same name gets the 409 '
+      'instead of reusing the node too (round-4 review)', () async {
+    // Attempt 1: this instance creates retry-id and fails to fill it, which
+    // is what makes retry-id eligible for reuse.
+    when(() => remote.createFile(
+          name: 'report.pdf',
+          isFolder: false,
+          parentId: null,
+          sizeBytes: 10,
+        )).thenAnswer((_) async => fileDto('retry-id', 'report.pdf'));
+    when(() => upload.uploadFile('retry-id', 'report.pdf', any(), 10,
+            onProgress: any(named: 'onProgress')))
+        .thenThrow(Exception('network dropped mid-transfer'));
+    await expectLater(
+      repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null),
+      throwsException,
+    );
+    clearInteractions(upload);
+
+    // From here on createFile 409s against retry-id, which is still empty,
+    // and an upload into it blocks until released, so attempt 2 stays in
+    // flight while attempt 3 runs.
+    final release = Completer<UploadCompleteDto>();
+    when(() => remote.createFile(
+          name: 'report.pdf',
+          isFolder: false,
+          parentId: null,
+          sizeBytes: 10,
+        )).thenThrow(conflict409());
+    when(() => remote.listChildren(null, page: 1, pageSize: 200)).thenAnswer(
+        (_) async => paged([fileDto('retry-id', 'report.pdf', manifestHash: null)]));
+    when(() => upload.uploadFile('retry-id', 'report.pdf', any(), 10,
+            onProgress: any(named: 'onProgress')))
+        .thenAnswer((_) => release.future);
+    when(() => remote.createFileVersion('retry-id',
+        blobVersionId: 'hash-2',
+        sizeBytes: 10,
+        manifestHash: 'hash-2')).thenAnswer((_) async => <String, dynamic>{});
+
+    // Attempt 2 reuses retry-id and blocks inside the upload.
+    final second =
+        repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null);
+    for (var i = 0; i < 20; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    // Attempt 3, same name, while attempt 2 is still uploading into retry-id:
+    // must get the 409, not a second claim on the same node.
+    await expectLater(
+      repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null),
+      throwsA(isA<DioException>()),
+    );
+    verify(() => upload.uploadFile('retry-id', 'report.pdf', any(), 10,
+        onProgress: any(named: 'onProgress'))).called(1);
+
+    release.complete(
+        const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-2', totalSize: 10));
+    expect(await second, 'retry-id');
   });
 }

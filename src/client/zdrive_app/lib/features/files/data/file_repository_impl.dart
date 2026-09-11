@@ -196,6 +196,13 @@ class FileRepositoryImpl implements FileRepository {
   /// as before this reuse logic existed, instead of a silent overwrite of
   /// someone else's file.
   ///
+  /// The id is *removed* from the set when it is reused, so each failed node
+  /// is handed out at most once. Checking membership without removing left
+  /// the node claimable for as long as the retry ran, and a third upload of
+  /// the same name took it too (round-4 review). This holds for uploads from
+  /// this app instance only: ZDrive.BackupCli reuses nodes by name on its own
+  /// terms and is not bound by this set.
+  ///
   /// Looking this up only after a 409 (instead of listing children before
   /// every upload) keeps the common case a single request and avoids a
   /// lookup-then-create race between two concurrent uploads of the same name.
@@ -215,7 +222,7 @@ class FileRepositoryImpl implements FileRepository {
       if (e.response?.statusCode != 409) rethrow;
       final conflicting = await _findExistingFile(parentId, fileName);
       if (conflicting == null || conflicting.manifestHash != null) rethrow;
-      if (!_failedUploadNodeIds.contains(conflicting.id)) rethrow;
+      if (!_failedUploadNodeIds.remove(conflicting.id)) rethrow;
       return conflicting;
     }
   }
