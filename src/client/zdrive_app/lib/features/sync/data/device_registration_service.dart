@@ -35,4 +35,12 @@ class DeviceRegistrationService {
     await _idStorage.saveDeviceId(newId);
     return newId;
   }
+
+  /// This installation's device id if one is already stored, with no
+  /// network call (PR #14 review round 4) — for callers that only need the
+  /// id to key a local cursor lookup, not a live registration. Enqueueing a
+  /// local change must work offline, and pull has always registered the
+  /// device before a scan runs, so `null` here is only a first-run edge
+  /// case.
+  Future<String?> localDeviceId() => _idStorage.deviceId;
 }

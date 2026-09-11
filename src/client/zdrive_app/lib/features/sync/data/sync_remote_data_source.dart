@@ -48,13 +48,21 @@ class SyncRemoteDataSource {
   /// [registerDevice] is an ordinal: SyncService registers no
   /// JsonStringEnumConverter. Prefer [PushSyncService.reportChange] over
   /// calling this directly — it hides the wire format and the ordinal.
+  ///
+  /// [baseCursor], when given, is this device's last-applied pull cursor at
+  /// the time of the change — a separate server-side PR uses it to detect
+  /// conflicts (a push based on a cursor older than the file's latest event).
+  /// Sent only when non-null; an older server that does not know the field
+  /// simply ignores it.
   Future<Map<String, dynamic>> push(
     String deviceId,
-    List<Map<String, dynamic>> events,
-  ) async {
+    List<Map<String, dynamic>> events, {
+    int? baseCursor,
+  }) async {
     final response = await _dio.post('/sync/push', data: {
       'deviceId': deviceId,
       'events': events,
+      'baseCursor': ?baseCursor,
     });
     return unwrapMap(response);
   }

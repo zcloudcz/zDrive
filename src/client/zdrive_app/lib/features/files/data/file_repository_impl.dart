@@ -154,21 +154,7 @@ class FileRepositoryImpl implements FileRepository {
     final node = await _createOrReuseNode(parentId, fileName, sizeBytes);
 
     try {
-      final complete = await _uploadDataSource.uploadFile(
-        node.id,
-        fileName,
-        content,
-        sizeBytes,
-        onProgress: onProgress,
-      );
-
-      await _remoteDataSource.createFileVersion(
-        node.id,
-        blobVersionId: complete.manifestHash,
-        sizeBytes: complete.totalSize,
-        manifestHash: complete.manifestHash,
-      );
-
+      await _uploadIntoNode(node.id, fileName, content, sizeBytes, onProgress);
       _failedUploadNodeIds.remove(node.id);
       return node.id;
     } catch (_) {
@@ -178,6 +164,45 @@ class FileRepositoryImpl implements FileRepository {
       _failedUploadNodeIds.add(node.id);
       rethrow;
     }
+  }
+
+  @override
+  Future<void> uploadNewVersion(
+    String fileId,
+    String fileName,
+    Stream<List<int>> content,
+    int sizeBytes,
+  ) {
+    // The second half of uploadFile only: no node creation, so this never
+    // touches _createOrReuseNode or _failedUploadNodeIds — fileId is already
+    // an existing node.
+    return _uploadIntoNode(fileId, fileName, content, sizeBytes, null);
+  }
+
+  /// Chunk-uploads [content] into the already-existing node [nodeId] and
+  /// records the resulting version — shared by [uploadFile] (after creating
+  /// the node) and [uploadNewVersion] (which skips node creation entirely).
+  Future<void> _uploadIntoNode(
+    String nodeId,
+    String fileName,
+    Stream<List<int>> content,
+    int sizeBytes,
+    void Function(double progress)? onProgress,
+  ) async {
+    final complete = await _uploadDataSource.uploadFile(
+      nodeId,
+      fileName,
+      content,
+      sizeBytes,
+      onProgress: onProgress,
+    );
+
+    await _remoteDataSource.createFileVersion(
+      nodeId,
+      blobVersionId: complete.manifestHash,
+      sizeBytes: complete.totalSize,
+      manifestHash: complete.manifestHash,
+    );
   }
 
   /// Creates the file node for [fileName], or — only when FileService

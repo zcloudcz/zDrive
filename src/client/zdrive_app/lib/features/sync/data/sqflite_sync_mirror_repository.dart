@@ -18,6 +18,21 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   static const _cursorTable = 'sync_cursor';
   static const _bootstrapTable = 'bootstrap_state';
   static const _failedTable = 'failed_events';
+  static const _outboxTable = 'sync_outbox';
+
+  // IF NOT EXISTS: onUpgrade must be idempotent (PR #14 review round 4,
+  // R4-3) — sqflite_common_ffi has no onDowngrade, so opening a v2 db,
+  // rolling back to a v1 build, then opening v2 again re-runs onUpgrade(1,
+  // 2) and would otherwise fail with "table already exists".
+  static const _createOutboxTableSql = '''
+    CREATE TABLE IF NOT EXISTS $_outboxTable (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fileId TEXT NOT NULL,
+      changeType INTEGER NOT NULL,
+      baseCursor INTEGER NOT NULL,
+      createdAt TEXT NOT NULL
+    )
+  ''';
 
   final String? _dbPathOverride;
 
@@ -51,7 +66,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     final db = await databaseFactory.openDatabase(
       dbPath,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onCreate: (db, version) async {
           await db.execute('''
             CREATE TABLE $_filesTable (
@@ -83,6 +98,16 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
               failedAt TEXT NOT NULL
             )
           ''');
+          await db.execute(_createOutboxTableSql);
+        },
+        // A device already running #12 has a version-1 database (every
+        // table above except sync_outbox) — add just the new table rather
+        // than recreating the schema, so its existing mirror rows survive
+        // the upgrade untouched.
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await db.execute(_createOutboxTableSql);
+          }
         },
       ),
     );
@@ -101,16 +126,18 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   @override
   Future<void> upsert(SyncMirrorEntry entry) async {
     final db = await _database;
-    await db.insert(_filesTable, {
-      'serverId': entry.serverId,
-      'localPath': entry.localPath,
-      'isFolder': entry.isFolder ? 1 : 0,
-      'sizeBytes': entry.sizeBytes,
-      'contentHash': entry.contentHash,
-      'updatedAt': entry.updatedAt.toIso8601String(),
-      'syncedAt': entry.syncedAt.toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
   }
+
+  Map<String, Object?> _entryRow(SyncMirrorEntry entry) => {
+        'serverId': entry.serverId,
+        'localPath': entry.localPath,
+        'isFolder': entry.isFolder ? 1 : 0,
+        'sizeBytes': entry.sizeBytes,
+        'contentHash': entry.contentHash,
+        'updatedAt': entry.updatedAt.toIso8601String(),
+        'syncedAt': entry.syncedAt.toIso8601String(),
+      };
 
   @override
   Future<void> deleteByServerId(String serverId) async {
@@ -139,34 +166,14 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   @override
   Future<void> rePathChildren(String oldPrefix, String newPrefix) async {
     final db = await _database;
-    // A LIKE query would need to escape '%'/'_' in the prefix (a legal
-    // filename character on both platforms), so this scans and filters in
-    // Dart instead — fine for a local per-user mirror table.
-    final prefix = '$oldPrefix${Platform.pathSeparator}';
-    final rows = await db.query(_filesTable);
-    final batch = db.batch();
-    for (final row in rows) {
-      final path = row['localPath'] as String;
-      if (path.startsWith(prefix)) {
-        batch.update(
-          _filesTable,
-          {'localPath': newPrefix + path.substring(oldPrefix.length)},
-          where: 'serverId = ?',
-          whereArgs: [row['serverId']],
-        );
-      }
-    }
-    await batch.commit(noResult: true);
+    await _rePathChildren(db, oldPrefix, newPrefix);
   }
 
   @override
   Future<List<SyncMirrorEntry>> getChildrenUnder(String dirPath) async {
     final db = await _database;
-    // Same scan-and-filter approach as rePathChildren, and for the same
-    // reason: a LIKE query would need to escape '%'/'_' in the prefix.
-    final prefix = '$dirPath${Platform.pathSeparator}';
-    final rows = await db.query(_filesTable);
-    return rows.map(_fromRow).where((entry) => entry.localPath.startsWith(prefix)).toList();
+    final rows = await _rowsUnder(db, dirPath);
+    return rows.map(_fromRow).toList();
   }
 
   @override
@@ -220,6 +227,138 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
             ))
         .toList();
   }
+
+  @override
+  Future<void> commit({
+    List<SyncMirrorEntry> upserts = const [],
+    List<String> deleteServerIds = const [],
+    String? deleteUnderPath,
+    ({String from, String to})? rePath,
+    List<OutboxItem> enqueue = const [],
+  }) async {
+    final db = await _database;
+    // Everything below runs against `txn`, never `db` — a plain db.insert
+    // mid-way would auto-commit itself before a later step in this same
+    // call could fail, defeating the whole point of grouping these writes
+    // (PR #14 review round 3, teeth-checked: pulling any one of these calls
+    // out of the transaction makes a rolled-back write stick).
+    await db.transaction((txn) async {
+      if (rePath != null) {
+        await _rePathChildren(txn, rePath.from, rePath.to);
+      }
+      for (final entry in upserts) {
+        await txn.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      for (final serverId in deleteServerIds) {
+        await txn.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+      }
+      if (deleteUnderPath != null) {
+        await _deleteChildren(txn, deleteUnderPath);
+      }
+      for (final item in enqueue) {
+        await txn.insert(_outboxTable, {
+          'fileId': item.fileId,
+          'changeType': item.type.index,
+          'baseCursor': item.baseCursor,
+          'createdAt': item.createdAt.toIso8601String(),
+        });
+      }
+    });
+  }
+
+  // oldPrefix/dirPath already ends with the separator when the sync folder
+  // is a filesystem root ("C:\", "/") — appending another would build a
+  // prefix no stored path can ever start with, so every row under it
+  // silently stops matching (PR #12 review, F7). The one place this rule
+  // lives (PR #14 review round 4, R4-5) — every prefix-based query below
+  // goes through this instead of repeating it.
+  String _childPrefix(String dirPath) =>
+      dirPath.endsWith(Platform.pathSeparator) ? dirPath : '$dirPath${Platform.pathSeparator}';
+
+  // Scan-and-filter, not a LIKE query — a LIKE pattern would need to escape
+  // '%'/'_' in the prefix (both legal filename characters), fine for a local
+  // per-user mirror table. Takes a [DatabaseExecutor] rather than [Database]
+  // or [Transaction] specifically, since both implement it (PR #14 review
+  // round 4, R4-5) — shared by [getChildrenUnder] (outside any transaction)
+  // and [commit]'s deleteUnderPath handling (inside one).
+  Future<List<Map<String, Object?>>> _rowsUnder(DatabaseExecutor executor, String dirPath) async {
+    final prefix = _childPrefix(dirPath);
+    final rows = await executor.query(_filesTable);
+    return rows.where((row) => (row['localPath'] as String).startsWith(prefix)).toList();
+  }
+
+  // Shared by the public rePathChildren (outside any transaction) and
+  // commit's rePath handling (inside one) — see _rowsUnder's doc comment for
+  // why a DatabaseExecutor rather than one specific type.
+  Future<void> _rePathChildren(DatabaseExecutor executor, String oldPrefix, String newPrefix) async {
+    final prefix = _childPrefix(oldPrefix);
+    final rows = await _rowsUnder(executor, oldPrefix);
+    // One batch, not one statement per row: a remote rename of a folder
+    // with thousands of files under it must re-path them all in one go —
+    // atomically (a batch on a Database runs as one transaction, and inside
+    // commit's transaction it simply joins it) and fast (per-row autocommit
+    // statements took ~5 s for 2000 rows, the batch ~50 ms; PR #14 review
+    // round 5).
+    final batch = executor.batch();
+    for (final row in rows) {
+      final path = row['localPath'] as String;
+      batch.update(
+        _filesTable,
+        {'localPath': p.join(newPrefix, path.substring(prefix.length))},
+        where: 'serverId = ?',
+        whereArgs: [row['serverId']],
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  // Only used from commit's deleteUnderPath handling (inside a transaction)
+  // today, but takes a DatabaseExecutor for the same reason as _rowsUnder
+  // and _rePathChildren above rather than being pinned to Transaction.
+  Future<void> _deleteChildren(DatabaseExecutor executor, String dirPath) async {
+    final rows = await _rowsUnder(executor, dirPath);
+    // Batched for the same reasons as _rePathChildren above.
+    final batch = executor.batch();
+    for (final row in rows) {
+      batch.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  @override
+  Future<List<OutboxItem>> peekOutbox({int limit = 100}) async {
+    final db = await _database;
+    final rows = await db.query(_outboxTable, orderBy: 'id ASC', limit: limit);
+    return rows
+        .map((row) => OutboxItem(
+              id: row['id'] as int,
+              fileId: row['fileId'] as String,
+              type: SyncChangeType.values[row['changeType'] as int],
+              baseCursor: row['baseCursor'] as int,
+              createdAt: DateTime.parse(row['createdAt'] as String),
+            ))
+        .toList();
+  }
+
+  @override
+  Future<void> removeOutbox(int id) async {
+    final db = await _database;
+    await db.delete(_outboxTable, where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<int> outboxCount() async {
+    final db = await _database;
+    final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM $_outboxTable');
+    return (rows.first['c'] as int?) ?? 0;
+  }
+
+  /// Test-only escape hatch so a repository test can force a mid-transaction
+  /// failure (e.g. drop the outbox table before calling [commit]) to prove
+  /// atomicity, without a way to construct an invalid [OutboxItem] through
+  /// the public API — every one of its fields is already non-nullable.
+  @visibleForTesting
+  Future<Database> get debugDatabase => _database;
 
   SyncMirrorEntry _fromRow(Map<String, Object?> row) => SyncMirrorEntry(
         serverId: row['serverId'] as String,

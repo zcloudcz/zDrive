@@ -5,6 +5,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/core/di/injection.dart';
 import 'package:zdrive_app/core/storage/app_preferences.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
+import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
@@ -12,6 +13,8 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 class MockSyncRemoteDataSource extends Mock implements SyncRemoteDataSource {}
 
 class MockPullSyncService extends Mock implements PullSyncService {}
+
+class MockSyncCoordinator extends Mock implements SyncCoordinator {}
 
 class MockAppPreferences extends Mock implements AppPreferences {}
 
@@ -22,6 +25,7 @@ void main() {
     mockDataSource = MockSyncRemoteDataSource();
     getIt.registerLazySingleton<SyncRemoteDataSource>(() => mockDataSource);
     getIt.registerLazySingleton<PullSyncService>(() => MockPullSyncService());
+    getIt.registerLazySingleton<SyncCoordinator>(() => MockSyncCoordinator());
     // No stubbing of syncFolderPath: mocktail returns null for an unstubbed
     // nullable getter, matching "no folder chosen yet" — the state every
     // existing scenario below assumes, since none of them are about pulling.
@@ -156,6 +160,31 @@ void main() {
 
       expect(find.text('Everything is synced'), findsOneWidget);
       expect(find.text('Laptop'), findsOneWidget);
+    });
+
+    testWidgets('shows how many changes are still queued in the push '
+        'outbox after a sync run (PR #14 review round 3)', (tester) async {
+      // Grab (not re-register) the mocks setUp() already wired into getIt —
+      // registerLazySingleton hands back the same instance on every
+      // resolve, so this is the one SyncPage itself will construct its
+      // SyncBloc with.
+      final mockCoordinator = getIt<SyncCoordinator>() as MockSyncCoordinator;
+      final mockPreferences = getIt<AppPreferences>() as MockAppPreferences;
+      final mockPullService = getIt<PullSyncService>() as MockPullSyncService;
+
+      when(() => mockPreferences.syncFolderPath).thenReturn('/local/sync');
+      when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
+            {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
+          ]);
+      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
+      when(() => mockCoordinator.syncOnce('/local/sync'))
+          .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 3));
+      when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      expect(find.text('3 changes waiting to be sent'), findsOneWidget);
     });
   });
 }

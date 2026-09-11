@@ -12,6 +12,7 @@ import 'package:zdrive_app/features/files/domain/file_item.dart';
 import 'package:zdrive_app/features/files/domain/file_repository.dart';
 import 'package:zdrive_app/features/sync/data/device_registration_service.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
+import 'package:zdrive_app/features/sync/data/sync_name_rules.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_entry.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart';
@@ -131,7 +132,10 @@ void main() {
           localPath: existingFile.path,
           isFolder: false,
           sizeBytes: 3,
-          contentHash: 'irrelevant',
+          // Matches the file's actual on-disk bytes ('bye') — this test is
+          // the "nothing changed locally" case, so the hash guard added for
+          // F1 below must find no conflict and let the delete proceed.
+          contentHash: sha256.convert(utf8.encode('bye')).toString(),
           updatedAt: now,
           syncedAt: now,
         ));
@@ -143,6 +147,46 @@ void main() {
     expect(existingFile.existsSync(), isFalse);
     verify(() => mockMirror.deleteByServerId('file-2')).called(1);
     verify(() => mockMirror.setCursor('dev-1', 1)).called(1);
+  });
+
+  test('a Delete event whose tracked file was edited locally and never '
+      'pushed: quarantined instead of destroying the edit (F1 round 1)',
+      () async {
+    final editedFile = File(p.join(tempDir.path, 'edited.txt'))
+      ..writeAsStringSync('local edit not yet synced');
+
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+          {'id': 1, 'fileId': 'file-edited', 'eventType': 'Delete', 'metadata': null},
+        ], 1));
+    when(() => mockMirror.getByServerId('file-edited')).thenAnswer((_) async => SyncMirrorEntry(
+          serverId: 'file-edited',
+          localPath: editedFile.path,
+          isFolder: false,
+          sizeBytes: 3,
+          // Whatever was last synced — deliberately not the hash of the
+          // edited bytes above, so the on-disk content no longer matches.
+          contentHash: sha256.convert(utf8.encode('old synced content')).toString(),
+          updatedAt: DateTime.utc(2026, 1, 1),
+          syncedAt: DateTime.utc(2026, 1, 1),
+        ));
+    // Stubbed for any id so that, if the guard regresses, the test fails on
+    // the edited file being gone rather than on an unstubbed mock.
+    when(() => mockMirror.deleteByServerId(any())).thenAnswer((_) async {});
+
+    final applied = await service.pullOnce(tempDir.path);
+
+    // Counted as "applied" in pullOnce's sense — it was handled, just
+    // quarantined instead of written.
+    expect(applied, 1);
+    expect(editedFile.existsSync(), isTrue);
+    expect(editedFile.readAsStringSync(), 'local edit not yet synced');
+    verifyNever(() => mockMirror.deleteByServerId('file-edited'));
+    verify(() => mockMirror.recordFailedEvent(
+          'file-edited',
+          1,
+          any(that: contains('local changes not yet synced')),
+        )).called(1);
   });
 
   test('does not advance the cursor past an event whose apply failed', () async {

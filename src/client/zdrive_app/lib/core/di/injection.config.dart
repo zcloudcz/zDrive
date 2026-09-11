@@ -52,10 +52,13 @@ import 'package:zdrive_app/features/sync/data/current_device_platform.dart'
 import 'package:zdrive_app/features/sync/data/device_id_storage.dart' as _i918;
 import 'package:zdrive_app/features/sync/data/device_registration_service.dart'
     as _i318;
+import 'package:zdrive_app/features/sync/data/local_change_scanner.dart'
+    as _i132;
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart' as _i827;
 import 'package:zdrive_app/features/sync/data/push_sync_service.dart' as _i557;
 import 'package:zdrive_app/features/sync/data/sqflite_sync_mirror_repository.dart'
     as _i294;
+import 'package:zdrive_app/features/sync/data/sync_coordinator.dart' as _i918;
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart'
     as _i319;
 import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart'
@@ -142,10 +145,18 @@ extension GetItInjectableX on _i174.GetIt {
     gh.lazySingleton<_i328.PhotoRepository>(
       () => _i826.PhotoRepositoryImpl(gh<_i5.PhotoRemoteDataSource>()),
     );
+    gh.lazySingleton<_i132.LocalChangeScanner>(
+      () => _i132.LocalChangeScanner(
+        gh<_i500.SyncMirrorRepository>(),
+        gh<_i1043.FileRepository>(),
+        gh<_i318.DeviceRegistrationService>(),
+      ),
+    );
     gh.lazySingleton<_i557.PushSyncService>(
       () => _i557.PushSyncService(
         gh<_i319.SyncRemoteDataSource>(),
         gh<_i318.DeviceRegistrationService>(),
+        gh<_i500.SyncMirrorRepository>(),
       ),
     );
     gh.lazySingleton<_i827.PullSyncService>(
@@ -154,6 +165,13 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i318.DeviceRegistrationService>(),
         gh<_i500.SyncMirrorRepository>(),
         gh<_i1043.FileRepository>(),
+      ),
+    );
+    gh.lazySingleton<_i918.SyncCoordinator>(
+      () => _i918.SyncCoordinator(
+        gh<_i827.PullSyncService>(),
+        gh<_i132.LocalChangeScanner>(),
+        gh<_i557.PushSyncService>(),
       ),
     );
     return this;

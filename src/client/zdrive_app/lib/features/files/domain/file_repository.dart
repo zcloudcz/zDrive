@@ -46,6 +46,18 @@ abstract class FileRepository {
   /// there is no assembled whole-file blob on the server.
   Future<Uint8List> downloadFile(String fileId);
 
+  /// Uploads [content] as a new version of the already-existing file
+  /// [fileId] — the second half of [uploadFile] only (chunk upload +
+  /// version record), with no node creation. For sync's "last write wins"
+  /// path: a local edit is pushed as a new version of the file that already
+  /// has this id, not a new file.
+  Future<void> uploadNewVersion(
+    String fileId,
+    String fileName,
+    Stream<List<int>> content,
+    int sizeBytes,
+  );
+
   /// Lists recorded versions of a file, newest first.
   Future<List<FileVersion>> getVersions(String fileId);
 

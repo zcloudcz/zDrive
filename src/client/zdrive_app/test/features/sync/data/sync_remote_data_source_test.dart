@@ -112,6 +112,22 @@ void main() {
         .called(1);
   });
 
+  test('push includes baseCursor in the request body when given', () async {
+    final events = [
+      {'fileId': 'f-1', 'eventType': 0, 'metadata': null},
+    ];
+    when(() => dio.post('/sync/push',
+            data: {'deviceId': 'dev-1', 'events': events, 'baseCursor': 7}))
+        .thenAnswer((_) async => response({'newCursor': 9, 'conflicts': []}, '/sync/push'));
+
+    final result = await dataSource.push('dev-1', events, baseCursor: 7);
+
+    expect(result['newCursor'], 9);
+    verify(() => dio.post('/sync/push',
+            data: {'deviceId': 'dev-1', 'events': events, 'baseCursor': 7}))
+        .called(1);
+  });
+
   test('propagates DioException from the HTTP layer', () async {
     when(() => dio.get('/sync/devices')).thenThrow(
       DioException(
