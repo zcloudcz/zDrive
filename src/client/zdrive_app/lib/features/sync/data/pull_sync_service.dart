@@ -96,7 +96,10 @@ class PullSyncService {
     this._deviceRegistration,
     this._mirror,
     this._fileRepository, {
-    bool? isWindows,
+    // Test seam only — GetIt has no `bool` to inject, so the generator must
+    // leave this param out of the generated factory call; the default below
+    // then reads the real platform.
+    @ignoreParam bool? isWindows,
   }) : _isWindows = isWindows ?? Platform.isWindows;
 
   // Guards pullOnce against concurrent invocations on this singleton. The

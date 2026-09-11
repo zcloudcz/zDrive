@@ -40,7 +40,10 @@ class LocalChangeScanner {
     this._mirror,
     this._fileRepository,
     this._push, {
-    bool? isWindows,
+    // Test seam only — GetIt has no `bool` to inject, so the generator must
+    // leave this param out of the generated factory call; the default below
+    // then reads the real platform.
+    @ignoreParam bool? isWindows,
   }) : _isWindows = isWindows ?? Platform.isWindows;
 
   /// A local path that failed during the last [scanOnce] that touched it,

@@ -145,15 +145,6 @@ extension GetItInjectableX on _i174.GetIt {
     gh.lazySingleton<_i328.PhotoRepository>(
       () => _i826.PhotoRepositoryImpl(gh<_i5.PhotoRemoteDataSource>()),
     );
-    gh.lazySingleton<_i827.PullSyncService>(
-      () => _i827.PullSyncService(
-        gh<_i319.SyncRemoteDataSource>(),
-        gh<_i318.DeviceRegistrationService>(),
-        gh<_i500.SyncMirrorRepository>(),
-        gh<_i1043.FileRepository>(),
-        isWindows: gh<bool>(),
-      ),
-    );
     gh.lazySingleton<_i557.PushSyncService>(
       () => _i557.PushSyncService(
         gh<_i319.SyncRemoteDataSource>(),
@@ -161,12 +152,19 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i500.SyncMirrorRepository>(),
       ),
     );
+    gh.lazySingleton<_i827.PullSyncService>(
+      () => _i827.PullSyncService(
+        gh<_i319.SyncRemoteDataSource>(),
+        gh<_i318.DeviceRegistrationService>(),
+        gh<_i500.SyncMirrorRepository>(),
+        gh<_i1043.FileRepository>(),
+      ),
+    );
     gh.lazySingleton<_i132.LocalChangeScanner>(
       () => _i132.LocalChangeScanner(
         gh<_i500.SyncMirrorRepository>(),
         gh<_i1043.FileRepository>(),
         gh<_i557.PushSyncService>(),
-        isWindows: gh<bool>(),
       ),
     );
     gh.lazySingleton<_i918.SyncCoordinator>(
