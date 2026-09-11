@@ -150,6 +150,11 @@ void main() {
 
     test('syncOnce is a no-op after endSession, until startSession '
         're-enables it', () async {
+      // Stubbed up front so that, without the session flag, syncOnce would
+      // run and the test fails on the assertions below — not on an
+      // unstubbed mock.
+      when(() => mockPull.pullOnce(any())).thenAnswer((_) async => 1);
+      when(() => mockScanner.scanOnce(any())).thenAnswer((_) async => 1);
       await coordinator.endSession();
 
       final result = await coordinator.syncOnce(syncPath);

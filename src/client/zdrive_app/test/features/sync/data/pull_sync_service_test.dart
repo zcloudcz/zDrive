@@ -195,6 +195,30 @@ void main() {
     verify(() => mockFilesDataSource.getChanges(1, deviceId: 'dev-1')).called(1);
   });
 
+  test('asks the feed with this device id, so the server leaves out '
+      "this device's own writes", () async {
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockFilesDataSource.getChanges(any(), deviceId: any(named: 'deviceId')))
+        .thenAnswer((_) async => page([], 0));
+
+    await service.pullOnce(tempDir.path);
+
+    verify(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).called(1);
+  });
+
+  test('persists nextCursor even when the server filtered every item of the '
+      "page out as this device's own — an empty page must still move the "
+      'cursor, or the same own changes are re-read on every poll', () async {
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 3);
+    when(() => mockFilesDataSource.getChanges(any(), deviceId: any(named: 'deviceId')))
+        .thenAnswer((_) async => page([], 9));
+    when(() => mockMirror.setCursor(any(), any())).thenAnswer((_) async {});
+
+    await service.pullOnce(tempDir.path);
+
+    verify(() => mockMirror.setCursor('dev-1', 9)).called(1);
+  });
+
   test('a Delete feed item for a file that is live again (e.g. restored '
       'from trash before this device pulled) is applied as an upsert, not '
       'a delete (test 8)', () async {

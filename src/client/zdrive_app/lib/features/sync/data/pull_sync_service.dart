@@ -147,14 +147,24 @@ class PullSyncService {
     while (true) {
       final cursor = await _mirror.getCursor(deviceId);
       final page = await _filesDataSource.getChanges(cursor, deviceId: deviceId);
-      if (page.changes.isEmpty) break;
 
       for (final change in page.changes) {
         await _applyEvent(change, deviceId, syncFolderPath);
         applied++;
       }
 
-      if (!page.hasMore) break;
+      // The server drops this device's own writes from the page *after*
+      // fixing nextCursor, so nextCursor can lie beyond the last item here —
+      // or a page can be empty while nextCursor still moved. Persist it, or
+      // every poll re-reads the same run of this device's own changes (and,
+      // with an empty page, never gets past them). Only written when it is
+      // ahead of what _applyEvent already stored for the last item.
+      final lastStored = page.changes.isEmpty ? cursor : page.changes.last.id;
+      if (page.nextCursor > lastStored) {
+        await _mirror.setCursor(deviceId, page.nextCursor);
+      }
+
+      if (!page.hasMore || page.nextCursor <= cursor) break;
     }
 
     // Runs after the event-log drain above, not before: that way the
