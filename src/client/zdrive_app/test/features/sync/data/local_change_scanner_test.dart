@@ -46,8 +46,14 @@ void main() {
         type: DioExceptionType.badResponse,
       );
 
-  LocalChangeScanner scannerWith({required bool isWindows}) =>
-      LocalChangeScanner(mockMirror, mockFileRepository, mockPush, isWindows: isWindows);
+  LocalChangeScanner scannerWith({required bool isWindows, bool isCaseInsensitive = false}) =>
+      LocalChangeScanner(
+        mockMirror,
+        mockFileRepository,
+        mockPush,
+        isWindows: isWindows,
+        isCaseInsensitive: isCaseInsensitive,
+      );
 
   setUpAll(() {
     registerFallbackValue(FakeSyncMirrorEntry());
@@ -216,6 +222,14 @@ void main() {
             syncedAt: past,
           ),
         ]);
+    when(() => mockFileRepository.getFile('file-6')).thenAnswer((_) async => FileItem(
+          id: 'file-6',
+          name: 'old.txt',
+          isFolder: false,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
     when(() => mockFileRepository.renameFile('file-6', 'new.txt')).thenAnswer((_) async => FileItem(
           id: 'file-6',
           name: 'new.txt',
@@ -264,6 +278,14 @@ void main() {
             syncedAt: past,
           ),
         ]);
+    when(() => mockFileRepository.getFile('file-7')).thenAnswer((_) async => FileItem(
+          id: 'file-7',
+          name: 'file.txt',
+          isFolder: false,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
     when(() => mockFileRepository.moveFile('file-7', 'sub-id')).thenAnswer((_) async => FileItem(
           id: 'file-7',
           name: 'file.txt',
@@ -307,6 +329,14 @@ void main() {
             syncedAt: past,
           ),
         ]);
+    when(() => mockFileRepository.getFile('file-8')).thenAnswer((_) async => FileItem(
+          id: 'file-8',
+          name: 'old.txt',
+          isFolder: false,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
     when(() => mockFileRepository.moveFile('file-8', 'sub-id')).thenAnswer((_) async => FileItem(
           id: 'file-8',
           name: 'old.txt',
@@ -587,5 +617,303 @@ void main() {
 
     expect(secondPushed, 0);
     verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any()));
+  });
+
+  test('tracked file touched (mtime bumped) but identical content: the hash '
+      'compare catches it — no upload (F8)', () async {
+    final file = File(p.join(tempDir.path, 'touched.txt'))..writeAsStringSync('same content');
+    // Bump mtime forward so the cheap stat pre-filter alone cannot skip the
+    // hash compare below it — a re-save (e.g. an editor "touch") must not be
+    // mistaken for an edit just because the OS timestamp moved.
+    file.setLastModifiedSync(DateTime.now().add(const Duration(days: 1)));
+
+    when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
+          SyncMirrorEntry(
+            serverId: 'file-touch',
+            localPath: file.path,
+            isFolder: false,
+            sizeBytes: 12, // 'same content'.length
+            contentHash: hashOf('same content'),
+            updatedAt: past,
+            syncedAt: past, // older than the bumped mtime
+          ),
+        ]);
+
+    final pushed = await scanner.scanOnce(tempDir.path);
+
+    expect(pushed, 0);
+    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any()));
+  });
+
+  test('a tracked .DS_Store still present on disk is never deleted, even '
+      'though the walk itself never surfaces it (F5)', () async {
+    final dsStore = File(p.join(tempDir.path, '.DS_Store'))
+      ..writeAsStringSync('finder metadata');
+
+    when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
+          SyncMirrorEntry(
+            serverId: 'ds-store-id',
+            localPath: dsStore.path,
+            isFolder: false,
+            sizeBytes: 16,
+            contentHash: hashOf('finder metadata'),
+            updatedAt: past,
+            syncedAt: past,
+          ),
+        ]);
+
+    final pushed = await scanner.scanOnce(tempDir.path);
+
+    expect(pushed, 0);
+    verifyNever(() => mockFileRepository.deleteFile(any()));
+    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any()));
+  });
+
+  test('case-only folder rename on a case-insensitive platform (F4): '
+      'renames instead of create-then-delete, re-paths children, and ends '
+      'the scan', () async {
+    // Real disk either way — on Linux CI (case-sensitive) this only tests
+    // anything because the seam below forces case-insensitive handling on;
+    // the rename itself is genuinely applied to the filesystem, matching
+    // what a user would see on Windows/macOS.
+    final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
+    File(p.join(docsDir.path, 'child.txt')).writeAsStringSync('x');
+    final oldDocsPath = p.join(tempDir.path, 'Docs'); // tracked path, no longer on disk
+    final oldChildPath = p.join(oldDocsPath, 'child.txt');
+
+    when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
+          SyncMirrorEntry(
+            serverId: 'docs-id',
+            localPath: oldDocsPath,
+            isFolder: true,
+            updatedAt: past,
+            syncedAt: past,
+          ),
+          SyncMirrorEntry(
+            serverId: 'child-id',
+            localPath: oldChildPath,
+            isFolder: false,
+            sizeBytes: 1,
+            contentHash: hashOf('x'),
+            updatedAt: past,
+            syncedAt: past,
+          ),
+        ]);
+    when(() => mockFileRepository.renameFile('docs-id', 'docs')).thenAnswer((_) async => FileItem(
+          id: 'docs-id',
+          name: 'docs',
+          isFolder: true,
+          parentId: null,
+          createdAt: now,
+          updatedAt: now,
+        ));
+    when(() => mockMirror.rePathChildren(oldDocsPath, docsDir.path)).thenAnswer((_) async {});
+
+    await scannerWith(isWindows: false, isCaseInsensitive: true).scanOnce(tempDir.path);
+
+    verify(() => mockFileRepository.renameFile('docs-id', 'docs')).called(1);
+    verify(() => mockPush.reportChange('docs-id', SyncChangeType.rename)).called(1);
+    verify(() => mockMirror.rePathChildren(oldDocsPath, docsDir.path)).called(1);
+    verifyNever(() => mockFileRepository.createFolder(any(), any()));
+    verifyNever(() => mockFileRepository.deleteFile(any()));
+    final upserted =
+        verify(() => mockMirror.upsert(captureAny())).captured.single as SyncMirrorEntry;
+    expect(upserted.serverId, 'docs-id');
+    expect(upserted.localPath, docsDir.path);
+  });
+
+  group('F2: a failed move does not delete the source, and a partial move '
+      'is idempotent on retry', () {
+    test('moveFile throws: no deleteFile for the source, no upload of the '
+        'new file, mirror row unchanged', () async {
+      final subDir = Directory(p.join(tempDir.path, 'sub'))..createSync();
+      final oldPath = p.join(tempDir.path, 'file.txt'); // no longer on disk
+      File(p.join(subDir.path, 'file.txt')).writeAsStringSync('payload');
+
+      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'sub-id',
+              localPath: subDir.path,
+              isFolder: true,
+              updatedAt: past,
+              syncedAt: past,
+            ),
+            SyncMirrorEntry(
+              serverId: 'file-a',
+              localPath: oldPath,
+              isFolder: false,
+              sizeBytes: 7,
+              contentHash: hashOf('payload'),
+              updatedAt: past,
+              syncedAt: past,
+            ),
+          ]);
+      when(() => mockFileRepository.getFile('file-a')).thenAnswer((_) async => FileItem(
+            id: 'file-a',
+            name: 'file.txt',
+            isFolder: false,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockFileRepository.moveFile('file-a', 'sub-id'))
+          .thenThrow(Exception('network dropped'));
+
+      await scanner.scanOnce(tempDir.path);
+
+      verifyNever(() => mockFileRepository.deleteFile(any()));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any()));
+      verifyNever(() => mockMirror.upsert(any()));
+    });
+
+    test('move succeeds but rename throws: no deleteFile; a retried scan '
+        'with getFile now returning the already-moved parent calls only '
+        'renameFile', () async {
+      final subDir = Directory(p.join(tempDir.path, 'sub'))..createSync();
+      final oldPath = p.join(tempDir.path, 'old.txt'); // no longer on disk
+      File(p.join(subDir.path, 'new.txt')).writeAsStringSync('payload');
+
+      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'sub-id',
+              localPath: subDir.path,
+              isFolder: true,
+              updatedAt: past,
+              syncedAt: past,
+            ),
+            SyncMirrorEntry(
+              serverId: 'file-b',
+              localPath: oldPath,
+              isFolder: false,
+              sizeBytes: 7,
+              contentHash: hashOf('payload'),
+              updatedAt: past,
+              syncedAt: past,
+            ),
+          ]);
+      when(() => mockFileRepository.getFile('file-b')).thenAnswer((_) async => FileItem(
+            id: 'file-b',
+            name: 'old.txt',
+            isFolder: false,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockFileRepository.moveFile('file-b', 'sub-id')).thenAnswer((_) async => FileItem(
+            id: 'file-b',
+            name: 'old.txt',
+            isFolder: false,
+            parentId: 'sub-id',
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockFileRepository.renameFile('file-b', 'new.txt'))
+          .thenThrow(Exception('server unreachable'));
+
+      await scanner.scanOnce(tempDir.path);
+
+      verify(() => mockFileRepository.moveFile('file-b', 'sub-id')).called(1);
+      verify(() => mockPush.reportChange('file-b', SyncChangeType.move)).called(1);
+      verifyNever(() => mockFileRepository.deleteFile(any()));
+
+      // Retry: backoff cleared, and getFile now reflects the half that
+      // already landed (parentId is 'sub-id'; the rename never made it).
+      scanner.debugClearBackoff();
+      clearInteractions(mockFileRepository);
+      clearInteractions(mockPush);
+      when(() => mockFileRepository.getFile('file-b')).thenAnswer((_) async => FileItem(
+            id: 'file-b',
+            name: 'old.txt',
+            isFolder: false,
+            parentId: 'sub-id',
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockFileRepository.renameFile('file-b', 'new.txt')).thenAnswer((_) async => FileItem(
+            id: 'file-b',
+            name: 'new.txt',
+            isFolder: false,
+            parentId: 'sub-id',
+            createdAt: now,
+            updatedAt: now,
+          ));
+
+      await scanner.scanOnce(tempDir.path);
+
+      verifyNever(() => mockFileRepository.moveFile(any(), any()));
+      verify(() => mockFileRepository.renameFile('file-b', 'new.txt')).called(1);
+    });
+
+    test('an unreadable/backed-off new file with the same size as a missing '
+        'file: no deleteFile for that missing file', () async {
+      final oldPath = p.join(tempDir.path, 'gone.bin'); // no longer on disk
+      final newFile = File(p.join(tempDir.path, 'unreadable.bin'))
+        ..writeAsBytesSync(List.filled(9, 1));
+
+      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'file-c',
+              localPath: oldPath,
+              isFolder: false,
+              sizeBytes: 9, // same size as newFile, unrelated content
+              contentHash: hashOf('irrelevant, never compared'),
+              updatedAt: past,
+              syncedAt: past,
+            ),
+          ]);
+      // Simulates a read failure without depending on OS-specific file
+      // locking: pre-backing the path off is exactly what _hashFiles's own
+      // failure path leaves behind, and the scanner cannot tell the two
+      // apart.
+      scanner.debugBackOff(newFile.path);
+
+      await scanner.scanOnce(tempDir.path);
+
+      verifyNever(() => mockFileRepository.deleteFile('file-c'));
+    });
+  });
+
+  group('F6: report before mirror commit', () {
+    test('reportChange throws after a new-file upload: mirror not '
+        'upserted, so the next scan retries the whole upload', () async {
+      File(p.join(tempDir.path, 'flaky.txt')).writeAsStringSync('x');
+
+      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => []);
+      when(() => mockFileRepository.uploadFile(any(that: isNull), 'flaky.txt', any(), 1, any()))
+          .thenAnswer((_) async => 'flaky-id');
+      when(() => mockPush.reportChange('flaky-id', SyncChangeType.create))
+          .thenThrow(Exception('server unreachable'));
+
+      final pushed = await scanner.scanOnce(tempDir.path);
+
+      expect(pushed, 0);
+      verifyNever(() => mockMirror.upsert(any()));
+    });
+
+    test('delete whose deleteFile 404s still reports the delete before '
+        'clearing the mirror row', () async {
+      final gonePath = p.join(tempDir.path, 'gone404.txt'); // never created on disk
+
+      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'file-404',
+              localPath: gonePath,
+              isFolder: false,
+              sizeBytes: 3,
+              contentHash: hashOf('bye'),
+              updatedAt: past,
+              syncedAt: past,
+            ),
+          ]);
+      when(() => mockFileRepository.deleteFile('file-404')).thenThrow(dioError(404));
+
+      final pushed = await scanner.scanOnce(tempDir.path);
+
+      expect(pushed, 0); // already gone server-side too; not a new push
+      verifyInOrder([
+        () => mockPush.reportChange('file-404', SyncChangeType.delete),
+        () => mockMirror.deleteByServerId('file-404'),
+      ]);
+    });
   });
 }
