@@ -739,7 +739,10 @@ class LocalChangeScanner {
     while (true) {
       final result = await _fileRepository.listChildren(parentId, page: page, pageSize: pageSize);
       for (final item in result.items) {
-        if (item.name == name && !item.isFolder) return item;
+        // Case-insensitive, like every other name comparison here: FileService
+        // rejects a sibling that differs only by case, so the 409 for
+        // `Photo.jpg` may be about an existing `photo.jpg`.
+        if (item.name.toLowerCase() == name.toLowerCase() && !item.isFolder) return item;
       }
       if (!result.hasMore) return null;
       page++;

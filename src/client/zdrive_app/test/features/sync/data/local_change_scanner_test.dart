@@ -626,6 +626,39 @@ void main() {
     expect(mirror.outboxFor('existing-id').single.type, SyncChangeType.update);
   });
 
+  test('new file 409 against a server name that differs only by case: '
+      'finds it case-insensitively and uploads a new version into it', () async {
+    File(p.join(tempDir.path, 'Shared.txt')).writeAsStringSync('local content');
+    final mirror = stateful([]);
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'Shared.txt', any(), 13, any()))
+        .thenThrow(dioError(409));
+    when(() => mockFileRepository.listChildren(null, page: 1, pageSize: 200))
+        .thenAnswer((_) async => PagedResult(
+              items: [
+                FileItem(
+                  id: 'existing-id',
+                  name: 'shared.txt',
+                  isFolder: false,
+                  parentId: null,
+                  createdAt: now,
+                  updatedAt: now,
+                ),
+              ],
+              totalCount: 1,
+              page: 1,
+              pageSize: 200,
+            ));
+    when(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any()))
+        .thenAnswer((_) async {});
+
+    final pushed = await scanner.scanOnce(tempDir.path);
+
+    expect(pushed, 1);
+    verify(() => mockFileRepository.uploadNewVersion('existing-id', 'Shared.txt', any(), 13))
+        .called(1);
+    expect(mirror.outboxFor('existing-id').single.type, SyncChangeType.update);
+  });
+
   test('changed file whose uploadNewVersion 404s (deleted server-side '
       'meanwhile): re-created via uploadFile, old mirror row removed in the '
       'same commit as the new one', () async {
