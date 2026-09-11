@@ -91,6 +91,27 @@ void main() {
     expect(captured.headers, {'X-Device-Id': 'dev-1'});
   });
 
+  test('createFile sends X-Device-Id when originDeviceId is given — HTTP-'
+      'level, not just through the createFolder wrapper above', () async {
+    when(() => dio.post('/files', data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async => ok(fileJson, '/files'));
+
+    await ds.createFile(
+      name: 'doc.txt',
+      isFolder: false,
+      parentId: 'parent1',
+      sizeBytes: 10,
+      mimeType: 'text/plain',
+      originDeviceId: 'dev-1',
+    );
+
+    final captured = verify(() => dio.post('/files',
+            data: any(named: 'data'), options: captureAny(named: 'options')))
+        .captured
+        .single as Options;
+    expect(captured.headers, {'X-Device-Id': 'dev-1'});
+  });
+
   test('renameFile uses PUT /files/{id}/rename with newName', () async {
     when(() => dio.put('/files/f1/rename', data: any(named: 'data'), options: any(named: 'options')))
         .thenAnswer((_) async => ok(fileJson, '/files/f1/rename'));
