@@ -117,6 +117,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   final SyncCoordinator _syncCoordinator;
   final PullSyncService _pullService;
   final AppPreferences _preferences;
+  final String _userId;
   final Stream<FileSystemEvent> Function(String path) _watchFolder;
 
   // Polling, not SignalR: the hub has no backplane configured at
@@ -145,11 +146,13 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     required SyncCoordinator syncCoordinator,
     required PullSyncService pullService,
     required AppPreferences preferences,
+    required String userId,
     Stream<FileSystemEvent> Function(String path)? watch,
   })  : _dataSource = dataSource,
         _syncCoordinator = syncCoordinator,
         _pullService = pullService,
         _preferences = preferences,
+        _userId = userId,
         // Defaults to a real recursive folder watch; tests inject a fake so
         // they can drive events without touching the filesystem.
         _watchFolder = watch ?? ((path) => Directory(path).watch(recursive: true)),
@@ -163,10 +166,12 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     LoadSyncStatus event,
     Emitter<SyncState> emit,
   ) async {
-    // Re-enables syncOnce after a previous session's endSession — see
-    // SyncCoordinator.startSession's doc comment. A no-op the very first
-    // time this app has ever loaded (nothing has ended a session yet).
-    _syncCoordinator.startSession();
+    // Re-enables syncOnce after a previous session's endSession, and — if
+    // this machine's stored sync state belongs to a different account than
+    // _userId — clears it first, so that account never inherits the
+    // previous user's mirror, device id or folder. See
+    // SyncCoordinator.startSession's doc comment.
+    await _syncCoordinator.startSession(_userId);
     emit(const SyncLoading());
     try {
       final loaded = await _fetchLoadedState();
@@ -189,12 +194,22 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     final previousPath = current is SyncLoaded ? current.syncFolderPath : _preferences.syncFolderPath;
     if (previousPath != null && previousPath != event.path) {
       // A different folder than the one already configured starts sync
-      // over from a clean slate — see resetForNewFolder's doc comment.
+      // over from a clean slate — see resetForNewFolder's doc comment. This
+      // awaits the coordinator's mutex, i.e. waits for any pull already in
+      // flight to finish — which is why the emit below reads `state` again
+      // instead of reusing `current`: the in-flight pull's own handler can
+      // land its "pull finished" emit (isPulling: false, or a pullError)
+      // while this await is pending, and building the next emit from the
+      // state captured before it would resurrect a stale isPulling: true
+      // over that update, wedging every later PullRequested (PR #16 review
+      // round 1, F2).
       await _syncCoordinator.resetForNewFolder();
     }
     await _preferences.setSyncFolderPath(event.path);
-    if (current is SyncLoaded) {
-      emit(current.copyWith(syncFolderPath: event.path));
+
+    final latest = state;
+    if (latest is SyncLoaded) {
+      emit(latest.copyWith(syncFolderPath: event.path));
     } else {
       emit(await _fetchLoadedState());
     }

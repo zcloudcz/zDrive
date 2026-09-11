@@ -33,13 +33,18 @@ void main() {
     // Unstubbed: syncFolderPath returns null (mocktail's default for a
     // nullable getter), matching "no folder chosen yet" — the baseline every
     // existing test below assumes, since none of them are about pulling.
+    when(() => mockSyncCoordinator.startSession(any())).thenAnswer((_) async {});
   });
 
-  SyncBloc buildBloc({Stream<FileSystemEvent> Function(String path)? watch}) => SyncBloc(
+  SyncBloc buildBloc({
+    Stream<FileSystemEvent> Function(String path)? watch,
+    String userId = 'user-1',
+  }) => SyncBloc(
         dataSource: mockDataSource,
         syncCoordinator: mockSyncCoordinator,
         pullService: mockPullService,
         preferences: mockPreferences,
+        userId: userId,
         watch: watch,
       );
 
@@ -73,7 +78,7 @@ void main() {
       ],
       // Re-enables syncOnce after a previous session's endSession — see
       // SyncCoordinator.startSession's doc comment.
-      verify: (_) => verify(() => mockSyncCoordinator.startSession()).called(1),
+      verify: (_) => verify(() => mockSyncCoordinator.startSession('user-1')).called(1),
     );
 
     blocTest<SyncBloc, SyncState>(
@@ -212,6 +217,10 @@ void main() {
   });
 
   group('SyncFolderChosen', () {
+    // Shared by the F2 race test below only — reassigned fresh in that
+    // test's own setUp, like watchController in the 'folder watch' group.
+    late Completer<SyncRunResult> pullGate;
+
     blocTest<SyncBloc, SyncState>(
       'persists the chosen folder and triggers a sync, when no folder was '
       'configured before (nothing to reset)',
@@ -282,6 +291,50 @@ void main() {
       },
       act: (bloc) => bloc.add(const SyncFolderChosen('/same/folder')),
       verify: (_) => verifyNever(() => mockSyncCoordinator.resetForNewFolder()),
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'changing the folder while a pull is in flight does not resurrect a '
+      'stale isPulling once that pull finishes (PR #16 review round 1, F2) '
+      '— resetForNewFolder shares SyncCoordinator\'s mutex with syncOnce, so '
+      'it does not resolve until the in-flight pull does; emitting from the '
+      'state captured *before* that await would restore isPulling: true '
+      'over the pull handler\'s own "finished" update and wedge every later '
+      'PullRequested',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        pullGate = Completer<SyncRunResult>();
+        when(() => mockSyncCoordinator.syncOnce('/old')).thenAnswer((_) => pullGate.future);
+        // Mirrors the real SyncCoordinator: resetForNewFolder waits on the
+        // same mutex syncOnce holds. The extra delay after pullGate settles
+        // forces the exact ordering that broke the old code: the pull
+        // handler's own "finished" emit (isPulling: false) must land before
+        // this resolves, not after.
+        when(() => mockSyncCoordinator.resetForNewFolder()).thenAnswer((_) async {
+          await pullGate.future;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        });
+        when(() => mockSyncCoordinator.syncOnce('/new'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPreferences.setSyncFolderPath('/new')).thenAnswer((_) async {});
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+      },
+      act: (bloc) async {
+        bloc.add(const PullRequested());
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        bloc.add(const SyncFolderChosen('/new'));
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        pullGate.complete(const SyncRunResult(pulled: 1, pushed: 0));
+      },
+      wait: const Duration(milliseconds: 50),
+      verify: (bloc) {
+        final state = bloc.state as SyncLoaded;
+        expect(state.syncFolderPath, '/new');
+        expect(state.isPulling, isFalse);
+        verify(() => mockSyncCoordinator.syncOnce('/new')).called(1);
+      },
     );
   });
 

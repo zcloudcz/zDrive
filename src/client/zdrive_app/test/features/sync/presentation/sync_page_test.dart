@@ -34,6 +34,10 @@ void main() {
     // No stubbing of syncFolderPath: mocktail returns null for an unstubbed
     // nullable getter, matching "no folder chosen yet" — the state every
     // existing scenario below assumes, since none of them are about pulling.
+    // startSession must be stubbed (unlike a plain void method, an unstubbed
+    // Future-returning one throws instead of resolving to null) — every
+    // scenario here dispatches LoadSyncStatus via buildTestWidget.
+    when(() => mockCoordinator.startSession(any())).thenAnswer((_) async {});
   });
 
   // SyncPage now reads the ancestor SyncBloc provided once for the whole
@@ -55,6 +59,7 @@ void main() {
           syncCoordinator: mockCoordinator,
           pullService: mockPullService,
           preferences: mockPreferences,
+          userId: 'user-1',
         )..add(const LoadSyncStatus()),
         child: const SyncPage(),
       ),
