@@ -68,6 +68,11 @@ final class SyncLoaded extends SyncState {
   final String? pullError;
   final List<SyncFailedEvent> failedEvents;
 
+  /// How many local changes are still queued in the push outbox, waiting to
+  /// be sent — [SyncRunResult.queued] from the most recent sync run (0
+  /// until the first one completes).
+  final int outboxCount;
+
   const SyncLoaded({
     required this.devices,
     required this.conflicts,
@@ -75,6 +80,7 @@ final class SyncLoaded extends SyncState {
     this.isPulling = false,
     this.pullError,
     this.failedEvents = const [],
+    this.outboxCount = 0,
   });
 
   SyncLoaded copyWith({
@@ -84,6 +90,7 @@ final class SyncLoaded extends SyncState {
     bool? isPulling,
     String? Function()? pullError,
     List<SyncFailedEvent>? failedEvents,
+    int? outboxCount,
   }) {
     return SyncLoaded(
       devices: devices ?? this.devices,
@@ -92,12 +99,13 @@ final class SyncLoaded extends SyncState {
       isPulling: isPulling ?? this.isPulling,
       pullError: pullError != null ? pullError() : this.pullError,
       failedEvents: failedEvents ?? this.failedEvents,
+      outboxCount: outboxCount ?? this.outboxCount,
     );
   }
 
   @override
   List<Object?> get props =>
-      [devices, conflicts, syncFolderPath, isPulling, pullError, failedEvents];
+      [devices, conflicts, syncFolderPath, isPulling, pullError, failedEvents, outboxCount];
 }
 
 final class SyncError extends SyncState {
@@ -213,7 +221,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
 
     emit(current.copyWith(isPulling: true, pullError: () => null));
     try {
-      await _syncCoordinator.syncOnce(current.syncFolderPath!);
+      final result = await _syncCoordinator.syncOnce(current.syncFolderPath!);
       // A first pull registers the device, so the device list can now
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
@@ -224,6 +232,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
           devices: devices.map(SyncDevice.fromJson).toList(),
           isPulling: false,
           failedEvents: failedEvents,
+          outboxCount: result.queued,
         ));
       }
     } catch (e) {

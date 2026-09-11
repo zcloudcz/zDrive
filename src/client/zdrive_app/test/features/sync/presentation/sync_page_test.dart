@@ -161,5 +161,30 @@ void main() {
       expect(find.text('Everything is synced'), findsOneWidget);
       expect(find.text('Laptop'), findsOneWidget);
     });
+
+    testWidgets('shows how many changes are still queued in the push '
+        'outbox after a sync run (PR #14 review round 3)', (tester) async {
+      // Grab (not re-register) the mocks setUp() already wired into getIt —
+      // registerLazySingleton hands back the same instance on every
+      // resolve, so this is the one SyncPage itself will construct its
+      // SyncBloc with.
+      final mockCoordinator = getIt<SyncCoordinator>() as MockSyncCoordinator;
+      final mockPreferences = getIt<AppPreferences>() as MockAppPreferences;
+      final mockPullService = getIt<PullSyncService>() as MockPullSyncService;
+
+      when(() => mockPreferences.syncFolderPath).thenReturn('/local/sync');
+      when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
+            {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
+          ]);
+      when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
+      when(() => mockCoordinator.syncOnce('/local/sync'))
+          .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 3));
+      when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+
+      await tester.pumpWidget(buildTestWidget());
+      await tester.pumpAndSettle();
+
+      expect(find.text('3 changes waiting to be sent'), findsOneWidget);
+    });
   });
 }

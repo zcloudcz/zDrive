@@ -195,7 +195,7 @@ void main() {
       seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
       setUp: () {
         when(() => mockSyncCoordinator.syncOnce('/local/sync'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 2, pushed: 1));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 2, pushed: 1, queued: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
               {'id': 'dev-1', 'name': 'This PC', 'platform': 'windows'},
@@ -213,6 +213,34 @@ void main() {
           devices: [SyncDevice(id: 'dev-1', name: 'This PC', platform: 'windows')],
           conflicts: [],
           syncFolderPath: '/local/sync',
+        ),
+      ],
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'carries the outbox queue length from SyncRunResult.queued into '
+      'SyncLoaded.outboxCount (PR #14 review round 3)',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], conflicts: [], syncFolderPath: '/local/sync'),
+      setUp: () {
+        when(() => mockSyncCoordinator.syncOnce('/local/sync'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 1, queued: 3));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+      },
+      act: (bloc) => bloc.add(const PullRequested()),
+      expect: () => [
+        const SyncLoaded(
+          devices: [],
+          conflicts: [],
+          syncFolderPath: '/local/sync',
+          isPulling: true,
+        ),
+        const SyncLoaded(
+          devices: [],
+          conflicts: [],
+          syncFolderPath: '/local/sync',
+          outboxCount: 3,
         ),
       ],
     );
@@ -257,7 +285,7 @@ void main() {
         // slow sync (a whole-file transfer) is still in flight.
         Future.delayed(
           const Duration(milliseconds: 20),
-          () => completer.complete(const SyncRunResult(pulled: 0, pushed: 0)),
+          () => completer.complete(const SyncRunResult(pulled: 0, pushed: 0, queued: 0)),
         );
       },
       act: (bloc) {
@@ -278,7 +306,7 @@ void main() {
         when(() => mockPreferences.setSyncFolderPath('/new/folder'))
             .thenAnswer((_) async {});
         when(() => mockSyncCoordinator.syncOnce('/new/folder'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
       },
@@ -332,7 +360,7 @@ void main() {
         when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
         when(() => mockPreferences.syncFolderPath).thenReturn('/watched/folder');
         when(() => mockSyncCoordinator.syncOnce('/watched/folder'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
       },
       act: (bloc) async {
@@ -365,7 +393,7 @@ void main() {
         when(() => mockPreferences.syncFolderPath).thenReturn('/old/folder');
         when(() => mockPreferences.setSyncFolderPath('/new/folder')).thenAnswer((_) async {});
         when(() => mockSyncCoordinator.syncOnce(any()))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
       },
       act: (bloc) async {
@@ -400,7 +428,7 @@ void main() {
         when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
         when(() => mockPreferences.syncFolderPath).thenReturn('/watched/folder');
         when(() => mockSyncCoordinator.syncOnce('/watched/folder'))
-            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0, queued: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
       },
       act: (bloc) async {

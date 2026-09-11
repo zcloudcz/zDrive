@@ -93,6 +93,7 @@ class _SyncLoadedBody extends StatelessWidget {
       return Column(
         children: [
           _FolderStatusTile(state: state),
+          if (state.outboxCount > 0) _OutboxPendingTile(count: state.outboxCount),
           Expanded(
             child: Center(
               child: Column(
@@ -113,6 +114,7 @@ class _SyncLoadedBody extends StatelessWidget {
     return ListView(
       children: [
         _FolderStatusTile(state: state),
+        if (state.outboxCount > 0) _OutboxPendingTile(count: state.outboxCount),
         if (state.conflicts.isEmpty)
           ListTile(
             leading: Icon(Icons.sync, color: Theme.of(context).colorScheme.primary),
@@ -136,6 +138,24 @@ class _SyncLoadedBody extends StatelessWidget {
         else
           for (final device in state.devices) _DeviceTile(device: device),
       ],
+    );
+  }
+}
+
+/// One line for the push outbox (PR #14 review round 3) — how many local
+/// changes are still queued waiting to be sent to SyncService. Only shown
+/// when there is something queued; an empty outbox says nothing extra.
+class _OutboxPendingTile extends StatelessWidget {
+  final int count;
+
+  const _OutboxPendingTile({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return ListTile(
+      leading: Icon(Icons.hourglass_top, color: Theme.of(context).colorScheme.primary),
+      title: Text(l10n.syncOutboxPending(count)),
     );
   }
 }
