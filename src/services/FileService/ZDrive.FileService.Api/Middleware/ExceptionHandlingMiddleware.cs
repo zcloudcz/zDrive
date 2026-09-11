@@ -73,8 +73,18 @@ public sealed class ExceptionHandlingMiddleware
             // lower() do not fold every character identically. A unique
             // violation here is a naming conflict the caller can react to, not
             // a server bug — map it to 409 instead of letting it fall through
-            // to the 500 default below.
-            DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } } => (
+            // to the 500 default below. Matched on the index name, not on
+            // 23505 alone: file_versions has its own unique index
+            // (file_id, version_number), and a violation there is not a
+            // naming conflict, so this message would be wrong for it.
+            DbUpdateException
+            {
+                InnerException: PostgresException
+                {
+                    SqlState: PostgresErrorCodes.UniqueViolation,
+                    ConstraintName: "ix_file_nodes_tenant_id_user_id_parent_id_name_normalized"
+                }
+            } => (
                 HttpStatusCode.Conflict,
                 new ErrorResponse("CONFLICT", "A file or folder with that name already exists in this location.")),
 
