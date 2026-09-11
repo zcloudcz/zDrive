@@ -47,6 +47,24 @@ class ManifestChunkIndexException implements Exception {
       'ManifestChunkIndexException: expected chunk index $expectedIndex, got $actualIndex';
 }
 
+/// Thrown when the stream handed to [FileUploadDataSource.uploadFile]
+/// produced a different number of bytes than the caller declared as
+/// [FileUploadDataSource.uploadFile]'s `sizeBytes`. StorageService only
+/// checks chunk *count* and index completeness, never byte length (see the
+/// doc comment on `uploadFile`), so a stream that changed size between being
+/// picked and being read would otherwise complete as a corrupt upload with
+/// no error anywhere — this is the client-side check that catches it.
+class UploadSizeMismatchException implements Exception {
+  final int expectedSize;
+  final int actualSize;
+
+  const UploadSizeMismatchException(this.expectedSize, this.actualSize);
+
+  @override
+  String toString() =>
+      'UploadSizeMismatchException: declared $expectedSize bytes, stream produced $actualSize';
+}
+
 /// Thin transport over StorageService's chunked-upload API. Orchestration
 /// (creating the file node, recording the version) lives in the repository.
 @lazySingleton
@@ -115,11 +133,15 @@ class FileUploadDataSource {
   /// into a PUT, without ever holding more than one chunk in memory — the
   /// counterpart to [downloadFile] below, which reassembles the same shape
   /// back. [sizeBytes] must be the exact byte count [content] will produce;
-  /// it is only used to compute totalChunks up front (required by
-  /// [initUpload] before any chunk is sent) — if the stream turns out
-  /// shorter or longer, the chunk-index/completeness checks StorageService
-  /// already does ([UploadChunkCommandHandler], [CompleteUploadCommandHandler])
-  /// fail the upload loudly rather than silently storing a truncated file.
+  /// it is used both to compute totalChunks up front (required by
+  /// [initUpload] before any chunk is sent) and, once the stream is fully
+  /// read, to check against the actual byte count. That second check matters
+  /// because StorageService only verifies chunk *count* and index
+  /// completeness ([UploadChunkCommandHandler], [CompleteUploadCommandHandler])
+  /// — never byte length — so a stream that turns out shorter or longer than
+  /// [sizeBytes] but still produces the same number of chunks (e.g. the
+  /// picked file changed size between pick and upload) would otherwise
+  /// complete silently with mismatched metadata instead of failing loudly.
   Future<UploadCompleteDto> uploadFile(
     String fileId,
     String fileName,
@@ -132,7 +154,7 @@ class FileUploadDataSource {
 
     var index = 0;
     var uploadedBytes = 0;
-    await for (final chunk in splitIntoChunks(content)) {
+    await for (final chunk in _splitIntoChunks(content)) {
       await uploadChunk(
         session.sessionId,
         index,
@@ -149,6 +171,10 @@ class FileUploadDataSource {
       index++;
     }
 
+    if (uploadedBytes != sizeBytes) {
+      throw UploadSizeMismatchException(sizeBytes, uploadedBytes);
+    }
+
     return completeUpload(session.sessionId);
   }
 
@@ -159,11 +185,7 @@ class FileUploadDataSource {
   /// up with chunkSize on its own. A source that yields nothing produces one
   /// empty chunk, matching Chunking.cs's handling of zero-byte files (a
   /// session needs totalChunks > 0).
-  ///
-  /// Public (not just used by [uploadFile] above) so folder upload can hash
-  /// a local file's chunks the same way, to compare against a remote
-  /// manifest before deciding whether to skip re-uploading it.
-  static Stream<Uint8List> splitIntoChunks(Stream<List<int>> source) async* {
+  static Stream<Uint8List> _splitIntoChunks(Stream<List<int>> source) async* {
     final buffer = BytesBuilder(copy: false);
     var yielded = false;
 
@@ -191,19 +213,6 @@ class FileUploadDataSource {
       '${ApiConstants.storage}/download/$fileId/manifest',
     );
     return ManifestDto.fromJson(unwrapMap(response));
-  }
-
-  /// Like [getManifest], but returns null instead of throwing when [fileId]
-  /// has no manifest yet (a file node with no completed upload) — folder
-  /// upload's "is this already uploaded?" check needs to tell that apart
-  /// from a real error.
-  Future<ManifestDto?> tryGetManifest(String fileId) async {
-    try {
-      return await getManifest(fileId);
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 404) return null;
-      rethrow;
-    }
   }
 
   /// Fetches one chunk's raw bytes.
@@ -250,10 +259,11 @@ class FileUploadDataSource {
     }
 
     // ponytail: whole file is buffered in memory (this BytesBuilder plus the
-    // copy toBytes() makes), peak ~2-3x file size. Pre-existing ceiling —
-    // upload is already whole-file/single-chunk, so nothing this client
-    // uploads is bigger than that today. Upgrade path if that changes:
-    // stream to a temp file on native, File System Access API on web.
+    // copy toBytes() makes), peak ~2-3x file size. uploadFile above streams
+    // chunk-by-chunk and never holds more than one chunk at a time, so this
+    // client can now upload a file it cannot download back — asymmetric, not
+    // a matched pair. Upgrade path: stream to a temp file on native, File
+    // System Access API on web.
     final builder = BytesBuilder(copy: false);
     for (final chunk in chunks) {
       final bytes = await downloadChunkBytes(fileId, chunk.hash);

@@ -414,7 +414,6 @@ class _FileBrowserView extends StatelessWidget {
       );
     }
   }
-
 }
 
 /// Downloads [file]'s complete content (reassembled from its chunks by

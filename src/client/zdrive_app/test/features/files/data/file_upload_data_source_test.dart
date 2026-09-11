@@ -74,35 +74,30 @@ void main() {
   });
 
   group('uploadFile (multi-chunk upload)', () {
-    // Every case here streams zero real bytes regardless of the declared
-    // size — totalChunks is computed from sizeBytes alone, before any byte
-    // is read (initUpload has to happen first), so the arithmetic can be
-    // tested without pushing megabytes through a fake stream. The single
-    // chunk that Stream.empty() always produces (see splitIntoChunks'
-    // zero-byte handling) lands at index 0 regardless of totalChunks, which
-    // is exactly why the assertion below is on the initUpload call, not on
-    // how many PUTs happened.
-    void stubSessionOfEmptyContent() {
+    // Session/chunk-PUT/complete stubs generic enough to serve any of the
+    // sizes/streams below — these tests care about totalChunks and the
+    // byte-count check, not about individual chunk paths.
+    void stubUploadSession() {
       when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer(
           (_) async => ok({'sessionId': 's1', 'sasUploadUrl': 'x'}, apiInit));
       when(() => dio.put(
-            '/storage/upload/s1/chunk/0',
+            any(),
             data: any(named: 'data'),
             options: any(named: 'options'),
             onSendProgress: any(named: 'onSendProgress'),
           )).thenAnswer((_) async => ok(
-          {'sessionId': 's1', 'chunkIndex': 0, 'chunkHash': 'h', 'accepted': true},
-          '/storage/upload/s1/chunk/0'));
+          {'sessionId': 's1', 'chunkIndex': 0, 'chunkHash': 'h', 'accepted': true}, ''));
       when(() => dio.post('/storage/upload/s1/complete')).thenAnswer((_) async =>
           ok({'blobPath': 'p', 'manifestHash': 'h1', 'totalSize': 0}, ''));
     }
 
-    test('derives totalChunks from sizeBytes instead of hard-coding 1', () async {
-      stubSessionOfEmptyContent();
+    test('derives totalChunks from sizeBytes instead of hard-coding 1, when '
+        'the stream actually produces that many bytes', () async {
+      stubUploadSession();
       const chunkSize = FileUploadDataSource.chunkSize;
 
       for (final size in [0, chunkSize, chunkSize + 1, chunkSize * 3]) {
-        await ds.uploadFile('f1', 'x.bin', const Stream<List<int>>.empty(), size);
+        await ds.uploadFile('f1', 'x.bin', Stream.value(Uint8List(size)), size);
       }
 
       final totalChunksSent = verify(
@@ -110,6 +105,40 @@ void main() {
       ).captured.map((data) => (data as Map)['totalChunks']).toList();
 
       expect(totalChunksSent, [1, 1, 2, 3]);
+    });
+
+    test(
+        'throws UploadSizeMismatchException when the stream produces fewer '
+        'bytes than sizeBytes declared, even though the chunk count still '
+        'comes out to 1 either way (round-3 review finding 2 — this used to '
+        'be exactly the input the old "derives totalChunks" test fed in and '
+        'expected to succeed)', () async {
+      stubUploadSession();
+
+      await expectLater(
+        ds.uploadFile('f1', 'x.bin', const Stream<List<int>>.empty(),
+            FileUploadDataSource.chunkSize),
+        throwsA(isA<UploadSizeMismatchException>()),
+      );
+
+      verifyNever(() => dio.post('/storage/upload/s1/complete'));
+    });
+
+    test(
+        'throws UploadSizeMismatchException when the stream is short by a '
+        'few bytes but still produces the same chunk count as declared — '
+        'the input that distinguishes a byte-count check from a chunk-count '
+        'check (round-3 review finding 2)', () async {
+      stubUploadSession();
+      const chunkSize = FileUploadDataSource.chunkSize;
+      final shortContent = Uint8List(chunkSize - 100);
+
+      await expectLater(
+        ds.uploadFile('f1', 'x.bin', Stream.value(shortContent), chunkSize),
+        throwsA(isA<UploadSizeMismatchException>()),
+      );
+
+      verifyNever(() => dio.post('/storage/upload/s1/complete'));
     });
 
     test('a multi-chunk upload round-trips through downloadFile', () async {
