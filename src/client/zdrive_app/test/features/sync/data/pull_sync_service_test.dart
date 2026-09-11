@@ -170,6 +170,9 @@ void main() {
           updatedAt: DateTime.utc(2026, 1, 1),
           syncedAt: DateTime.utc(2026, 1, 1),
         ));
+    // Stubbed for any id so that, if the guard regresses, the test fails on
+    // the edited file being gone rather than on an unstubbed mock.
+    when(() => mockMirror.deleteByServerId(any())).thenAnswer((_) async {});
 
     final applied = await service.pullOnce(tempDir.path);
 
