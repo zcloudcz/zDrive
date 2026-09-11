@@ -40,12 +40,13 @@ public sealed class MoveFileCommandHandler : IRequestHandler<MoveFileCommand, Fi
                 throw new ConflictException("Cannot move a folder into one of its own descendants.");
         }
 
-        // Prevent duplicate names in target folder.
+        // Prevent duplicate names in target folder. Case-insensitive —
+        // see CreateFileCommandHandler for why.
         var duplicate = await _db.FileNodes.AnyAsync(f =>
             f.TenantId == request.TenantId
             && f.UserId == request.UserId
             && f.ParentId == request.NewParentId
-            && f.Name == node.Name
+            && f.Name.ToLower() == node.Name.ToLower()
             && f.Id != node.Id
             && !f.IsDeleted,
             cancellationToken);

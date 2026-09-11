@@ -228,6 +228,64 @@ public sealed class FileFlowTests : IClassFixture<FileServiceFactory>
         second.StatusCode.Should().Be(HttpStatusCode.Conflict);
     }
 
+    // The next three tests pin PR #12 review round 3, B1 (server side): a
+    // sibling name that differs only by case is the same directory entry on
+    // NTFS and default APFS, so create/rename/move must reject it exactly
+    // like an exact-case duplicate, not treat it as a distinct name.
+
+    [Fact]
+    public async Task CreateDuplicate_CaseOnlyDifference_Returns409()
+    {
+        var first = await _client.PostAsJsonAsync("/api/v1/files", new { name = "Photos", isFolder = true });
+        first.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var second = await _client.PostAsJsonAsync("/api/v1/files", new { name = "photos", isFolder = true });
+        second.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task RenameFile_CaseOnlyCollisionWithSibling_Returns409()
+    {
+        var sibling = await _client.PostAsJsonAsync("/api/v1/files", new { name = "Docs", isFolder = true });
+        (await sibling.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!.Id.Should().NotBeEmpty();
+
+        var toRename = await _client.PostAsJsonAsync("/api/v1/files", new { name = "Other", isFolder = true });
+        var toRenameId = (await toRename.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!.Id;
+
+        // Renaming "Other" to "docs" collides with the existing "Docs" only by case.
+        var renameResponse = await _client.PutAsJsonAsync($"/api/v1/files/{toRenameId}/rename", new
+        {
+            newName = "docs"
+        });
+        renameResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task MoveFile_CaseOnlyCollisionInTargetFolder_Returns409()
+    {
+        var targetFolder = await _client.PostAsJsonAsync("/api/v1/files", new { name = "TargetFolder-CaseMove", isFolder = true });
+        var target = (await targetFolder.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var existing = await _client.PostAsJsonAsync("/api/v1/files", new
+        {
+            name = "Report.docx",
+            parentId = target.Id,
+            isFolder = false
+        });
+        existing.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var moving = await _client.PostAsJsonAsync("/api/v1/files", new { name = "report.docx", isFolder = false });
+        var movingFile = (await moving.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        // Moving "report.docx" into TargetFolder-CaseMove collides with the
+        // existing "Report.docx" there only by case.
+        var moveResponse = await _client.PutAsJsonAsync($"/api/v1/files/{movingFile.Id}/move", new
+        {
+            newParentId = target.Id
+        });
+        moveResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
     [Fact]
     public async Task GetFile_WithoutAuth_Returns401()
     {

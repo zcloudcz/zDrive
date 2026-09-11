@@ -28,12 +28,16 @@ public sealed class CreateFileCommandHandler : IRequestHandler<CreateFileCommand
                 ?? throw new NotFoundException("Folder", request.ParentId.Value);
         }
 
-        // Prevent duplicate names in the same folder.
+        // Prevent duplicate names in the same folder. Case-insensitive:
+        // NTFS and default APFS resolve "Photos" and "photos" to the same
+        // directory, so a case-only difference is a real collision, not a
+        // cosmetic one (see PR #12 review round 3, B1). Backed by a
+        // matching unique index (FileNodeConfiguration) for the race case.
         var duplicate = await _db.FileNodes.AnyAsync(f =>
             f.TenantId == request.TenantId
             && f.UserId == request.UserId
             && f.ParentId == request.ParentId
-            && f.Name == request.Name
+            && f.Name.ToLower() == request.Name.ToLower()
             && !f.IsDeleted,
             cancellationToken);
 
