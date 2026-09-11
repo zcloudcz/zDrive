@@ -106,6 +106,27 @@ void main() {
     });
   });
 
+  group('getChildrenUnder', () {
+    test('returns only rows strictly nested under the prefix, not the '
+        'prefix\'s own row or an unrelated sibling', () async {
+      final folderDir = p.join('sync', 'Photos');
+
+      await repository.upsert(entry(serverId: 'folder-1', localPath: folderDir, isFolder: true));
+      await repository.upsert(
+          entry(serverId: 'file-1', localPath: p.join(folderDir, 'a.jpg')));
+      await repository.upsert(
+          entry(serverId: 'file-2', localPath: p.join(folderDir, 'nested', 'b.jpg')));
+      await repository.upsert(
+          entry(serverId: 'file-3', localPath: p.join('sync', 'unrelated.txt')));
+
+      final children = await repository.getChildrenUnder(folderDir);
+
+      expect(children.map((e) => e.serverId), containsAll(['file-1', 'file-2']));
+      expect(children.map((e) => e.serverId), isNot(contains('folder-1')));
+      expect(children.map((e) => e.serverId), isNot(contains('file-3')));
+    });
+  });
+
   group('bootstrap flag', () {
     test('isBootstrapped is false until markBootstrapped is called', () async {
       expect(await repository.isBootstrapped('dev-1'), isFalse);

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
@@ -396,17 +397,23 @@ void main() {
         ], 2));
     when(() => mockFileRepository.getFile('bad-1')).thenAnswer((_) async => FileItem(
           id: 'bad-1',
-          name: 'aux',
+          // A perfectly legal name — this test is about an OS-level failure
+          // unrelated to naming (a path past MAX_PATH, a disk hiccup). A
+          // reserved device name like "aux" is now rejected before this
+          // point instead (see the "rejects a reserved Win32 device name"
+          // test below, B2), so re-using one here would never reach
+          // downloadFile at all.
+          name: 'stuck-file.bin',
           isFolder: false,
           parentId: null,
           createdAt: now,
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('bad-1')).thenAnswer((_) async => null);
-    // Simulates a name the OS refuses outright (e.g. a reserved device name
-    // on Windows, or a path past MAX_PATH) — not a network error.
+    // Simulates a name-independent OS-level failure — a path past MAX_PATH,
+    // a disk hiccup — not a network error.
     when(() => mockFileRepository.downloadFile('bad-1'))
-        .thenThrow(const FileSystemException('The filename is invalid', 'aux'));
+        .thenThrow(const FileSystemException('The operation could not be completed', 'stuck-file.bin'));
 
     when(() => mockFileRepository.getFile('good-1')).thenAnswer((_) async => FileItem(
           id: 'good-1',
@@ -650,6 +657,442 @@ void main() {
       // done — there is no per-item retry inside bootstrap itself; recovery
       // comes from the same R3 retry loop that picks up any quarantined
       // entry on a later poll.
+      verify(() => mockMirror.markBootstrapped('dev-1')).called(1);
+    });
+  });
+
+  group('Win32 name rules (B2)', () {
+    test('violatesWin32NameRules flags a trailing dot or space, the alias '
+        'that let a remote "foo." merge into an existing "foo"', () {
+      expect(violatesWin32NameRules('foo.'), isTrue);
+      expect(violatesWin32NameRules('foo '), isTrue);
+      expect(violatesWin32NameRules('foo'), isFalse);
+    });
+
+    test('violatesWin32NameRules flags Win32-illegal characters', () {
+      expect(violatesWin32NameRules('Why?.mp4'), isTrue);
+      expect(violatesWin32NameRules('a<b>.txt'), isTrue);
+      expect(violatesWin32NameRules('normal-name.txt'), isFalse);
+    });
+
+    test('violatesWin32NameRules flags reserved device stems regardless of '
+        'case or extension, but not a name that merely starts the same way', () {
+      expect(violatesWin32NameRules('nul'), isTrue);
+      expect(violatesWin32NameRules('NUL'), isTrue);
+      expect(violatesWin32NameRules('nul.txt'), isTrue);
+      expect(violatesWin32NameRules('com1'), isTrue);
+      expect(violatesWin32NameRules('lpt9'), isTrue);
+      expect(violatesWin32NameRules('null.txt'), isFalse); // "null", not "nul"
+      expect(violatesWin32NameRules('company.txt'), isFalse); // "company", not "com1".."com9"
+    });
+
+    test('rejects a Win32-illegal-character file name before ever '
+        'downloading it — a download before this fix cost full file '
+        'egress on every poll for a name Windows can never write (B2a)',
+        () async {
+      final now = DateTime.utc(2026, 1, 1);
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'bad-name-1', 'eventType': 'Create', 'metadata': null},
+          ], 1));
+      when(() => mockFileRepository.getFile('bad-name-1')).thenAnswer((_) async => FileItem(
+            id: 'bad-name-1',
+            name: 'Why?.mp4',
+            isFolder: false,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockMirror.getByServerId('bad-name-1')).thenAnswer((_) async => null);
+
+      final applied = await service.pullOnce(tempDir.path);
+
+      expect(applied, 1);
+      verifyNever(() => mockFileRepository.downloadFile(any()));
+      verify(() => mockMirror.recordFailedEvent(
+            'bad-name-1',
+            1,
+            any(that: contains('unsafe remote name')),
+          )).called(1);
+    });
+
+    test('rejects a reserved Win32 device stem before ever downloading it '
+        '(B2a)', () async {
+      final now = DateTime.utc(2026, 1, 1);
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'bad-name-2', 'eventType': 'Create', 'metadata': null},
+          ], 1));
+      when(() => mockFileRepository.getFile('bad-name-2')).thenAnswer((_) async => FileItem(
+            id: 'bad-name-2',
+            name: 'nul',
+            isFolder: false,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockMirror.getByServerId('bad-name-2')).thenAnswer((_) async => null);
+
+      await service.pullOnce(tempDir.path);
+
+      verifyNever(() => mockFileRepository.downloadFile(any()));
+      verify(() => mockMirror.recordFailedEvent(
+            'bad-name-2',
+            1,
+            any(that: contains('unsafe remote name')),
+          )).called(1);
+    });
+
+    test('rejects a trailing-dot folder name before ever creating a '
+        'directory for it, instead of merging into an existing "foo" '
+        'sibling (B1/B2)', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final existingFoo = Directory(p.join(tempDir.path, 'foo'))..createSync();
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-dot', 'eventType': 'Create', 'metadata': null},
+          ], 1));
+      when(() => mockFileRepository.getFile('folder-dot')).thenAnswer((_) async => FileItem(
+            id: 'folder-dot',
+            name: 'foo.',
+            isFolder: true,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockMirror.getByServerId('folder-dot')).thenAnswer((_) async => null);
+
+      await service.pullOnce(tempDir.path);
+
+      verify(() => mockMirror.recordFailedEvent(
+            'folder-dot',
+            1,
+            any(that: contains('unsafe remote name')),
+          )).called(1);
+      // Untouched — nothing was ever written under it, because "foo." was
+      // rejected before any Directory call was made.
+      expect(existingFoo.existsSync(), isTrue);
+      expect(existingFoo.listSync(), isEmpty);
+    });
+
+    test('rejects a rename target Windows cannot write, leaving the old '
+        'folder and its untracked content untouched (B1/B2)', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final oldDir = Directory(p.join(tempDir.path, 'oldName'))..createSync();
+      final untracked = File(p.join(oldDir.path, 'untracked.txt'))
+        ..writeAsStringSync('never sent to the server');
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-1', 'eventType': 'Rename', 'metadata': null},
+          ], 1));
+      when(() => mockFileRepository.getFile('folder-1')).thenAnswer((_) async => FileItem(
+            id: 'folder-1',
+            name: 'renamed.', // trailing dot — Win32 cannot write this
+            isFolder: true,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockMirror.getByServerId('folder-1')).thenAnswer((_) async => SyncMirrorEntry(
+            serverId: 'folder-1',
+            localPath: oldDir.path,
+            isFolder: true,
+            updatedAt: now,
+            syncedAt: now,
+          ));
+
+      await service.pullOnce(tempDir.path);
+
+      verify(() => mockMirror.recordFailedEvent(
+            'folder-1',
+            1,
+            any(that: contains('unsafe remote name')),
+          )).called(1);
+      expect(oldDir.existsSync(), isTrue);
+      expect(untracked.readAsStringSync(), 'never sent to the server');
+      verifyNever(() => mockMirror.rePathChildren(any(), any()));
+    });
+  });
+
+  group('quarantine retry backoff, budget and exception boundary (B2b/c)', () {
+    test('does not retry a quarantined row inside the backoff window, but '
+        'does retry one once it has elapsed', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final bytes = Uint8List.fromList(utf8.encode('now available'));
+
+      final recent = SyncFailedEvent(
+        fileId: 'recent-1',
+        eventId: 1,
+        reason: 'still unsafe',
+        failedAt: DateTime.now(), // just failed — inside the backoff window
+      );
+      final stale = SyncFailedEvent(
+        fileId: 'stale-1',
+        eventId: 2,
+        reason: 'was locked',
+        failedAt: DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => [recent, stale]);
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFileRepository.getFile('stale-1')).thenAnswer((_) async => FileItem(
+            id: 'stale-1',
+            name: 'now-available.bin',
+            isFolder: false,
+            sizeBytes: bytes.length,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockMirror.getByServerId('stale-1')).thenAnswer((_) async => null);
+      when(() => mockFileRepository.downloadFile('stale-1')).thenAnswer((_) async => bytes);
+
+      await service.pullOnce(tempDir.path);
+
+      verifyNever(() => mockFileRepository.getFile('recent-1'));
+      verify(() => mockFileRepository.getFile('stale-1')).called(1);
+      verify(() => mockMirror.clearFailedEvent('stale-1')).called(1);
+    });
+
+    test('retries at most a bounded number of quarantined rows per poll, '
+        'oldest-failed first', () async {
+      const totalQuarantined = 25;
+      const expectedRetriedThisPoll = 20; // must match PullSyncService._maxRetriesPerPoll
+
+      final failedEvents = List.generate(
+        totalQuarantined,
+        (i) => SyncFailedEvent(
+          fileId: 'q-$i',
+          eventId: i,
+          reason: 'still failing',
+          // All comfortably past the backoff window, staggered so ordering
+          // is unambiguous: q-0 failed longest ago, q-24 most recently.
+          failedAt: DateTime.now().subtract(Duration(minutes: 10 + (totalQuarantined - i))),
+        ),
+      );
+
+      when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => failedEvents);
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      // Every quarantined row fails the same way again — what matters here
+      // is how many getFile calls the retry loop issues, not the outcome.
+      when(() => mockFileRepository.getFile(any())).thenThrow(Exception('still broken'));
+
+      await service.pullOnce(tempDir.path);
+
+      final retried = verify(() => mockFileRepository.getFile(captureAny())).captured;
+      expect(retried, hasLength(expectedRetriedThisPoll));
+      expect(retried, containsAll(List.generate(expectedRetriedThisPoll, (i) => 'q-$i')));
+    });
+
+    test('a non-404 exception during a quarantine retry does not abort the '
+        'drain — a fresh event in the same poll still applies', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final bytes = Uint8List.fromList(utf8.encode('fresh'));
+
+      final stuck = SyncFailedEvent(
+        fileId: 'stuck-1',
+        eventId: 1,
+        reason: 'was a local conflict',
+        failedAt: DateTime.now().subtract(const Duration(minutes: 10)),
+      );
+      when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => [stuck]);
+      // Something this loop was never taught to expect — a non-404
+      // DioException from a flaky connection, say.
+      when(() => mockFileRepository.getFile('stuck-1')).thenThrow(
+        DioException(
+          requestOptions: RequestOptions(path: '/files/stuck-1'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/files/stuck-1'),
+            statusCode: 500,
+          ),
+        ),
+      );
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 5, 'fileId': 'fresh-1', 'eventType': 'Create', 'metadata': null},
+          ], 5));
+      when(() => mockFileRepository.getFile('fresh-1')).thenAnswer((_) async => FileItem(
+            id: 'fresh-1',
+            name: 'fresh.txt',
+            isFolder: false,
+            sizeBytes: bytes.length,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockMirror.getByServerId('fresh-1')).thenAnswer((_) async => null);
+      when(() => mockFileRepository.downloadFile('fresh-1')).thenAnswer((_) async => bytes);
+
+      final applied = await service.pullOnce(tempDir.path);
+
+      expect(applied, 1);
+      expect(File(p.join(tempDir.path, 'fresh.txt')).readAsBytesSync(), bytes);
+      // The quarantined row is still quarantined — re-stamped, not resolved
+      // and not left to abort the poll.
+      verify(() => mockMirror.recordFailedEvent('stuck-1', 1, 'was a local conflict')).called(1);
+    });
+  });
+
+  group('folder delete removes only what pull owns, non-recursively (B1)', () {
+    test('leaves an untracked file inside a deleted folder alone, and '
+        'quarantines the event instead of destroying the folder', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final folderDir = Directory(p.join(tempDir.path, 'Photos'))..createSync();
+      final trackedBytes = Uint8List.fromList(utf8.encode('server content'));
+      final trackedFile = File(p.join(folderDir.path, 'tracked.jpg'))
+        ..writeAsBytesSync(trackedBytes);
+      final untrackedFile = File(p.join(folderDir.path, 'my-notes.txt'))
+        ..writeAsStringSync('only ever existed on this machine');
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-1', 'eventType': 'Delete', 'metadata': null},
+          ], 1));
+      when(() => mockMirror.getByServerId('folder-del-1')).thenAnswer((_) async => SyncMirrorEntry(
+            serverId: 'folder-del-1',
+            localPath: folderDir.path,
+            isFolder: true,
+            updatedAt: now,
+            syncedAt: now,
+          ));
+      when(() => mockMirror.getChildrenUnder(folderDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'tracked-file-1',
+              localPath: trackedFile.path,
+              isFolder: false,
+              contentHash: sha256.convert(trackedBytes).toString(),
+              updatedAt: now,
+              syncedAt: now,
+            ),
+          ]);
+      when(() => mockMirror.deleteByServerId('tracked-file-1')).thenAnswer((_) async {});
+
+      final applied = await service.pullOnce(tempDir.path);
+
+      expect(applied, 1);
+      // The tracked, unmodified file is gone...
+      expect(trackedFile.existsSync(), isFalse);
+      verify(() => mockMirror.deleteByServerId('tracked-file-1')).called(1);
+      // ...but the untracked one, and the folder holding it, are not.
+      expect(untrackedFile.existsSync(), isTrue);
+      expect(untrackedFile.readAsStringSync(), 'only ever existed on this machine');
+      expect(folderDir.existsSync(), isTrue);
+      // The folder's own row is not dropped — it still holds content pull
+      // did not clear, so a later retry can finish the job once that
+      // resolves on its own.
+      verifyNever(() => mockMirror.deleteByServerId('folder-del-1'));
+      verify(() => mockMirror.recordFailedEvent(
+            'folder-del-1',
+            1,
+            any(that: contains('untracked or locally modified content')),
+          )).called(1);
+    });
+
+    test('removes the whole folder once every tracked file inside matches '
+        'what was last synced', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final folderDir = Directory(p.join(tempDir.path, 'Empty-once-synced'))..createSync();
+      final trackedBytes = Uint8List.fromList(utf8.encode('server content'));
+      final trackedFile = File(p.join(folderDir.path, 'tracked.jpg'))
+        ..writeAsBytesSync(trackedBytes);
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-2', 'eventType': 'Delete', 'metadata': null},
+          ], 1));
+      when(() => mockMirror.getByServerId('folder-del-2')).thenAnswer((_) async => SyncMirrorEntry(
+            serverId: 'folder-del-2',
+            localPath: folderDir.path,
+            isFolder: true,
+            updatedAt: now,
+            syncedAt: now,
+          ));
+      when(() => mockMirror.getChildrenUnder(folderDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'tracked-file-2',
+              localPath: trackedFile.path,
+              isFolder: false,
+              contentHash: sha256.convert(trackedBytes).toString(),
+              updatedAt: now,
+              syncedAt: now,
+            ),
+          ]);
+      when(() => mockMirror.deleteByServerId('tracked-file-2')).thenAnswer((_) async {});
+      when(() => mockMirror.deleteByServerId('folder-del-2')).thenAnswer((_) async {});
+
+      await service.pullOnce(tempDir.path);
+
+      expect(folderDir.existsSync(), isFalse);
+      verify(() => mockMirror.deleteByServerId('tracked-file-2')).called(1);
+      verify(() => mockMirror.deleteByServerId('folder-del-2')).called(1);
+      verifyNever(() => mockMirror.recordFailedEvent(any(), any(), any()));
+    });
+  });
+
+  group('bootstrap folder create failure does not wedge forever (B3)', () {
+    test('a folder the OS refuses to create is recorded as a failed event, '
+        'markBootstrapped still runs, and a later sibling is still walked',
+        () async {
+      final now = DateTime.utc(2026, 1, 1);
+      // A real file already occupies the path bootstrap will try to make a
+      // directory at — Directory.create(recursive: true) genuinely throws
+      // for this, no mocking of dart:io needed.
+      File(p.join(tempDir.path, 'blocked')).writeAsStringSync('irrelevant');
+
+      when(() => mockMirror.isBootstrapped('dev-1')).thenAnswer((_) async => false);
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([], 0));
+      when(() => mockFileRepository.listChildren(null, page: 1)).thenAnswer((_) async => PagedResult(
+            items: [
+              FileItem(
+                id: 'blocked-folder',
+                name: 'blocked',
+                isFolder: true,
+                parentId: null,
+                createdAt: now,
+                updatedAt: now,
+              ),
+              FileItem(
+                id: 'ok-folder',
+                name: 'ok',
+                isFolder: true,
+                parentId: null,
+                createdAt: now,
+                updatedAt: now,
+              ),
+            ],
+            totalCount: 2,
+            page: 1,
+            pageSize: 50,
+          ));
+      when(() => mockMirror.getByServerId('blocked-folder')).thenAnswer((_) async => null);
+      when(() => mockMirror.getByServerId('ok-folder')).thenAnswer((_) async => null);
+      // "ok" has no children of its own — the walk into it just finds an
+      // empty page.
+      when(() => mockFileRepository.listChildren('ok-folder', page: 1)).thenAnswer((_) async => PagedResult(
+            items: [],
+            totalCount: 0,
+            page: 1,
+            pageSize: 50,
+          ));
+
+      await service.pullOnce(tempDir.path);
+
+      // "blocked" failed and is recorded, not silently dropped...
+      verify(() => mockMirror.recordFailedEvent('blocked-folder', any(), any())).called(1);
+      // ...but the walk did not stop there: "ok", listed right after it,
+      // still got created — proving the failure did not escape
+      // _bootstrapFolder's loop.
+      expect(Directory(p.join(tempDir.path, 'ok')).existsSync(), isTrue);
+      // And bootstrap is marked complete. Before this fix, the escaped
+      // exception meant this line never ran, and every later poll
+      // re-walked the whole tree only to fail at "blocked" again, forever.
       verify(() => mockMirror.markBootstrapped('dev-1')).called(1);
     });
   });

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:path/path.dart' as p;
 
@@ -111,30 +112,29 @@ class PullSyncService {
     return _inFlight ??= _pullOnce(syncFolderPath).whenComplete(() => _inFlight = null);
   }
 
+  /// Caps how many quarantined rows a single poll retries. Without this, a
+  /// quarantine that has grown large (e.g. pointing sync at a folder that
+  /// already duplicates thousands of already-uploaded files) would cost one
+  /// getFile per row on every single poll, forever (PR #12 review round 3,
+  /// B2b). Rows beyond the cap simply wait for a later poll —
+  /// [_retryQuarantined] always works the longest-untouched ones first, so
+  /// every row eventually gets a turn.
+  static const _maxRetriesPerPoll = 20;
+
+  /// How long a just-retried row is left alone before being retried again.
+  /// Without this, a row that fails the exact same way every time would be
+  /// retried on every ~30s poll forever, at whatever cost that failure
+  /// carries (PR #12 review round 3, B2b) — Win32-unsafe names no longer
+  /// carry a download cost (see [violatesWin32NameRules]), but this backs
+  /// off any other repeatedly-failing row too, not just that one cause.
+  static const _retryBackoff = Duration(minutes: 5);
+
   Future<int> _pullOnce(String syncFolderPath) async {
     final deviceId = await _deviceRegistration.ensureRegistered();
 
-    // A quarantined entry's cause may no longer hold by the next poll (the
-    // file that was locked is closed now, the drive is back). _applyUpsert
-    // and _applyDelete are keyed on fileId and fetch current server state,
-    // not on the original event — so a failed row is already re-appliable
-    // without replaying anything from the event log. _applyUpsert alone
-    // covers both directions: if the file is now gone server-side, its
-    // internal 404 handling falls through to _applyDelete itself. Runs
-    // before the drain below so a fix picked up here does not race a fresh
-    // failure for the same file later in this same call.
-    for (final failed in await _mirror.getFailedEvents()) {
-      try {
-        await _applyUpsert(failed.fileId, syncFolderPath);
-        await _mirror.clearFailedEvent(failed.fileId);
-      } on UnsafeRemoteNameException {
-        // Still an unsafe name — stays quarantined.
-      } on LocalConflictException {
-        // Still conflicts with an untracked local change — stays quarantined.
-      } on FileSystemException {
-        // Still failing at the OS level — try again on the next poll.
-      }
-    }
+    // Runs before the drain below so a fix picked up here does not race a
+    // fresh failure for the same file later in this same call.
+    await _retryQuarantined(syncFolderPath);
 
     var applied = 0;
     while (true) {
@@ -169,6 +169,44 @@ class PullSyncService {
   /// comment. A thin passthrough so the presentation layer can surface them
   /// without depending on [SyncMirrorRepository] directly.
   Future<List<SyncFailedEvent>> getFailedEvents() => _mirror.getFailedEvents();
+
+  /// Retries every quarantined entry whose cause may no longer hold (the
+  /// file that was locked is closed now, the drive is back). _applyUpsert
+  /// is keyed on fileId and fetches current server state, not the original
+  /// event — so a failed row is already re-appliable without replaying
+  /// anything from the event log. It alone covers both directions: if the
+  /// file is now gone server-side, its internal 404 handling falls through
+  /// to _applyDelete itself. Bounded by [_maxRetriesPerPoll] and
+  /// [_retryBackoff] (PR #12 review round 3, B2b), and every exception is
+  /// caught here (B2c): a quarantined row that keeps failing must not
+  /// escape and abort [_pullOnce] before the fresh-event drain that follows
+  /// this call even runs.
+  Future<void> _retryQuarantined(String syncFolderPath) async {
+    final now = DateTime.now();
+    final due = (await _mirror.getFailedEvents())
+        .where((f) => now.difference(f.failedAt) >= _retryBackoff)
+        .toList()
+      // Oldest-failed first: whatever gets retried below has its failedAt
+      // re-stamped to now, sorting it to the back for the next poll — so a
+      // quarantine larger than the per-poll budget still gets worked
+      // through over time instead of the same rows winning every time.
+      ..sort((a, b) => a.failedAt.compareTo(b.failedAt));
+
+    for (final failed in due.take(_maxRetriesPerPoll)) {
+      try {
+        await _applyUpsert(failed.fileId, syncFolderPath);
+        await _mirror.clearFailedEvent(failed.fileId);
+      } catch (_) {
+        // Still failing — still an unsafe name, still a local conflict, a
+        // transient FileSystemException, or something this loop was never
+        // taught to expect (a non-404 DioException, say). Whichever it is,
+        // it must not propagate (B2c). Re-recording only re-stamps
+        // failedAt so the backoff above actually backs off; the reason
+        // text stays whatever _applyEvent's first attempt recorded.
+        await _mirror.recordFailedEvent(failed.fileId, failed.eventId, failed.reason);
+      }
+    }
+  }
 
   Future<void> _applyEvent(
     Map<String, dynamic> event,
@@ -215,7 +253,25 @@ class PullSyncService {
     final entry = await _mirror.getByServerId(fileId);
     if (entry == null) return; // Never pulled locally — nothing to remove.
 
-    await _deleteLocal(syncFolderPath, entry.localPath, entry.isFolder);
+    if (entry.isFolder) {
+      _assertWithinSyncFolder(syncFolderPath, entry.localPath);
+      if (!await _deleteTrackedFolder(entry.localPath)) {
+        // Untracked or locally-modified content is still under this
+        // folder — see _deleteTrackedFolder's doc comment. Routed through
+        // the same refuse-to-overwrite exception _applyUpsert already uses
+        // for files, so this reuses the existing quarantine/retry
+        // machinery instead of a parallel one: the mirror row for this
+        // folder is left in place (nothing below runs), and
+        // _retryQuarantined's next _applyUpsert call 404s straight back
+        // into this same method and tries again — finishing the job on its
+        // own once whatever is left resolves (PR #12 review round 3, B1).
+        throw LocalConflictException(
+            'folder still holds untracked or locally modified content, not removed: ${entry.localPath}');
+      }
+    } else {
+      await _deleteLocal(syncFolderPath, entry.localPath);
+    }
+
     await _mirror.deleteByServerId(fileId);
   }
 
@@ -271,8 +327,9 @@ class PullSyncService {
         // Moved/renamed file: remove the stale copy before committing the
         // mirror row below, not after — see the class doc comment. Deleting
         // first is safe to repeat: an already-gone file is a no-op
-        // (_deleteLocal).
-        await _deleteLocal(syncFolderPath, previous.localPath, previous.isFolder);
+        // (_deleteLocal). This branch only runs for files (see the
+        // `remote.isFolder` check above), so previous is always a file too.
+        await _deleteLocal(syncFolderPath, previous.localPath);
       }
       final bytes = await _fileRepository.downloadFile(fileId);
       await File(localPath).parent.create(recursive: true);
@@ -333,16 +390,81 @@ class PullSyncService {
     return dirPath;
   }
 
-  Future<void> _deleteLocal(String syncFolderPath, String path, bool isFolder) async {
+  /// Deletes the file at [path]. Folders go through [_deleteTrackedFolder]
+  /// instead — see its doc comment for why a folder delete can never be
+  /// this simple.
+  Future<void> _deleteLocal(String syncFolderPath, String path) async {
     _assertWithinSyncFolder(syncFolderPath, path);
     try {
-      if (isFolder) {
-        await Directory(path).delete(recursive: true);
-      } else {
-        await File(path).delete();
-      }
+      await File(path).delete();
     } on PathNotFoundException {
       // Already gone locally — deleting is idempotent, not an error.
+    }
+  }
+
+  /// Removes everything under [path] that this mirror can prove pull
+  /// itself put there — each tracked file whose on-disk bytes still match
+  /// [SyncMirrorEntry.contentHash], and each tracked subfolder once it is
+  /// empty — then [path] itself, all with non-recursive OS calls. Never
+  /// `Directory.delete(recursive: true)`: that call removes whatever the OS
+  /// resolves the path to, which is not always the folder the mirror
+  /// tracks (a trailing dot/space or a case-only difference can make it
+  /// resolve onto an existing sibling instead), and even without that, a
+  /// file the user saved locally into a synced folder is not pull's to
+  /// remove just because the folder itself was deleted server-side (PR #12
+  /// review round 3, B1; and round 1's F3, whose folder-delete half was
+  /// never actually fixed until now). Returns whether [path] ended up empty
+  /// and was removed; false means something is still there and nothing
+  /// more was touched — the caller ([_applyDelete]) quarantines that
+  /// instead of treating it as done.
+  Future<bool> _deleteTrackedFolder(String path) async {
+    final tracked = await _mirror.getChildrenUnder(path);
+
+    for (final file in tracked.where((e) => !e.isFolder)) {
+      if (await _wouldOverwriteLocalChange(file.localPath, file)) {
+        // Edited locally since sync — not pull's to remove. Left in place,
+        // mirror row and all: once this folder stops being tracked (or a
+        // later retry finds it finally empty), the row simply stops
+        // mattering to anything.
+        continue;
+      }
+      try {
+        await File(file.localPath).delete();
+      } on PathNotFoundException {
+        // Already gone.
+      }
+      await _mirror.deleteByServerId(file.serverId);
+    }
+
+    // Deepest paths first, so a child folder is empty before its own
+    // parent is attempted. A path under another is always longer than it
+    // (at minimum one more separator plus a non-empty name), so sorting by
+    // length alone is sufficient depth ordering here.
+    final dirs = tracked.where((e) => e.isFolder).toList()
+      ..sort((a, b) => b.localPath.length.compareTo(a.localPath.length));
+    for (final dir in dirs) {
+      if (await _tryRemoveEmptyDir(dir.localPath)) {
+        await _mirror.deleteByServerId(dir.serverId);
+      }
+      // Else: not empty — something untracked, or a file skipped above,
+      // is still inside. Leave it and its mirror row; nothing recurses
+      // into it.
+    }
+
+    return _tryRemoveEmptyDir(path);
+  }
+
+  /// Non-recursive directory removal that treats "not empty" as a normal
+  /// outcome, not an error — see [_deleteTrackedFolder]. Returns whether
+  /// [path] is gone (already gone counts).
+  Future<bool> _tryRemoveEmptyDir(String path) async {
+    try {
+      await Directory(path).delete();
+      return true;
+    } on PathNotFoundException {
+      return true;
+    } on FileSystemException {
+      return false; // Not empty.
     }
   }
 
@@ -397,21 +519,31 @@ class PullSyncService {
       } else {
         try {
           localPath = _safeChildPath(syncFolderPath, dirPath, item.name);
+          await Directory(localPath).create(recursive: true);
+          await _mirror.upsert(SyncMirrorEntry(
+            serverId: item.id,
+            localPath: localPath,
+            isFolder: true,
+            updatedAt: item.updatedAt,
+            syncedAt: DateTime.now(),
+          ));
         } on UnsafeRemoteNameException catch (e) {
           // The whole subtree under an unsafe folder name would otherwise be
           // invisible: not synced, not listed, and never revisited (siblings
           // still need walking, so this returns rather than rethrows).
           await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
           return;
+        } on FileSystemException catch (e) {
+          // The OS refused to create the directory for a reason no name
+          // check predicts (a permission-denied parent, a path already
+          // occupied by a file, a full disk). This call used to sit outside
+          // every try, so this exact failure escaped through _bootstrap
+          // into _pullOnce, markBootstrapped never ran, and every later
+          // poll re-walked the whole tree only to fail here again, forever
+          // (PR #12 review round 3, B3).
+          await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.message);
+          return;
         }
-        await Directory(localPath).create(recursive: true);
-        await _mirror.upsert(SyncMirrorEntry(
-          serverId: item.id,
-          localPath: localPath,
-          isFolder: true,
-          updatedAt: item.updatedAt,
-          syncedAt: DateTime.now(),
-        ));
       }
       await _bootstrapFolder(item.id, localPath, syncFolderPath);
       return;
@@ -470,7 +602,46 @@ bool _isPlainSegment(String name) =>
     !RegExp(r'^[. ]+$').hasMatch(name) &&
     !name.contains('/') &&
     !name.contains('\\') &&
-    !name.contains(':');
+    !name.contains(':') &&
+    // Win32-specific unwritable names (a trailing dot/space, a reserved
+    // device stem, an illegal character) are rejected only on Windows —
+    // per the PR #12 review round 3 human decision, the server does not
+    // enforce these and a macOS client syncs such names normally. See
+    // [violatesWin32NameRules].
+    !(Platform.isWindows && violatesWin32NameRules(name));
+
+/// Characters Win32 forbids in a path segment beyond the ones already
+/// checked above (`/`, `\`, `:`): `< > " | ? *` and the C0 control range.
+/// macOS and Linux allow all of these in a filename.
+final RegExp _win32IllegalChars = RegExp(r'[<>"|?*\x00-\x1F]');
+
+/// `CON`, `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9`, case-insensitive,
+/// with or without an extension — `nul.txt` is just as reserved as bare
+/// `nul` to this check. Whether a given one of these actually fails to
+/// write is Windows version- and build-dependent (on the machine the PR #12
+/// review ran its probes on, only bare `nul` failed — `aux`, `com1` and
+/// `nul.txt` all wrote fine), and that dependence is exactly why they are
+/// rejected up front instead of discovered at write time.
+const _win32ReservedStems = {
+  'con', 'prn', 'aux', 'nul', //
+  'com0', 'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9', //
+  'lpt0', 'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
+};
+
+/// True if Win32 cannot write [name] as given: a trailing dot or space
+/// (Win32 silently trims these off before resolving a path component,
+/// which is what let a remote `foo.` alias the local `foo` a sibling
+/// already occupies — PR #12 review round 3, B1), one of
+/// [_win32IllegalChars], or a reserved device stem. Deliberately
+/// platform-agnostic: the only production call site ([_isPlainSegment])
+/// gates it behind [Platform.isWindows], but the rule table itself is
+/// exercised directly in tests without needing to fake the host OS.
+@visibleForTesting
+bool violatesWin32NameRules(String name) =>
+    name.endsWith('.') ||
+    name.endsWith(' ') ||
+    _win32IllegalChars.hasMatch(name) ||
+    _win32ReservedStems.contains(name.split('.').first.toLowerCase());
 
 /// Joins [name] under [dirPath], rejecting it outright if it is not a safe
 /// path segment, then asserting the canonicalised result still lands inside

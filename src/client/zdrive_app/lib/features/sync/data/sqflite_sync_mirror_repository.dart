@@ -160,6 +160,16 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   }
 
   @override
+  Future<List<SyncMirrorEntry>> getChildrenUnder(String dirPath) async {
+    final db = await _database;
+    // Same scan-and-filter approach as rePathChildren, and for the same
+    // reason: a LIKE query would need to escape '%'/'_' in the prefix.
+    final prefix = '$dirPath${Platform.pathSeparator}';
+    final rows = await db.query(_filesTable);
+    return rows.map(_fromRow).where((entry) => entry.localPath.startsWith(prefix)).toList();
+  }
+
+  @override
   Future<bool> isBootstrapped(String deviceId) async {
     final db = await _database;
     final rows = await db.query(_bootstrapTable, where: 'deviceId = ?', whereArgs: [deviceId]);

@@ -24,6 +24,14 @@ abstract class SyncMirrorRepository {
   /// than going stale.
   Future<void> rePathChildren(String oldPrefix, String newPrefix);
 
+  /// Every tracked entry whose [SyncMirrorEntry.localPath] lives strictly
+  /// under [dirPath] (not [dirPath] itself) — used by a folder delete to
+  /// find exactly what it is safe to remove, so it never has to fall back
+  /// to a recursive OS delete that cannot tell "the mirror put this here"
+  /// from "whatever the OS resolved the path to" (see PR #12 review round
+  /// 3, B1).
+  Future<List<SyncMirrorEntry>> getChildrenUnder(String dirPath);
+
   /// Whether the one-time full-tree backfill has already run for
   /// [deviceId]. Distinct from the cursor being 0, which also means
   /// "nothing pulled yet" but stays true after a completed backfill if the
