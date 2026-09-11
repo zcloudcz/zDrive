@@ -142,7 +142,16 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     // A LIKE query would need to escape '%'/'_' in the prefix (a legal
     // filename character on both platforms), so this scans and filters in
     // Dart instead — fine for a local per-user mirror table.
-    final prefix = '$oldPrefix${Platform.pathSeparator}';
+    //
+    // oldPrefix already ends with the separator when the sync folder is a
+    // filesystem root ("C:\", "/") — appending another would build a
+    // prefix no stored path can ever start with, so every row under it
+    // silently stops matching (PR #12 review, F7). `prefix.length` (not
+    // oldPrefix.length) is used below for the same reason: it is the one
+    // guaranteed to strip exactly one separator regardless of whether
+    // oldPrefix already had one.
+    final prefix =
+        oldPrefix.endsWith(Platform.pathSeparator) ? oldPrefix : '$oldPrefix${Platform.pathSeparator}';
     final rows = await db.query(_filesTable);
     final batch = db.batch();
     for (final row in rows) {
@@ -150,7 +159,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
       if (path.startsWith(prefix)) {
         batch.update(
           _filesTable,
-          {'localPath': newPrefix + path.substring(oldPrefix.length)},
+          {'localPath': p.join(newPrefix, path.substring(prefix.length))},
           where: 'serverId = ?',
           whereArgs: [row['serverId']],
         );
@@ -163,8 +172,10 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   Future<List<SyncMirrorEntry>> getChildrenUnder(String dirPath) async {
     final db = await _database;
     // Same scan-and-filter approach as rePathChildren, and for the same
-    // reason: a LIKE query would need to escape '%'/'_' in the prefix.
-    final prefix = '$dirPath${Platform.pathSeparator}';
+    // reason: a LIKE query would need to escape '%'/'_' in the prefix. See
+    // rePathChildren's doc comment for why a root path (already ending
+    // with the separator) must not get a second one appended (F7).
+    final prefix = dirPath.endsWith(Platform.pathSeparator) ? dirPath : '$dirPath${Platform.pathSeparator}';
     final rows = await db.query(_filesTable);
     return rows.map(_fromRow).where((entry) => entry.localPath.startsWith(prefix)).toList();
   }

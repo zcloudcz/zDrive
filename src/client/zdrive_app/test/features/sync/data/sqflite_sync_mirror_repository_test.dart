@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -104,6 +106,18 @@ void main() {
       expect((await repository.getByServerId('folder-1'))!.localPath, oldDir);
       expect((await repository.getByServerId('file-3'))!.localPath, p.join('sync', 'unrelated.txt'));
     });
+
+    test('re-parents a direct child of a root sync folder without doubling '
+        'the separator (F7)', () async {
+      final root = p.rootPrefix(Directory.current.absolute.path);
+      final newDir = p.join('sync', 'new');
+
+      await repository.upsert(entry(serverId: 'file-1', localPath: p.join(root, 'a.txt')));
+
+      await repository.rePathChildren(root, newDir);
+
+      expect((await repository.getByServerId('file-1'))!.localPath, p.join(newDir, 'a.txt'));
+    });
   });
 
   group('getChildrenUnder', () {
@@ -124,6 +138,24 @@ void main() {
       expect(children.map((e) => e.serverId), containsAll(['file-1', 'file-2']));
       expect(children.map((e) => e.serverId), isNot(contains('folder-1')));
       expect(children.map((e) => e.serverId), isNot(contains('file-3')));
+    });
+
+    // The sync folder itself can be a filesystem root ("C:\" on Windows,
+    // "/" on Linux) — p.rootPrefix gives the real one for whichever
+    // platform the test happens to run on. A root already ends with the
+    // separator, so naively appending another (the pre-F7 bug) built a
+    // prefix nothing could ever match, making the mirror look permanently
+    // empty (PR #12 review, F7).
+    test('a root sync folder does not double the separator, so its direct '
+        'children are still found (F7)', () async {
+      final root = p.rootPrefix(Directory.current.absolute.path);
+      final childPath = p.join(root, 'a.txt');
+
+      await repository.upsert(entry(serverId: 'file-1', localPath: childPath));
+
+      final children = await repository.getChildrenUnder(root);
+
+      expect(children.map((e) => e.serverId), contains('file-1'));
     });
   });
 
