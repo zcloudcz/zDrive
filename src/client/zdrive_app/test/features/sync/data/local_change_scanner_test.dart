@@ -21,6 +21,36 @@ class MockPushSyncService extends Mock implements PushSyncService {}
 
 class FakeSyncMirrorEntry extends Fake implements SyncMirrorEntry {}
 
+/// Wires [mock]'s getChildrenUnder/upsert/deleteByServerId to one mutable
+/// row list, so a two-scan test sees exactly what the scanner's own mirror
+/// calls left behind between scans — not a hand-picked "after" snapshot the
+/// test re-stubs itself, which would hide a regression where the scanner
+/// forgets to write the row at all (PR #14 review round 2, findings 1-3;
+/// see the group below). Mirrors the prefix-filter rule
+/// SqfliteSyncMirrorRepository.getChildrenUnder actually uses.
+class _StatefulMirror {
+  final List<SyncMirrorEntry> rows;
+
+  _StatefulMirror(MockSyncMirrorRepository mock, List<SyncMirrorEntry> initialRows)
+      : rows = List.of(initialRows) {
+    when(() => mock.getChildrenUnder(any())).thenAnswer((inv) async {
+      final dirPath = inv.positionalArguments[0] as String;
+      final prefix =
+          dirPath.endsWith(Platform.pathSeparator) ? dirPath : '$dirPath${Platform.pathSeparator}';
+      return rows.where((e) => e.localPath.startsWith(prefix)).toList();
+    });
+    when(() => mock.upsert(any())).thenAnswer((inv) async {
+      final entry = inv.positionalArguments[0] as SyncMirrorEntry;
+      rows.removeWhere((e) => e.serverId == entry.serverId);
+      rows.add(entry);
+    });
+    when(() => mock.deleteByServerId(any())).thenAnswer((inv) async {
+      final serverId = inv.positionalArguments[0] as String;
+      rows.removeWhere((e) => e.serverId == serverId);
+    });
+  }
+}
+
 void main() {
   late MockSyncMirrorRepository mockMirror;
   late MockFileRepository mockFileRepository;
@@ -925,17 +955,17 @@ void main() {
       final file = File(p.join(tempDir.path, 'tracked1.txt'))
         ..writeAsStringSync('a longer new body');
 
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            SyncMirrorEntry(
-              serverId: 'file-v1',
-              localPath: file.path,
-              isFolder: false,
-              sizeBytes: 3, // old content's length
-              contentHash: hashOf('old'),
-              updatedAt: past,
-              syncedAt: past,
-            ),
-          ]);
+      _StatefulMirror(mockMirror, [
+        SyncMirrorEntry(
+          serverId: 'file-v1',
+          localPath: file.path,
+          isFolder: false,
+          sizeBytes: 3, // old content's length
+          contentHash: hashOf('old'),
+          updatedAt: past,
+          syncedAt: past,
+        ),
+      ]);
       when(() => mockFileRepository.uploadNewVersion('file-v1', 'tracked1.txt', any(), 17))
           .thenAnswer((_) async {});
       when(() => mockPush.reportChange('file-v1', SyncChangeType.update))
@@ -947,24 +977,14 @@ void main() {
       verify(() => mockFileRepository.uploadNewVersion('file-v1', 'tracked1.txt', any(), 17)).called(1);
       verifyNever(() => mockMirror.upsert(any()));
 
-      // Scan 2: reportChange now succeeds. From the mirror's point of view
-      // this scan starts with the row the flush is about to overwrite — a
-      // real SQLite upsert would already show the new size/hash by the
-      // time classify reads it, so the stub mirrors that end state.
+      // Scan 2: reportChange now succeeds, and the backoff window (had one
+      // been set) has expired. The mirror row itself is left exactly as
+      // scan 1's own calls left it — untouched — so a regression that
+      // stops writing it is what this scan actually exercises.
+      scanner.debugClearBackoff();
       clearInteractions(mockFileRepository);
       clearInteractions(mockPush);
       when(() => mockPush.reportChange('file-v1', SyncChangeType.update)).thenAnswer((_) async {});
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            SyncMirrorEntry(
-              serverId: 'file-v1',
-              localPath: file.path,
-              isFolder: false,
-              sizeBytes: 17,
-              contentHash: hashOf('a longer new body'),
-              updatedAt: past,
-              syncedAt: future,
-            ),
-          ]);
 
       final secondPushed = await scanner.scanOnce(tempDir.path);
 
@@ -976,9 +996,9 @@ void main() {
 
     test('new file upload: scan 2 -> exactly one reportChange(create), no '
         'second uploadFile', () async {
-      final file = File(p.join(tempDir.path, 'brandnew2.txt'))..writeAsStringSync('hello');
+      File(p.join(tempDir.path, 'brandnew2.txt')).writeAsStringSync('hello');
 
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => []);
+      _StatefulMirror(mockMirror, []);
       when(() => mockFileRepository.uploadFile(any(that: isNull), 'brandnew2.txt', any(), 5, any()))
           .thenAnswer((_) async => 'new2-id');
       when(() => mockPush.reportChange('new2-id', SyncChangeType.create))
@@ -991,20 +1011,10 @@ void main() {
           .called(1);
       verifyNever(() => mockMirror.upsert(any()));
 
+      scanner.debugClearBackoff();
       clearInteractions(mockFileRepository);
       clearInteractions(mockPush);
       when(() => mockPush.reportChange('new2-id', SyncChangeType.create)).thenAnswer((_) async {});
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            SyncMirrorEntry(
-              serverId: 'new2-id',
-              localPath: file.path,
-              isFolder: false,
-              sizeBytes: 5,
-              contentHash: hashOf('hello'),
-              updatedAt: past,
-              syncedAt: future,
-            ),
-          ]);
 
       final secondPushed = await scanner.scanOnce(tempDir.path);
 
@@ -1019,17 +1029,17 @@ void main() {
       final oldPath = p.join(tempDir.path, 'old3.txt');
       final newFile = File(p.join(tempDir.path, 'new3.txt'))..writeAsStringSync('same bytes 3');
 
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            SyncMirrorEntry(
-              serverId: 'file-r3',
-              localPath: oldPath,
-              isFolder: false,
-              sizeBytes: 12,
-              contentHash: hashOf('same bytes 3'),
-              updatedAt: past,
-              syncedAt: past,
-            ),
-          ]);
+      _StatefulMirror(mockMirror, [
+        SyncMirrorEntry(
+          serverId: 'file-r3',
+          localPath: oldPath,
+          isFolder: false,
+          sizeBytes: 12,
+          contentHash: hashOf('same bytes 3'),
+          updatedAt: past,
+          syncedAt: past,
+        ),
+      ]);
       when(() => mockFileRepository.getFile('file-r3')).thenAnswer((_) async => FileItem(
             id: 'file-r3',
             name: 'old3.txt',
@@ -1055,20 +1065,10 @@ void main() {
       verify(() => mockFileRepository.renameFile('file-r3', 'new3.txt')).called(1);
       verifyNever(() => mockMirror.upsert(any()));
 
+      scanner.debugClearBackoff();
       clearInteractions(mockFileRepository);
       clearInteractions(mockPush);
       when(() => mockPush.reportChange('file-r3', SyncChangeType.rename)).thenAnswer((_) async {});
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            SyncMirrorEntry(
-              serverId: 'file-r3',
-              localPath: newFile.path,
-              isFolder: false,
-              sizeBytes: 12,
-              contentHash: hashOf('same bytes 3'),
-              updatedAt: past,
-              syncedAt: future,
-            ),
-          ]);
 
       final secondPushed = await scanner.scanOnce(tempDir.path);
 
@@ -1083,7 +1083,7 @@ void main() {
         'moveFile', () async {
       final subDir = Directory(p.join(tempDir.path, 'sub4'))..createSync();
       final oldPath = p.join(tempDir.path, 'file4.txt');
-      final movedFile = File(p.join(subDir.path, 'file4.txt'))..writeAsStringSync('move payload');
+      File(p.join(subDir.path, 'file4.txt')).writeAsStringSync('move payload');
       final subEntry = SyncMirrorEntry(
         serverId: 'sub4-id',
         localPath: subDir.path,
@@ -1092,18 +1092,18 @@ void main() {
         syncedAt: past,
       );
 
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            subEntry,
-            SyncMirrorEntry(
-              serverId: 'file-m4',
-              localPath: oldPath,
-              isFolder: false,
-              sizeBytes: 12,
-              contentHash: hashOf('move payload'),
-              updatedAt: past,
-              syncedAt: past,
-            ),
-          ]);
+      _StatefulMirror(mockMirror, [
+        subEntry,
+        SyncMirrorEntry(
+          serverId: 'file-m4',
+          localPath: oldPath,
+          isFolder: false,
+          sizeBytes: 12,
+          contentHash: hashOf('move payload'),
+          updatedAt: past,
+          syncedAt: past,
+        ),
+      ]);
       when(() => mockFileRepository.getFile('file-m4')).thenAnswer((_) async => FileItem(
             id: 'file-m4',
             name: 'file4.txt',
@@ -1129,21 +1129,10 @@ void main() {
       verify(() => mockFileRepository.moveFile('file-m4', 'sub4-id')).called(1);
       verifyNever(() => mockMirror.upsert(any()));
 
+      scanner.debugClearBackoff();
       clearInteractions(mockFileRepository);
       clearInteractions(mockPush);
       when(() => mockPush.reportChange('file-m4', SyncChangeType.move)).thenAnswer((_) async {});
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            subEntry,
-            SyncMirrorEntry(
-              serverId: 'file-m4',
-              localPath: movedFile.path,
-              isFolder: false,
-              sizeBytes: 12,
-              contentHash: hashOf('move payload'),
-              updatedAt: past,
-              syncedAt: future,
-            ),
-          ]);
 
       final secondPushed = await scanner.scanOnce(tempDir.path);
 
@@ -1157,17 +1146,17 @@ void main() {
         'deleteFile, mirror row removed after it', () async {
       final gonePath = p.join(tempDir.path, 'gone5.txt');
 
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [
-            SyncMirrorEntry(
-              serverId: 'file-d5',
-              localPath: gonePath,
-              isFolder: false,
-              sizeBytes: 3,
-              contentHash: hashOf('bye'),
-              updatedAt: past,
-              syncedAt: past,
-            ),
-          ]);
+      _StatefulMirror(mockMirror, [
+        SyncMirrorEntry(
+          serverId: 'file-d5',
+          localPath: gonePath,
+          isFolder: false,
+          sizeBytes: 3,
+          contentHash: hashOf('bye'),
+          updatedAt: past,
+          syncedAt: past,
+        ),
+      ]);
       when(() => mockFileRepository.deleteFile('file-d5')).thenAnswer((_) async {});
       when(() => mockPush.reportChange('file-d5', SyncChangeType.delete))
           .thenThrow(Exception('server unreachable'));
@@ -1178,12 +1167,11 @@ void main() {
       verify(() => mockFileRepository.deleteFile('file-d5')).called(1);
       verifyNever(() => mockMirror.deleteByServerId(any()));
 
+      scanner.debugClearBackoff();
       clearInteractions(mockFileRepository);
       clearInteractions(mockPush);
       clearInteractions(mockMirror);
       when(() => mockPush.reportChange('file-d5', SyncChangeType.delete)).thenAnswer((_) async {});
-      // The flush already cleared this row by the time classify runs.
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => []);
 
       final secondPushed = await scanner.scanOnce(tempDir.path);
 
@@ -1214,8 +1202,7 @@ void main() {
         syncedAt: past,
       );
 
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => [projEntry, aEntry]);
-      when(() => mockMirror.getChildrenUnder(projPath)).thenAnswer((_) async => [aEntry]);
+      _StatefulMirror(mockMirror, [projEntry, aEntry]);
       when(() => mockFileRepository.deleteFile('proj6-id')).thenAnswer((_) async {});
       when(() => mockPush.reportChange('proj6-id', SyncChangeType.delete))
           .thenThrow(Exception('server unreachable'));
@@ -1226,14 +1213,11 @@ void main() {
       verify(() => mockFileRepository.deleteFile('proj6-id')).called(1);
       verifyNever(() => mockMirror.deleteByServerId(any()));
 
+      scanner.debugClearBackoff();
       clearInteractions(mockFileRepository);
       clearInteractions(mockPush);
       clearInteractions(mockMirror);
       when(() => mockPush.reportChange('proj6-id', SyncChangeType.delete)).thenAnswer((_) async {});
-      // The flush's mirror effect re-reads getChildrenUnder(projPath) to
-      // find the children to clear.
-      when(() => mockMirror.getChildrenUnder(projPath)).thenAnswer((_) async => [aEntry]);
-      when(() => mockMirror.getChildrenUnder(tempDir.path)).thenAnswer((_) async => []);
 
       final secondPushed = await scanner.scanOnce(tempDir.path);
 
