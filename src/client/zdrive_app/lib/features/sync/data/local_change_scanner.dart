@@ -368,13 +368,22 @@ class LocalChangeScanner {
     Map<String, SyncMirrorEntry> mirrorByPath,
   ) async {
     await _fileRepository.renameFile(file.serverId, p.basename(newPath));
-    final updated = _mirrorRow(
+    // A case-only rename changes localPath and nothing else — contentHash,
+    // sizeBytes and syncedAt are carried over unchanged from the old row
+    // (PR #14 review round 4, R4-2), not through _mirrorRow (which always
+    // stamps syncedAt to now). An edit made to the file before the rename
+    // was ever seen must still look like an edit to _uploadChangedFile's
+    // change-detection pre-filter on the next scan; stamping syncedAt here
+    // would tell that filter the file was just synced and silently drop
+    // the edit.
+    final updated = SyncMirrorEntry(
       serverId: file.serverId,
       localPath: newPath,
       isFolder: false,
       sizeBytes: file.sizeBytes,
       contentHash: file.contentHash,
       updatedAt: file.updatedAt,
+      syncedAt: file.syncedAt,
     );
     await _mirror.commit(
       upserts: [updated],

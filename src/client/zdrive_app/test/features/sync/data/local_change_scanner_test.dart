@@ -801,6 +801,56 @@ void main() {
       expect(mirror.outboxFor('a-id').single.type, SyncChangeType.rename);
     });
 
+    test('case rename plus a same-size edit made before the rename was '
+        'seen: across at most two scans, exactly one renameFile and '
+        'exactly one uploadNewVersion — the edit is not silently dropped '
+        '(PR #14 review round 4, R4-2)', () async {
+      final oldPath = p.join(tempDir.path, 'a.txt'); // tracked, no longer on disk
+      // Same byte length as the tracked content ('original'.length == 8) but
+      // different bytes — the edit this test must not lose.
+      final newFile = File(p.join(tempDir.path, 'A.txt'))..writeAsStringSync('edited!!');
+      final mirror = stateful([
+        SyncMirrorEntry(
+          serverId: 'a-id',
+          localPath: oldPath,
+          isFolder: false,
+          sizeBytes: 8,
+          contentHash: hashOf('original'),
+          updatedAt: past,
+          syncedAt: past,
+        ),
+      ]);
+      when(() => mockFileRepository.renameFile('a-id', 'A.txt')).thenAnswer((_) async => FileItem(
+            id: 'a-id',
+            name: 'A.txt',
+            isFolder: false,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockFileRepository.uploadNewVersion('a-id', 'A.txt', any(), 8))
+          .thenAnswer((_) async {});
+
+      // Scan 1: case-only rename only — no upload yet.
+      final firstPushed = await scanner.scanOnce(tempDir.path);
+      expect(firstPushed, 1);
+      verify(() => mockFileRepository.renameFile('a-id', 'A.txt')).called(1);
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any()));
+      // The renamed row must keep the OLD hash/syncedAt (not stamped to
+      // "now") — otherwise scan 2's change-detection pre-filter in
+      // _uploadChangedFile reads sizeBytes-equal + not-modified-since-
+      // syncedAt as "nothing changed" and the edit below is never uploaded.
+      expect(mirror.row('a-id')!.contentHash, hashOf('original'));
+      expect(mirror.row('a-id')!.syncedAt, past);
+
+      // Scan 2: the edit is now visible under its new (renamed) path.
+      final secondPushed = await scanner.scanOnce(tempDir.path);
+      expect(secondPushed, 1);
+      verify(() => mockFileRepository.uploadNewVersion('a-id', 'A.txt', any(), 8)).called(1);
+      expect(mirror.row('a-id')!.localPath, newFile.path);
+      expect(mirror.row('a-id')!.contentHash, hashOf('edited!!'));
+    });
+
     test('tracked Docs/ with tracked Docs/x.txt, disk has docs/x.txt: one '
         'renameFile(docsId, "docs"), no create/delete/upload (test 7)', () async {
       final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
