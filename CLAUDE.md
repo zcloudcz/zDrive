@@ -153,10 +153,10 @@ gives us versioning for free):
 FileService writes an append-only `file_changes` row for every `FileNode`
 mutation, in the same transaction as the mutation (a `SaveChangesInterceptor`,
 not a second write), and serves it as a cursor-paged feed
-(`GET /api/v1/files/changes`). This replaces client-pushed sync events —
-desktop, web, mobile and `ZDrive.BackupCli` all go through FileService, so
-all of them now produce sync events, not just whichever client called
-SyncService's push endpoint. See
+(`GET /api/v1/files/changes`). This will replace client-pushed sync events
+once clients actually read the feed (the client-side PR that wires desktop,
+web, mobile and `ZDrive.BackupCli` onto it) — until then, SyncService's push
+path is still what clients use. See
 `docs/adr/0001-server-side-file-change-log.md` for the full reasoning,
 alternatives rejected, and the known 5-second commit-order hold-back.
 
