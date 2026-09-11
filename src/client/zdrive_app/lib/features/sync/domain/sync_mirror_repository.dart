@@ -52,4 +52,41 @@ abstract class SyncMirrorRepository {
 
   /// Recorded failures, most recent first.
   Future<List<SyncFailedEvent>> getFailedEvents();
+
+  /// Applies a mirror change and enqueues the outbox report(s) it
+  /// represents in one atomic transaction — the persistent-outbox
+  /// replacement for the in-memory "write server, then report" two-step
+  /// [LocalChangeScanner] used to do (PR #14 review round 3). A scan that
+  /// dies right after calling this always leaves the mirror and the outbox
+  /// consistent with each other: either both landed, or neither did, so
+  /// there is never a mirror row with an owed report nobody remembers, or a
+  /// report for a mirror row that was never written.
+  ///
+  /// [upserts] writes/replaces rows by serverId. [deleteServerIds] removes
+  /// rows by serverId. [deleteUnderPath], when given, additionally removes
+  /// every row strictly nested under that local path (a folder delete
+  /// trashing its tracked subtree). [rePath], when given, re-parents every
+  /// row nested under `rePath.from` to live under `rePath.to` instead (a
+  /// folder rename) — applied before [upserts], so the folder's own row can
+  /// be upserted straight to its new path in the same call. [enqueue] adds
+  /// outbox rows, in order — a move-then-rename adds two, in that order.
+  Future<void> commit({
+    List<SyncMirrorEntry> upserts = const [],
+    List<String> deleteServerIds = const [],
+    String? deleteUnderPath,
+    ({String from, String to})? rePath,
+    List<OutboxItem> enqueue = const [],
+  });
+
+  /// The oldest [limit] outbox rows, oldest first — what
+  /// [PushSyncService.drainOutbox] sends next.
+  Future<List<OutboxItem>> peekOutbox({int limit = 100});
+
+  /// Removes one outbox row once its report has been sent.
+  Future<void> removeOutbox(int id);
+
+  /// How many reports are still owed — shown in the sync UI so a queue that
+  /// keeps failing to drain is visible instead of silent (PR #14 review
+  /// round 3, finding C).
+  Future<int> outboxCount();
 }

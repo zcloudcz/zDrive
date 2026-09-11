@@ -18,6 +18,17 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   static const _cursorTable = 'sync_cursor';
   static const _bootstrapTable = 'bootstrap_state';
   static const _failedTable = 'failed_events';
+  static const _outboxTable = 'sync_outbox';
+
+  static const _createOutboxTableSql = '''
+    CREATE TABLE $_outboxTable (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fileId TEXT NOT NULL,
+      changeType INTEGER NOT NULL,
+      baseCursor INTEGER NOT NULL,
+      createdAt TEXT NOT NULL
+    )
+  ''';
 
   final String? _dbPathOverride;
 
@@ -51,7 +62,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     final db = await databaseFactory.openDatabase(
       dbPath,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onCreate: (db, version) async {
           await db.execute('''
             CREATE TABLE $_filesTable (
@@ -83,6 +94,16 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
               failedAt TEXT NOT NULL
             )
           ''');
+          await db.execute(_createOutboxTableSql);
+        },
+        // A device already running #12 has a version-1 database (every
+        // table above except sync_outbox) — add just the new table rather
+        // than recreating the schema, so its existing mirror rows survive
+        // the upgrade untouched.
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await db.execute(_createOutboxTableSql);
+          }
         },
       ),
     );
@@ -101,16 +122,18 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   @override
   Future<void> upsert(SyncMirrorEntry entry) async {
     final db = await _database;
-    await db.insert(_filesTable, {
-      'serverId': entry.serverId,
-      'localPath': entry.localPath,
-      'isFolder': entry.isFolder ? 1 : 0,
-      'sizeBytes': entry.sizeBytes,
-      'contentHash': entry.contentHash,
-      'updatedAt': entry.updatedAt.toIso8601String(),
-      'syncedAt': entry.syncedAt.toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
   }
+
+  Map<String, Object?> _entryRow(SyncMirrorEntry entry) => {
+        'serverId': entry.serverId,
+        'localPath': entry.localPath,
+        'isFolder': entry.isFolder ? 1 : 0,
+        'sizeBytes': entry.sizeBytes,
+        'contentHash': entry.contentHash,
+        'updatedAt': entry.updatedAt.toIso8601String(),
+        'syncedAt': entry.syncedAt.toIso8601String(),
+      };
 
   @override
   Future<void> deleteByServerId(String serverId) async {
@@ -231,6 +254,111 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
             ))
         .toList();
   }
+
+  @override
+  Future<void> commit({
+    List<SyncMirrorEntry> upserts = const [],
+    List<String> deleteServerIds = const [],
+    String? deleteUnderPath,
+    ({String from, String to})? rePath,
+    List<OutboxItem> enqueue = const [],
+  }) async {
+    final db = await _database;
+    // Everything below runs against `txn`, never `db` — a plain db.insert
+    // mid-way would auto-commit itself before a later step in this same
+    // call could fail, defeating the whole point of grouping these writes
+    // (PR #14 review round 3, teeth-checked: pulling any one of these calls
+    // out of the transaction makes a rolled-back write stick).
+    await db.transaction((txn) async {
+      if (rePath != null) {
+        await _rePathChildrenTxn(txn, rePath.from, rePath.to);
+      }
+      for (final entry in upserts) {
+        await txn.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      for (final serverId in deleteServerIds) {
+        await txn.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+      }
+      if (deleteUnderPath != null) {
+        await _deleteChildrenTxn(txn, deleteUnderPath);
+      }
+      for (final item in enqueue) {
+        await txn.insert(_outboxTable, {
+          'fileId': item.fileId,
+          'changeType': item.type.index,
+          'baseCursor': item.baseCursor,
+          'createdAt': item.createdAt.toIso8601String(),
+        });
+      }
+    });
+  }
+
+  // Same scan-and-filter approach as rePathChildren/getChildrenUnder above
+  // (a LIKE query would need to escape '%'/'_'), duplicated here rather than
+  // shared because these run against a Transaction, not the Database — see
+  // that pair's doc comments for the root-prefix double-separator rule (F7)
+  // this also has to honour.
+  Future<void> _rePathChildrenTxn(Transaction txn, String oldPrefix, String newPrefix) async {
+    final prefix = oldPrefix.endsWith(Platform.pathSeparator) ? oldPrefix : '$oldPrefix${Platform.pathSeparator}';
+    final rows = await txn.query(_filesTable);
+    for (final row in rows) {
+      final path = row['localPath'] as String;
+      if (path.startsWith(prefix)) {
+        await txn.update(
+          _filesTable,
+          {'localPath': p.join(newPrefix, path.substring(prefix.length))},
+          where: 'serverId = ?',
+          whereArgs: [row['serverId']],
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteChildrenTxn(Transaction txn, String dirPath) async {
+    final prefix = dirPath.endsWith(Platform.pathSeparator) ? dirPath : '$dirPath${Platform.pathSeparator}';
+    final rows = await txn.query(_filesTable);
+    for (final row in rows) {
+      final path = row['localPath'] as String;
+      if (path.startsWith(prefix)) {
+        await txn.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
+      }
+    }
+  }
+
+  @override
+  Future<List<OutboxItem>> peekOutbox({int limit = 100}) async {
+    final db = await _database;
+    final rows = await db.query(_outboxTable, orderBy: 'id ASC', limit: limit);
+    return rows
+        .map((row) => OutboxItem(
+              id: row['id'] as int,
+              fileId: row['fileId'] as String,
+              type: SyncChangeType.values[row['changeType'] as int],
+              baseCursor: row['baseCursor'] as int,
+              createdAt: DateTime.parse(row['createdAt'] as String),
+            ))
+        .toList();
+  }
+
+  @override
+  Future<void> removeOutbox(int id) async {
+    final db = await _database;
+    await db.delete(_outboxTable, where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<int> outboxCount() async {
+    final db = await _database;
+    final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM $_outboxTable');
+    return (rows.first['c'] as int?) ?? 0;
+  }
+
+  /// Test-only escape hatch so a repository test can force a mid-transaction
+  /// failure (e.g. drop the outbox table before calling [commit]) to prove
+  /// atomicity, without a way to construct an invalid [OutboxItem] through
+  /// the public API — every one of its fields is already non-nullable.
+  @visibleForTesting
+  Future<Database> get debugDatabase => _database;
 
   SyncMirrorEntry _fromRow(Map<String, Object?> row) => SyncMirrorEntry(
         serverId: row['serverId'] as String,
