@@ -283,6 +283,19 @@ class PullSyncService {
             'folder still holds untracked or locally modified content, not removed: ${entry.localPath}');
       }
     } else {
+      // Pull runs before the scan (SyncCoordinator.syncOnce), so a local
+      // edit that was never pushed yet is still sitting on disk right now —
+      // deleting it here would destroy it for good (it is not in the
+      // recycle bin or any version history, since it was never uploaded).
+      // Quarantine instead: the scan that follows then finds the file
+      // "changed" and uploads it through the existing 404 -> re-create path
+      // (last write wins), and the quarantined retry later finds the
+      // mirror row gone (that upload cleared it) and clears itself (PR #12
+      // review round 1, F1).
+      if (await _wouldOverwriteLocalChange(entry.localPath, entry)) {
+        throw LocalConflictException(
+            'file has local changes not yet synced, not removed: ${entry.localPath}');
+      }
       await _deleteLocal(syncFolderPath, entry.localPath);
     }
 
