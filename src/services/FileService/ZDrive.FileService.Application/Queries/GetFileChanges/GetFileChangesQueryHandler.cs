@@ -35,7 +35,6 @@ public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQ
         // clock (Npgsql translates DateTime.UtcNow to now()) rather than
         // this handler's own process clock — two FileService instances with
         // skewed clocks must not disagree about which rows are held back.
-        var cutoff = DateTime.UtcNow - CommitOrderHoldBack;
 
         var rows = await _db.FileChanges
             .AsNoTracking()
@@ -45,7 +44,13 @@ public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQ
                 && c.Id > request.Cursor)
             .OrderBy(c => c.Id)
             .Take(request.Limit + 1)
-            .Select(c => new { Change = c, TooYoung = c.OccurredAt > cutoff })
+            // DateTime.UtcNow inside the expression is translated by Npgsql to
+            // the database's now(), so both sides of the comparison come from
+            // the one clock that also stamped occurred_at (clock_timestamp()).
+            // Computing the cutoff in C# would compare the app server's clock
+            // against the database's — skew between them would shrink or
+            // remove the hold-back.
+            .Select(c => new { Change = c, TooYoung = c.OccurredAt > DateTime.UtcNow.AddSeconds(-CommitOrderHoldBack.TotalSeconds) })
             .ToListAsync(cancellationToken);
 
         // Hold back a PREFIX of the id order, not individual rows: once the
