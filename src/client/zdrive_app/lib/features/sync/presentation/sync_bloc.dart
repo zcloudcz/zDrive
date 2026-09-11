@@ -166,14 +166,18 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     LoadSyncStatus event,
     Emitter<SyncState> emit,
   ) async {
-    // Re-enables syncOnce after a previous session's endSession, and — if
-    // this machine's stored sync state belongs to a different account than
-    // _userId — clears it first, so that account never inherits the
-    // previous user's mirror, device id or folder. See
-    // SyncCoordinator.startSession's doc comment.
-    await _syncCoordinator.startSession(_userId);
     emit(const SyncLoading());
     try {
+      // Re-enables syncOnce after a previous session's endSession, and — if
+      // this machine's stored sync state belongs to a different account
+      // than _userId — clears it first, so that account never inherits the
+      // previous user's mirror, device id or folder. See
+      // SyncCoordinator.startSession's doc comment. Inside this try (PR #16
+      // review round 2, finding 7): a failure here used to leave the state
+      // at SyncInitial forever — indistinguishable from SyncLoading in
+      // SyncPage — instead of the error/retry state every other failure in
+      // this handler already gets.
+      await _syncCoordinator.startSession(_userId);
       final loaded = await _fetchLoadedState();
       emit(loaded);
       if (loaded.syncFolderPath != null) {
@@ -196,39 +200,65 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       // A different folder than the one already configured starts sync
       // over from a clean slate — see resetForNewFolder's doc comment. This
       // awaits the coordinator's mutex, i.e. waits for any pull already in
-      // flight to finish — which is why the emit below reads `state` again
-      // instead of reusing `current`: the in-flight pull's own handler can
-      // land its "pull finished" emit (isPulling: false, or a pullError)
-      // while this await is pending, and building the next emit from the
-      // state captured before it would resurrect a stale isPulling: true
-      // over that update, wedging every later PullRequested (PR #16 review
-      // round 1, F2).
-      await _syncCoordinator.resetForNewFolder();
+      // flight to finish, and now also persists the new path itself, inside
+      // that same lock (PR #16 review round 2, finding 3 — see
+      // resetForNewFolder's doc comment for why).
+      await _syncCoordinator.resetForNewFolder(event.path);
+    } else {
+      await _preferences.setSyncFolderPath(event.path);
     }
-    await _preferences.setSyncFolderPath(event.path);
 
+    // Reads `state` again here instead of reusing `current`: the in-flight
+    // pull's own handler can land its "pull finished" emit (isPulling:
+    // false, or a pullError) while the await above was pending, and building
+    // this emit from the state captured before it would resurrect a stale
+    // isPulling: true over that update, wedging every later PullRequested
+    // (PR #16 review round 1, F2).
     final latest = state;
     if (latest is SyncLoaded) {
-      emit(latest.copyWith(syncFolderPath: event.path));
+      // isPulling is forced to false here rather than carried over from
+      // `latest` — it describes the OLD folder's pull (if one was still in
+      // flight above), which says nothing about whether this NEW folder
+      // needs to wait. Forcing it in the same statement as this emit, with
+      // no await before _runSync's own guard check runs next, makes that
+      // guard immune to how far the old pull's own finishing sequence
+      // (getDevices/getFailedEvents/its own emit, running concurrently on a
+      // separate event) has gotten by this point — otherwise it could still
+      // see isPulling: true and skip the new folder's first sync entirely
+      // (PR #16 review round 2, finding 4).
+      emit(latest.copyWith(syncFolderPath: event.path, isPulling: false));
     } else {
       emit(await _fetchLoadedState());
     }
     _startPolling();
     _startWatching(event.path);
-    add(const PullRequested());
+    // Runs the pull routine directly instead of add(const PullRequested()):
+    // that event is handled concurrently with whatever else the bloc is
+    // doing (bloc's default EventTransformer), so a re-dispatched event's
+    // guard can still observe the old pull as in flight and return without
+    // ever syncing the new folder. Calling the guard-and-run logic
+    // synchronously from here, right after the isPulling override above,
+    // sidesteps that race instead of relying on it resolving in time.
+    await _runSync(emit);
   }
 
   Future<void> _onPullRequested(
     PullRequested event,
     Emitter<SyncState> emit,
-  ) async {
+  ) => _runSync(emit);
+
+  /// The guarded pull-once routine shared by [_onPullRequested] and
+  /// [_onSyncFolderChosen] (PR #16 review round 2, finding 4) — extracted so
+  /// a folder pick can run it directly instead of going through
+  /// [PullRequested]'s event queue.
+  Future<void> _runSync(Emitter<SyncState> emit) async {
     final current = state;
     // The isPulling check makes this re-entrancy-safe against the periodic
-    // timer, the initial load, and a folder pick all firing PullRequested
-    // around the same time: it is read and then set synchronously (no
-    // `await` in between), so a second call arriving while the first is
-    // still in flight always sees it already true and returns immediately
-    // instead of running a second pullOnce concurrently.
+    // timer, the initial load, and a folder pick all firing around the same
+    // time: it is read and then set synchronously (no `await` in between),
+    // so a second call arriving while the first is still in flight always
+    // sees it already true and returns immediately instead of running a
+    // second pullOnce concurrently.
     if (current is! SyncLoaded || current.syncFolderPath == null || current.isPulling) {
       return;
     }

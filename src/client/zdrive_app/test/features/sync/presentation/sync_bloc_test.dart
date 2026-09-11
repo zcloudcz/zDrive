@@ -128,6 +128,43 @@ void main() {
         isA<SyncError>(),
       ],
     );
+
+    blocTest<SyncBloc, SyncState>(
+      'emits [SyncLoading, SyncError] when startSession itself fails, '
+      'instead of leaving the state at SyncInitial forever — '
+      'indistinguishable from SyncLoading in SyncPage, i.e. an endless '
+      'spinner with no Retry button (PR #16 review round 2, finding 7)',
+      build: buildBloc,
+      setUp: () {
+        when(() => mockSyncCoordinator.startSession(any()))
+            .thenThrow(Exception('sqlite locked'));
+      },
+      act: (bloc) => bloc.add(const LoadSyncStatus()),
+      expect: () => [
+        const SyncLoading(),
+        isA<SyncError>(),
+      ],
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'startSession is awaited to completion before syncOnce ever runs — '
+      'never resolving startSession here means syncOnce must never be '
+      'called either; a future change that stopped awaiting it before '
+      'moving on would still let syncOnce run and fail this test (PR #16 '
+      'review round 2, test gap #9)',
+      build: buildBloc,
+      setUp: () {
+        when(() => mockSyncCoordinator.startSession(any()))
+            .thenAnswer((_) => Completer<void>().future);
+        when(() => mockPreferences.syncFolderPath).thenReturn('/local/sync');
+      },
+      act: (bloc) => bloc.add(const LoadSyncStatus()),
+      wait: const Duration(milliseconds: 20),
+      verify: (_) {
+        verifyNever(() => mockDataSource.getDevices());
+        verifyNever(() => mockSyncCoordinator.syncOnce(any()));
+      },
+    );
   });
 
   group('PullRequested', () {
@@ -217,9 +254,11 @@ void main() {
   });
 
   group('SyncFolderChosen', () {
-    // Shared by the F2 race test below only — reassigned fresh in that
-    // test's own setUp, like watchController in the 'folder watch' group.
+    // Shared by the F2/finding-4 race tests below only — reassigned fresh in
+    // each test's own setUp, like watchController in the 'folder watch'
+    // group.
     late Completer<SyncRunResult> pullGate;
+    late Completer<List<Map<String, dynamic>>> oldDevicesGate;
 
     blocTest<SyncBloc, SyncState>(
       'persists the chosen folder and triggers a sync, when no folder was '
@@ -249,19 +288,19 @@ void main() {
       ],
       verify: (_) {
         verify(() => mockPreferences.setSyncFolderPath('/new/folder')).called(1);
-        verifyNever(() => mockSyncCoordinator.resetForNewFolder());
+        verifyNever(() => mockSyncCoordinator.resetForNewFolder(any()));
       },
     );
 
     blocTest<SyncBloc, SyncState>(
-      'resets the mirror before persisting a different folder than the '
-      'one already configured',
+      'resets the mirror before syncing a different folder than the one '
+      'already configured — persisting the new path is now resetForNewFolder\'s '
+      'own job, inside its lock (PR #16 review round 2, finding 3), not a '
+      'separate call this bloc makes afterwards',
       build: buildBloc,
       seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old/folder'),
       setUp: () {
-        when(() => mockSyncCoordinator.resetForNewFolder()).thenAnswer((_) async {});
-        when(() => mockPreferences.setSyncFolderPath('/new/folder'))
-            .thenAnswer((_) async {});
+        when(() => mockSyncCoordinator.resetForNewFolder('/new/folder')).thenAnswer((_) async {});
         when(() => mockSyncCoordinator.syncOnce('/new/folder'))
             .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
@@ -269,10 +308,8 @@ void main() {
       },
       act: (bloc) => bloc.add(const SyncFolderChosen('/new/folder')),
       verify: (_) {
-        verifyInOrder([
-          () => mockSyncCoordinator.resetForNewFolder(),
-          () => mockPreferences.setSyncFolderPath('/new/folder'),
-        ]);
+        verify(() => mockSyncCoordinator.resetForNewFolder('/new/folder')).called(1);
+        verifyNever(() => mockPreferences.setSyncFolderPath(any()));
       },
     );
 
@@ -290,7 +327,7 @@ void main() {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const SyncFolderChosen('/same/folder')),
-      verify: (_) => verifyNever(() => mockSyncCoordinator.resetForNewFolder()),
+      verify: (_) => verifyNever(() => mockSyncCoordinator.resetForNewFolder(any())),
     );
 
     blocTest<SyncBloc, SyncState>(
@@ -311,13 +348,12 @@ void main() {
         // forces the exact ordering that broke the old code: the pull
         // handler's own "finished" emit (isPulling: false) must land before
         // this resolves, not after.
-        when(() => mockSyncCoordinator.resetForNewFolder()).thenAnswer((_) async {
+        when(() => mockSyncCoordinator.resetForNewFolder('/new')).thenAnswer((_) async {
           await pullGate.future;
           await Future<void>.delayed(const Duration(milliseconds: 10));
         });
         when(() => mockSyncCoordinator.syncOnce('/new'))
             .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
-        when(() => mockPreferences.setSyncFolderPath('/new')).thenAnswer((_) async {});
         when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
       },
@@ -329,6 +365,61 @@ void main() {
         pullGate.complete(const SyncRunResult(pulled: 1, pushed: 0));
       },
       wait: const Duration(milliseconds: 50),
+      verify: (bloc) {
+        final state = bloc.state as SyncLoaded;
+        expect(state.syncFolderPath, '/new');
+        expect(state.isPulling, isFalse);
+        verify(() => mockSyncCoordinator.syncOnce('/new')).called(1);
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'switching folders while a pull is in flight for the old one still '
+      'syncs the new folder, even when the old pull\'s own finishing '
+      'sequence (getDevices/getFailedEvents/its own emit) never completes '
+      'at all during this test (PR #16 review round 2, finding 4) — the '
+      'round-1 fix (F2) re-dispatched PullRequested, whose isPulling guard '
+      'ran concurrently with the old pull\'s handler and could still see it '
+      'as in flight, silently dropping the new folder\'s first sync '
+      'entirely; calling the shared pull routine directly, with isPulling '
+      'forced to false in the same synchronous step as the folder-path '
+      'emit, removes that race regardless of how far the old pull has '
+      'gotten',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        pullGate = Completer<SyncRunResult>();
+        oldDevicesGate = Completer<List<Map<String, dynamic>>>();
+        when(() => mockSyncCoordinator.syncOnce('/old')).thenAnswer((_) => pullGate.future);
+        // Shares the mutex with syncOnce, same as the real SyncCoordinator —
+        // cannot resolve until the old pull's own lock section is done.
+        when(() => mockSyncCoordinator.resetForNewFolder('/new')).thenAnswer((_) async {
+          await pullGate.future;
+        });
+        when(() => mockSyncCoordinator.syncOnce('/new'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        // The FIRST call is the old pull's own tail — left to hang for the
+        // rest of this test, so its "finished" emit never lands at all,
+        // proving the new folder's sync does not depend on it ever doing
+        // so. The SECOND call is the new folder's own pull, which must
+        // still resolve normally.
+        var getDevicesCalls = 0;
+        when(() => mockDataSource.getDevices()).thenAnswer((_) {
+          getDevicesCalls++;
+          return getDevicesCalls == 1 ? oldDevicesGate.future : Future.value(<Map<String, dynamic>>[]);
+        });
+      },
+      act: (bloc) async {
+        bloc.add(const PullRequested());
+        // Waits for the real state transition (isPulling: true) instead of
+        // a timed delay — deterministic proof the old pull's handler has
+        // actually started and is suspended on syncOnce('/old').
+        await bloc.stream.firstWhere((s) => s is SyncLoaded && s.isPulling);
+        bloc.add(const SyncFolderChosen('/new'));
+        pullGate.complete(const SyncRunResult(pulled: 1, pushed: 0));
+      },
+      wait: const Duration(milliseconds: 20),
       verify: (bloc) {
         final state = bloc.state as SyncLoaded;
         expect(state.syncFolderPath, '/new');
@@ -397,7 +488,7 @@ void main() {
       setUp: () {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
         when(() => mockPreferences.syncFolderPath).thenReturn('/old/folder');
-        when(() => mockSyncCoordinator.resetForNewFolder()).thenAnswer((_) async {});
+        when(() => mockSyncCoordinator.resetForNewFolder('/new/folder')).thenAnswer((_) async {});
         when(() => mockPreferences.setSyncFolderPath('/new/folder')).thenAnswer((_) async {});
         when(() => mockSyncCoordinator.syncOnce(any()))
             .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
