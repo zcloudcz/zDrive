@@ -29,7 +29,7 @@ public sealed class RenameFileCommandHandler : IRequestHandler<RenameFileCommand
             f.TenantId == request.TenantId
             && f.UserId == request.UserId
             && f.ParentId == node.ParentId
-            && f.Name.ToLower() == request.NewName.ToLower()
+            && f.Name.ToLower() == request.NewName.ToLowerInvariant()
             && f.Id != node.Id
             && !f.IsDeleted,
             cancellationToken);

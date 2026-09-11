@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
@@ -284,6 +285,44 @@ public sealed class FileFlowTests : IClassFixture<FileServiceFactory>
             newParentId = target.Id
         });
         moveResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task CreateDuplicate_CaseOnlyDifferenceUnderTurkishCulture_Returns409NotServerError()
+    {
+        // f.Name.ToLower() is translated to SQL lower(), which folds "I" to
+        // "i" regardless of .NET culture. Before CreateFileCommandHandler
+        // used ToLowerInvariant() for the request side, request.Name.ToLower()
+        // ran under whatever culture happened to be current — under Turkish,
+        // "I" folds to "ı" (dotless), not "i". A duplicate check comparing
+        // "fıle-tr.txt" (Turkish fold) against "file-tr.txt" (SQL fold) never
+        // matches, so the handler would let the insert proceed and the
+        // database's own case-insensitive unique index would reject it with
+        // a raw constraint-violation error — surfacing as 500 here, not the
+        // clean 409 a real name collision should produce (PR #12 review
+        // round 4). This test only proves anything if CurrentCulture is
+        // actually tr-TR while the request runs; .NET flows CurrentCulture
+        // across await points within the same async call chain (see
+        // https://learn.microsoft.com/dotnet/standard/globalization-localization/synchronizing-cultures),
+        // and this test's HttpClient call is exactly that: one awaited chain
+        // from this method straight into the in-process TestServer pipeline.
+        var originalCulture = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+        try
+        {
+            var first = await _client.PostAsJsonAsync("/api/v1/files", new { name = "file-tr.txt", isFolder = false });
+            first.StatusCode.Should().Be(HttpStatusCode.Created);
+
+            // Differs from "file-tr.txt" only by the case of "i" -> "I", the
+            // exact letter Turkish folds differently from every other culture.
+            var second = await _client.PostAsJsonAsync("/api/v1/files", new { name = "FILE-TR.TXT", isFolder = false });
+
+            second.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
     }
 
     [Fact]

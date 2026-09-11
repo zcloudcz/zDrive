@@ -46,7 +46,7 @@ public sealed class MoveFileCommandHandler : IRequestHandler<MoveFileCommand, Fi
             f.TenantId == request.TenantId
             && f.UserId == request.UserId
             && f.ParentId == request.NewParentId
-            && f.Name.ToLower() == node.Name.ToLower()
+            && f.Name.ToLower() == node.Name.ToLowerInvariant()
             && f.Id != node.Id
             && !f.IsDeleted,
             cancellationToken);
