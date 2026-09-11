@@ -1,9 +1,11 @@
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:injectable/injectable.dart';
 
 import 'local_change_scanner.dart';
 import 'pull_sync_service.dart';
+import 'push_sync_service.dart';
 
 /// Thrown when the designated sync folder no longer exists on disk (the
 /// user renamed or deleted it since it was chosen — the watcher and poll
@@ -39,8 +41,9 @@ class SyncFolderMissingException implements Exception {
 class SyncCoordinator {
   final PullSyncService _pull;
   final LocalChangeScanner _scanner;
+  final PushSyncService _push;
 
-  SyncCoordinator(this._pull, this._scanner);
+  SyncCoordinator(this._pull, this._scanner, this._push);
 
   Future<SyncRunResult>? _inFlight;
 
@@ -57,15 +60,27 @@ class SyncCoordinator {
     }
     final pulled = await _pull.pullOnce(syncFolderPath);
     final pushed = await _scanner.scanOnce(syncFolderPath);
-    return SyncRunResult(pulled: pulled, pushed: pushed);
+    // The scan itself never depends on SyncService being reachable (PR #14
+    // review round 3) — every local change is already durable in the
+    // outbox by this point, so a drain failure here must not throw out of
+    // syncOnce: the queue just retries on the next cycle instead.
+    try {
+      await _push.drainOutbox();
+    } catch (e, st) {
+      log('drainOutbox failed, queue retries next cycle', error: e, stackTrace: st, name: 'SyncCoordinator');
+    }
+    final queued = await _push.outboxCount();
+    return SyncRunResult(pulled: pulled, pushed: pushed, queued: queued);
   }
 }
 
-/// How many events [SyncCoordinator.syncOnce] applied from the server and
-/// how many local changes it reported upstream.
+/// How many events [SyncCoordinator.syncOnce] applied from the server, how
+/// many local changes it committed, and how many reports are still owed
+/// after the drain (0 when SyncService kept up).
 class SyncRunResult {
   final int pulled;
   final int pushed;
+  final int queued;
 
-  const SyncRunResult({required this.pulled, required this.pushed});
+  const SyncRunResult({required this.pulled, required this.pushed, required this.queued});
 }

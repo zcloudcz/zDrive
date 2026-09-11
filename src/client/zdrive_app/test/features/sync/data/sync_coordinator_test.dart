@@ -6,15 +6,19 @@ import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
 import 'package:zdrive_app/features/sync/data/local_change_scanner.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
+import 'package:zdrive_app/features/sync/data/push_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 
 class MockPullSyncService extends Mock implements PullSyncService {}
 
 class MockLocalChangeScanner extends Mock implements LocalChangeScanner {}
 
+class MockPushSyncService extends Mock implements PushSyncService {}
+
 void main() {
   late MockPullSyncService mockPull;
   late MockLocalChangeScanner mockScanner;
+  late MockPushSyncService mockPush;
   late SyncCoordinator coordinator;
   late Directory tempDir;
   late String syncPath;
@@ -22,21 +26,27 @@ void main() {
   setUp(() {
     mockPull = MockPullSyncService();
     mockScanner = MockLocalChangeScanner();
-    coordinator = SyncCoordinator(mockPull, mockScanner);
+    mockPush = MockPushSyncService();
+    coordinator = SyncCoordinator(mockPull, mockScanner, mockPush);
     // A real, existing directory — syncOnce now checks for that before
     // doing anything else (F3), so a bare string like '/local/sync' that
     // does not exist on the test runner's filesystem would fail every
     // test in this file, not just the one added for that check below.
     tempDir = Directory.systemTemp.createTempSync('sync_coordinator_test_');
     syncPath = tempDir.path;
+
+    // Baseline every test below assumes unless it says otherwise: the
+    // scan's own writes drain cleanly and nothing is left queued.
+    when(() => mockPush.drainOutbox()).thenAnswer((_) async => 0);
+    when(() => mockPush.outboxCount()).thenAnswer((_) async => 0);
   });
 
   tearDown(() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
-  test('syncOnce pulls, then scans — pull strictly completes before the '
-      'scan starts', () async {
+  test('syncOnce pulls, then scans, then drains the outbox — each step '
+      'strictly completes before the next starts', () async {
     final callOrder = <String>[];
     when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async {
       callOrder.add('pull');
@@ -46,12 +56,41 @@ void main() {
       callOrder.add('scan');
       return 2;
     });
+    when(() => mockPush.drainOutbox()).thenAnswer((_) async {
+      callOrder.add('drain');
+      return 2;
+    });
 
     final result = await coordinator.syncOnce(syncPath);
 
-    expect(callOrder, ['pull', 'scan']);
+    expect(callOrder, ['pull', 'scan', 'drain']);
     expect(result.pulled, 3);
     expect(result.pushed, 2);
+    expect(result.queued, 0);
+  });
+
+  test('drainOutbox failure does not throw out of syncOnce — the queue '
+      'retries next cycle', () async {
+    when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
+    when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 1);
+    when(() => mockPush.drainOutbox()).thenThrow(Exception('SyncService unreachable'));
+    when(() => mockPush.outboxCount()).thenAnswer((_) async => 4);
+
+    final result = await coordinator.syncOnce(syncPath);
+
+    expect(result.pushed, 1);
+    expect(result.queued, 4);
+  });
+
+  test('queued reflects what is left in the outbox after the drain', () async {
+    when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
+    when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 0);
+    when(() => mockPush.drainOutbox()).thenAnswer((_) async => 1);
+    when(() => mockPush.outboxCount()).thenAnswer((_) async => 2);
+
+    final result = await coordinator.syncOnce(syncPath);
+
+    expect(result.queued, 2);
   });
 
   test('two concurrent syncOnce calls run pull and scan exactly once — the '
