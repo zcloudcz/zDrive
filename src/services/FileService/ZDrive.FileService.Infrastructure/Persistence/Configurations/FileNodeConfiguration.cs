@@ -52,9 +52,18 @@ public sealed class FileNodeConfiguration : IEntityTypeConfiguration<FileNode>
             .HasMaxLength(512)
             .HasComputedColumnSql("lower(name)", stored: true);
 
+        // ParentId is NULL for root-level items — the most important place
+        // for this uniqueness rule, since the root is the synced folder
+        // itself. Postgres treats NULLs as distinct in a unique index by
+        // default, so without AreNullsDistinct(false) the index would not
+        // stop "Photos" and "photos" from coexisting at the root; only the
+        // handlers' pre-check would, and two concurrent creates can race
+        // past that (PR #12 review round 4). Requires Postgres 15+ (the
+        // stack runs 16).
         builder.HasIndex(new[] { nameof(FileNode.TenantId), nameof(FileNode.UserId), nameof(FileNode.ParentId), "name_normalized" })
             .IsUnique()
             .HasFilter("is_deleted = false")
+            .AreNullsDistinct(false)
             .HasDatabaseName("ix_file_nodes_tenant_id_user_id_parent_id_name_normalized");
 
         // Self-referencing relationship

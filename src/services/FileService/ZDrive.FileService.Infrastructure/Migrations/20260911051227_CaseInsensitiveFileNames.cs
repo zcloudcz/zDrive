@@ -72,7 +72,8 @@ namespace ZDrive.FileService.Infrastructure.Migrations
                 table: "file_nodes",
                 columns: new[] { "tenant_id", "user_id", "parent_id", "name_normalized" },
                 unique: true,
-                filter: "is_deleted = false");
+                filter: "is_deleted = false")
+                .Annotation("Npgsql:NullsDistinct", false);
         }
 
         /// <inheritdoc />
