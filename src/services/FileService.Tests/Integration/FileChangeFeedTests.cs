@@ -144,6 +144,50 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     }
 
     [Fact]
+    public async Task RestoreFile_ParentAlsoDeleted_RestoresToRootAsSingleCreateChange()
+    {
+        // Non-blocking coverage gap N1: RestoreFile's "parent is gone" branch
+        // (ParentId and IsDeleted both change) must still report exactly one
+        // Create, not a Create plus a redundant Move.
+        var beforeCreate = await GetLatestCursorAsync();
+        var folder = await CreateFileAsync("change-restore-root-parent", isFolder: true);
+        var file = await CreateFileAsync("change-restore-root-child.txt", parentId: folder.Id);
+        await _client.DeleteAsync($"/api/v1/files/{folder.Id}"); // soft-deletes folder + child
+        await AgeSinceAsync(beforeCreate);
+        var baseline = await GetLatestCursorAsync();
+
+        // Restore only the child — the parent folder stays deleted, so
+        // RestoreFileCommandHandler must fall back to the root.
+        var restoreResponse = await _client.PostAsync($"/api/v1/files/{file.Id}/restore", null);
+        restoreResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var restored = (await restoreResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+        restored.ParentId.Should().BeNull();
+        await AgeSinceAsync(baseline);
+
+        var changes = await GetChangesAsync(baseline);
+        changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Create");
+    }
+
+    [Fact]
+    public async Task RestoreFile_Folder_ProducesCreateChangeForFolderAndEachDescendant()
+    {
+        var beforeCreate = await GetLatestCursorAsync();
+        var folder = await CreateFileAsync("change-restore-folder", isFolder: true);
+        var child = await CreateFileAsync("change-restore-folder-child.txt", parentId: folder.Id);
+        await _client.DeleteAsync($"/api/v1/files/{folder.Id}");
+        await AgeSinceAsync(beforeCreate);
+        var baseline = await GetLatestCursorAsync();
+
+        var restoreResponse = await _client.PostAsync($"/api/v1/files/{folder.Id}/restore", null);
+        restoreResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AgeSinceAsync(baseline);
+
+        var changes = await GetChangesAsync(baseline);
+        changes.Changes.Should().Contain(c => c.FileId == folder.Id && c.Type == "Create");
+        changes.Changes.Should().Contain(c => c.FileId == child.Id && c.Type == "Create");
+    }
+
+    [Fact]
     public async Task CreateFileVersion_ProducesUpdateChange()
     {
         var beforeCreate = await GetLatestCursorAsync();
@@ -161,6 +205,65 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Update");
+    }
+
+    [Fact]
+    public async Task RestoreFileVersion_ProducesUpdateChange()
+    {
+        var beforeCreate = await GetLatestCursorAsync();
+        var file = await CreateFileAsync("change-restore-version.txt");
+
+        var v1Response = await _client.PostAsJsonAsync($"/api/v1/files/{file.Id}/versions", new
+        {
+            blobVersionId = "v1-hash",
+            sizeBytes = 10L
+        });
+        v1Response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var v1 = (await v1Response.Content.ReadFromJsonAsync<ApiResponse<FileVersionDto>>())!.Data!;
+
+        // A second version so the file's current content differs from v1 —
+        // otherwise restoring v1 would leave SizeBytes/ManifestHash unchanged
+        // and EF's change tracker would not see a Modified property at all.
+        var v2Response = await _client.PostAsJsonAsync($"/api/v1/files/{file.Id}/versions", new
+        {
+            blobVersionId = "v2-hash",
+            sizeBytes = 20L
+        });
+        v2Response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await AgeSinceAsync(beforeCreate);
+        var baseline = await GetLatestCursorAsync();
+
+        var restoreResponse = await _client.PostAsync($"/api/v1/files/{file.Id}/versions/{v1.Id}/restore", null);
+        restoreResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AgeSinceAsync(baseline);
+
+        var changes = await GetChangesAsync(baseline);
+        changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Update");
+    }
+
+    [Fact]
+    public async Task EmptyTrash_ProducesNoChangeRows()
+    {
+        // Other tests in this shared-fixture class may have left trashed
+        // items behind; purge them first so this test's own EmptyTrash call
+        // below is the only one that runs after the baseline.
+        await _client.DeleteAsync("/api/v1/files/trash");
+
+        var beforeCreate = await GetLatestCursorAsync();
+        var file = await CreateFileAsync("change-empty-trash.txt");
+        await _client.DeleteAsync($"/api/v1/files/{file.Id}");
+        await AgeSinceAsync(beforeCreate);
+        var baseline = await GetLatestCursorAsync();
+
+        // Hard delete: FileChangeInterceptor's EntityState.Deleted branch is a
+        // no-op — the item was already reported as Delete when trashed.
+        var emptyResponse = await _client.DeleteAsync("/api/v1/files/trash");
+        emptyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        await AgeSinceAsync(baseline);
+
+        var changes = await GetChangesAsync(baseline);
+        changes.Changes.Should().BeEmpty();
     }
 
     [Fact]

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Testcontainers.PostgreSql;
@@ -37,6 +38,24 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     {
         builder.UseEnvironment("Development");
 
+        // Point FileDb at the ephemeral Testcontainers instance instead of the
+        // dev connection string in appsettings.json. AddInfrastructure reads
+        // this configuration value lazily — inside the AddDbContext options
+        // delegate, evaluated on first DbContext resolution, not when
+        // AddInfrastructure itself runs — so overriding just the value here
+        // is enough to redirect it. Everything else about the registration
+        // (snake_case naming, schema-qualified migrations history table, and
+        // the FileChangeInterceptor wiring) stays exactly what production
+        // wires in DependencyInjection.cs. Previously this factory called its
+        // own AddDbContext (re-adding the interceptor itself too), so a test
+        // would keep passing even if production stopped wiring the
+        // interceptor there — this way, that would actually fail a test.
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new[]
+        {
+            new KeyValuePair<string, string?>(
+                "ConnectionStrings:FileDb", _postgres.GetConnectionString() + ";Search Path=files")
+        }));
+
         // Make the service validate tokens signed by this factory's key instead
         // of the per-machine dev key pair. PostConfigure runs after the app's own
         // service registration, so it reliably overrides the signing key.
@@ -50,28 +69,6 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
             // creating dozens of versions (see VersionFlowTests).
             services.PostConfigure<ZDrive.FileService.Application.Options.VersioningOptions>(
                 options => options.MaxVersionsPerFile = MaxVersionsPerFile);
-        });
-
-        builder.ConfigureServices(services =>
-        {
-            // Remove the real DbContext registration
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<FileDbContext>));
-            if (descriptor is not null)
-                services.Remove(descriptor);
-
-            // Register DbContext pointing to testcontainer
-            // Same options as the real registration — snake_case matters because
-            // the search query and index filters use raw snake_case SQL.
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // DependencyInjection.cs) — otherwise it falls back to the connection's
-            // search_path, which points at a schema that doesn't exist until the
-            // first migration creates it, and Migrate() fails before it gets there.
-            services.AddDbContext<FileDbContext>((sp, options) =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=files",
-                        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
-                    .UseSnakeCaseNamingConvention()
-                    .AddInterceptors(sp.GetRequiredService<ZDrive.FileService.Infrastructure.Persistence.Interceptors.FileChangeInterceptor>()));
         });
     }
 
