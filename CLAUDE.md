@@ -148,6 +148,18 @@ gives us versioning for free):
   default 10) prunes the oldest metadata rows on insert. Orphaned blob
   snapshots/chunks are garbage, not data loss; GC is future work.
 
+### File change log (server-side sync events)
+
+FileService writes an append-only `file_changes` row for every `FileNode`
+mutation, in the same transaction as the mutation (a `SaveChangesInterceptor`,
+not a second write), and serves it as a cursor-paged feed
+(`GET /api/v1/files/changes`). This replaces client-pushed sync events —
+desktop, web, mobile and `ZDrive.BackupCli` all go through FileService, so
+all of them now produce sync events, not just whichever client called
+SyncService's push endpoint. See
+`docs/adr/0001-server-side-file-change-log.md` for the full reasoning,
+alternatives rejected, and the known 5-second commit-order hold-back.
+
 ### Photo processing pipeline
 
 Async, event-driven via Service Bus:
