@@ -105,6 +105,26 @@ builder.Services.AddRateLimiter(options =>
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
             QueueLimit = 0
         }));
+
+    // Chunk PUTs (storage-upload-route, /api/v1/storage/upload/**) get their
+    // own budget instead of sharing "fixed": each chunk is capped at 4 MiB,
+    // so the real constraint is bytes/second, not requests/minute, and a
+    // 1 GB upload is already ~256 of them. Sharing "fixed" meant a transfer
+    // in progress could 429 the same user's own file list, thumbnails, etc.
+    // 600/min (10/s) covers a sustained transfer without noticeably raising
+    // the abuse ceiling, since it is still bounded by the 4 MiB per-chunk
+    // size; a fixed window is used (instead of e.g. a ConcurrencyLimiter) so
+    // it keeps producing the same RetryAfter metadata the OnRejected handler
+    // above already relies on.
+    options.AddPolicy("chunk", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 600,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        }));
 });
 
 // YARP reverse proxy
