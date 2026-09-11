@@ -33,6 +33,11 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     public Guid TestUserId { get; } = Guid.NewGuid();
     public Guid TestTenantId { get; } = Guid.NewGuid();
 
+    // Shared by FileChangeInterceptor (stamps FileChange.OccurredAt) and
+    // GetFileChangesQueryHandler (computes the hold-back cutoff) — both
+    // resolve TimeProvider from DI, so this single instance drives both.
+    public ManualTimeProvider TimeProvider { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
@@ -67,10 +72,18 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
             // DependencyInjection.cs) — otherwise it falls back to the connection's
             // search_path, which points at a schema that doesn't exist until the
             // first migration creates it, and Migrate() fails before it gets there.
-            services.AddDbContext<FileDbContext>(options =>
+            services.AddDbContext<FileDbContext>((sp, options) =>
                 options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=files",
                         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
-                    .UseSnakeCaseNamingConvention());
+                    .UseSnakeCaseNamingConvention()
+                    .AddInterceptors(sp.GetRequiredService<ZDrive.FileService.Infrastructure.Persistence.Interceptors.FileChangeInterceptor>()));
+
+            // Replace the real clock with a manually-advanceable one so tests
+            // can exercise the change feed's 5-second hold-back deterministically.
+            var timeProviderDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(TimeProvider));
+            if (timeProviderDescriptor is not null)
+                services.Remove(timeProviderDescriptor);
+            services.AddSingleton<TimeProvider>(TimeProvider);
         });
     }
 
