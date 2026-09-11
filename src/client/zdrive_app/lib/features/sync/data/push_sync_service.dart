@@ -35,12 +35,16 @@ class PushSyncService {
   /// the caller (a local file operation that already succeeded) never fails
   /// just because SyncService happened to be unreachable at that instant.
   Future<void> reportChange(String fileId, SyncChangeType type) async {
-    final deviceId = await _deviceRegistration.ensureRegistered();
+    // Enqueueing must work offline — [localDeviceId] is a local lookup, no
+    // network call, unlike ensureRegistered (PR #14 review round 4). A
+    // `null` id (no device registered yet) reads as cursor 0, the honest
+    // value for a device that has never pulled anything.
+    final deviceId = await _deviceRegistration.localDeviceId();
     // The pull cursor this device had already applied at the time of the
     // change — sent as baseCursor so the server can tell "I pushed after
     // seeing everything up to here" from a push based on stale knowledge
     // (see SyncRemoteDataSource.push's doc comment).
-    final baseCursor = await _mirror.getCursor(deviceId);
+    final baseCursor = deviceId == null ? 0 : await _mirror.getCursor(deviceId);
     await _mirror.commit(enqueue: [
       OutboxItem(fileId: fileId, type: type, baseCursor: baseCursor, createdAt: DateTime.now()),
     ]);

@@ -174,6 +174,7 @@ void main() {
     tempDir = Directory.systemTemp.createTempSync('local_change_scanner_test_');
 
     when(() => mockDeviceRegistration.ensureRegistered()).thenAnswer((_) async => 'dev-1');
+    when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'dev-1');
   });
 
   tearDown(() {
@@ -1173,6 +1174,50 @@ void main() {
             ],
             baseCursor: 0, // this device's cursor for 'dev-1' was never set
           )).called(2);
+    });
+
+    test('enqueueing never needs SyncService: ensureRegistered throwing '
+        'does not stop a change from being written and queued, and the '
+        'scan never calls it (PR #14 review round 4, R4-1)', () async {
+      final mirror = SqfliteSyncMirrorRepository.withDbPath(inMemoryDatabasePath);
+      final scanner = LocalChangeScanner(mirror, mockFileRepository, mockDeviceRegistration);
+
+      when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'dev-1');
+      when(() => mockDeviceRegistration.ensureRegistered())
+          .thenThrow(Exception('SyncService unreachable'));
+
+      final file = File(p.join(tempDir.path, 'tracked2.txt'))
+        ..writeAsStringSync('a longer new body');
+      await mirror.upsert(SyncMirrorEntry(
+        serverId: 'file-v2',
+        localPath: file.path,
+        isFolder: false,
+        sizeBytes: 3, // old content's length
+        contentHash: hashOf('old'),
+        updatedAt: past,
+        syncedAt: past,
+      ));
+      when(() => mockFileRepository.uploadNewVersion('file-v2', 'tracked2.txt', any(), 17))
+          .thenAnswer((_) async {});
+
+      final firstScanPushed = await scanner.scanOnce(tempDir.path);
+      expect(firstScanPushed, 1);
+      expect((await mirror.getByServerId('file-v2'))!.contentHash, hashOf('a longer new body'));
+      expect(await mirror.outboxCount(), 1);
+      verifyNever(() => mockDeviceRegistration.ensureRegistered());
+
+      // Scan 2: the mirror was already updated by scan 1's own commit, so
+      // no second uploadNewVersion. Teeth: switching _currentBaseCursor
+      // back to ensureRegistered makes scan 1's commit throw instead
+      // (ensureRegistered rejects), so the mirror is never updated and this
+      // second scan redoes the same server write.
+      clearInteractions(mockFileRepository);
+      scanner.debugClearBackoff();
+      final secondScanPushed = await scanner.scanOnce(tempDir.path);
+      expect(secondScanPushed, 0);
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any()));
+
+      await (await mirror.debugDatabase).close();
     });
   });
 }

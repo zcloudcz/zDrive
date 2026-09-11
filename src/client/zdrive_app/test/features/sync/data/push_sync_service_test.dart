@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:zdrive_app/features/sync/data/device_registration_service.dart';
 import 'package:zdrive_app/features/sync/data/push_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sqflite_sync_mirror_repository.dart';
@@ -35,6 +36,7 @@ void main() {
     service = PushSyncService(mockDataSource, mockDeviceRegistration, mockMirror);
 
     when(() => mockDeviceRegistration.ensureRegistered()).thenAnswer((_) async => 'dev-1');
+    when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'dev-1');
     when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 7);
   });
 
@@ -79,6 +81,26 @@ void main() {
       await service.reportChange('file-1', SyncChangeType.create);
 
       verifyNever(() => mockMirror.removeOutbox(any()));
+    });
+
+    test('enqueueing needs no network call: ensureRegistered throwing does '
+        'not stop the item from being queued, and reportChange itself does '
+        'not throw (PR #14 review round 4, R4-1)', () async {
+      // A real repository, not mockMirror, so the assertion below
+      // (outboxCount == 1) reflects an actual queued row rather than a
+      // hand-picked mock stub.
+      final mirror = SqfliteSyncMirrorRepository.withDbPath(inMemoryDatabasePath);
+      addTearDown(() async => (await mirror.debugDatabase).close());
+      final freshDeviceRegistration = MockDeviceRegistrationService();
+      final freshDataSource = MockSyncRemoteDataSource();
+      when(() => freshDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'dev-1');
+      when(() => freshDeviceRegistration.ensureRegistered())
+          .thenThrow(Exception('SyncService unreachable'));
+      final freshService = PushSyncService(freshDataSource, freshDeviceRegistration, mirror);
+
+      await freshService.reportChange('file-1', SyncChangeType.create);
+
+      expect(await mirror.outboxCount(), 1);
     });
 
     test('SyncChangeType ordinals match SyncService\'s SyncEventType enum order '

@@ -118,13 +118,16 @@ class LocalChangeScanner {
   /// This device's pull cursor at the moment of a write — what
   /// [SyncMirrorRepository.commit]'s enqueued [OutboxItem]s are stamped
   /// with (see [SyncRemoteDataSource.push]'s doc comment for what the
-  /// server does with it). Gets the device id the same way
-  /// [PushSyncService.reportChange] does, rather than depending on
-  /// [PushSyncService] itself — this class only ever needs the id and the
-  /// cursor, never a network call.
+  /// server does with it). Uses [DeviceRegistrationService.localDeviceId]
+  /// (PR #14 review round 4), not [DeviceRegistrationService.ensureRegistered]
+  /// — enqueueing a local change must work offline, and the cursor is
+  /// purely local, so no network call belongs here. A `null` id (no device
+  /// registered yet) reads as cursor 0, which is the honest value anyway:
+  /// pull has always registered the device before a scan runs, so this is
+  /// only a first-run edge case.
   Future<int> _currentBaseCursor() async {
-    final deviceId = await _deviceRegistration.ensureRegistered();
-    return _mirror.getCursor(deviceId);
+    final deviceId = await _deviceRegistration.localDeviceId();
+    return deviceId == null ? 0 : await _mirror.getCursor(deviceId);
   }
 
   /// Diffs [syncFolderPath] against the mirror and pushes whatever differs.
