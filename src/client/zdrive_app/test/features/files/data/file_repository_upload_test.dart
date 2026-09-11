@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/features/files/data/file_dtos.dart';
@@ -16,10 +17,13 @@ void main() {
 
   final now = DateTime(2026, 1, 1);
 
-  FileDto fileDto(String id, String name, {bool isFolder = false}) => FileDto(
+  FileDto fileDto(String id, String name,
+          {bool isFolder = false, String? manifestHash}) =>
+      FileDto(
         id: id,
         name: name,
         isFolder: isFolder,
+        manifestHash: manifestHash,
         createdAt: now,
         updatedAt: now,
       );
@@ -29,6 +33,18 @@ void main() {
         totalCount: items.length,
         page: 1,
         pageSize: 200,
+      );
+
+  // FileService's CreateFileCommandHandler rejects a duplicate name in the
+  // same folder with a 409 (ConflictException) — this is what a real
+  // createFile() call throws through Dio's default validateStatus.
+  DioException conflict409() => DioException(
+        requestOptions: RequestOptions(path: '/api/v1/files'),
+        response: Response(
+          requestOptions: RequestOptions(path: '/api/v1/files'),
+          statusCode: 409,
+        ),
+        type: DioExceptionType.badResponse,
       );
 
   setUpAll(() {
@@ -41,9 +57,7 @@ void main() {
     repository = FileRepositoryImpl(remote, upload);
   });
 
-  test('uploadFile creates a new node when no file with that name exists', () async {
-    when(() => remote.listChildren(null, page: 1, pageSize: 200))
-        .thenAnswer((_) async => paged([]));
+  test('uploadFile creates a new node when no name conflict occurs', () async {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
@@ -62,22 +76,23 @@ void main() {
     final id = await repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null);
 
     expect(id, 'new-id');
-    verify(() => remote.createFile(
+    // The happy path must never list children: that lookup is only for
+    // resolving a 409, and doing it unconditionally is what made folder
+    // uploads quadratic (round-2 review finding 4).
+    verifyNever(() => remote.listChildren(any(), page: any(named: 'page'), pageSize: any(named: 'pageSize')));
+  });
+
+  test(
+      'uploadFile reuses the conflicting node on a 409 when it is an orphan '
+      '(manifestHash null) from a previously failed upload', () async {
+    when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
           parentId: null,
           sizeBytes: 10,
-        )).called(1);
-  });
-
-  test(
-      'uploadFile reuses the node a previously failed attempt already created, '
-      'instead of hitting the duplicate-name 409 on retry', () async {
-    // A chunk upload that died mid-transfer (e.g. the rate-limit pause in
-    // dio_client.dart) leaves the node createFile() made with no manifest —
-    // exactly what a retry of the same file finds here.
-    when(() => remote.listChildren(null, page: 1, pageSize: 200))
-        .thenAnswer((_) async => paged([fileDto('orphan-id', 'report.pdf')]));
+        )).thenThrow(conflict409());
+    when(() => remote.listChildren(null, page: 1, pageSize: 200)).thenAnswer(
+        (_) async => paged([fileDto('orphan-id', 'report.pdf', manifestHash: null)]));
     when(() => upload.uploadFile('orphan-id', 'report.pdf', any(), 10,
             onProgress: any(named: 'onProgress')))
         .thenAnswer((_) async =>
@@ -90,13 +105,31 @@ void main() {
     final id = await repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null);
 
     expect(id, 'orphan-id');
-    // Must not go through createFile — CreateFileCommandHandler.cs rejects a
-    // second call with this name in this folder as a duplicate (409).
-    verifyNever(() => remote.createFile(
-          name: any(named: 'name'),
-          isFolder: any(named: 'isFolder'),
-          parentId: any(named: 'parentId'),
-          sizeBytes: any(named: 'sizeBytes'),
-        ));
+  });
+
+  test(
+      'uploadFile surfaces the 409 unchanged when the conflicting node already '
+      'has content (manifestHash non-null) — a genuine duplicate, not an orphan',
+      () async {
+    when(() => remote.createFile(
+          name: 'report.pdf',
+          isFolder: false,
+          parentId: null,
+          sizeBytes: 10,
+        )).thenThrow(conflict409());
+    when(() => remote.listChildren(null, page: 1, pageSize: 200)).thenAnswer(
+        (_) async => paged(
+            [fileDto('existing-id', 'report.pdf', manifestHash: 'already-uploaded-hash')]));
+
+    await expectLater(
+      repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null),
+      throwsA(isA<DioException>()),
+    );
+
+    // Must not touch the completed file's content — displacing it silently
+    // is exactly the data-loss bug this reuse logic must not reintroduce
+    // (round-2 review finding 3).
+    verifyNever(() => upload.uploadFile(any(), any(), any(), any(),
+        onProgress: any(named: 'onProgress')));
   });
 }

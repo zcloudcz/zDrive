@@ -10,6 +10,11 @@ class FileDto {
   final int? sizeBytes;
   final String? mimeType;
   final String? parentId;
+  // Null exactly when no upload has ever completed for this node — the
+  // marker _createOrReuseNode (file_repository_impl.dart) uses to tell an
+  // orphaned node (safe to reuse) from a genuine duplicate (must not be
+  // touched) on a 409 from createFile.
+  final String? manifestHash;
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isDeleted;
@@ -21,6 +26,7 @@ class FileDto {
     this.sizeBytes,
     this.mimeType,
     this.parentId,
+    this.manifestHash,
     required this.createdAt,
     required this.updatedAt,
     this.isDeleted = false,

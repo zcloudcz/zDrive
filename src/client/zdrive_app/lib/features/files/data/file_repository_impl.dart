@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:injectable/injectable.dart';
 
 import '../domain/file_item.dart';
@@ -132,25 +133,11 @@ class FileRepositoryImpl implements FileRepository {
   ) async {
     // Client-orchestrated upload across two services:
     //  1. FileService — create the file node (gives us the id), or reuse one
-    //     an earlier attempt already created (see _findExistingFile below).
+    //     an earlier attempt already created (see _createOrReuseNode below).
     //  2. StorageService — open a session, push chunks, complete (returns the
     //     manifest hash that identifies this content).
     //  3. FileService — record the version, binding the manifest to the file.
-    //
-    // A retry after a failed upload must reuse the existing node rather than
-    // create another: the chunk upload can die mid-transfer (e.g. the rate
-    // limiter in dio_client.dart) after step 1 already succeeded, and
-    // createFile() rejects a second call with this name in this folder as a
-    // duplicate (CreateFileCommandHandler.cs) — mirrors the same-node re-
-    // upload folder_uploader_io.dart already does for its own retries.
-    final existing = await _findExistingFile(parentId, fileName);
-    final node = existing ??
-        await _remoteDataSource.createFile(
-          name: fileName,
-          isFolder: false,
-          parentId: parentId,
-          sizeBytes: sizeBytes,
-        );
+    final node = await _createOrReuseNode(parentId, fileName, sizeBytes);
 
     final complete = await _uploadDataSource.uploadFile(
       node.id,
@@ -170,9 +157,42 @@ class FileRepositoryImpl implements FileRepository {
     return node.id;
   }
 
+  /// Creates the file node for [fileName], or — only when FileService
+  /// rejects it as a duplicate (409, CreateFileCommandHandler.cs) — reuses
+  /// the conflicting node, but only if it's an orphan from a previously
+  /// failed upload: [FileDto.manifestHash] null means no upload ever
+  /// completed for it (the chunk upload can die mid-transfer, e.g. the rate
+  /// limiter in dio_client.dart, after createFile already succeeded). A
+  /// conflicting node that already has a manifest is a genuine duplicate —
+  /// the 409 is rethrown unchanged, so the user sees the same "already
+  /// exists" failure as before this reuse logic existed, instead of a silent
+  /// overwrite of someone else's file.
+  ///
+  /// Looking this up only after a 409 (instead of listing children before
+  /// every upload) keeps the common case a single request and avoids a
+  /// lookup-then-create race between two concurrent uploads of the same name.
+  Future<FileDto> _createOrReuseNode(
+    String? parentId,
+    String fileName,
+    int sizeBytes,
+  ) async {
+    try {
+      return await _remoteDataSource.createFile(
+        name: fileName,
+        isFolder: false,
+        parentId: parentId,
+        sizeBytes: sizeBytes,
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 409) rethrow;
+      final conflicting = await _findExistingFile(parentId, fileName);
+      if (conflicting == null || conflicting.manifestHash != null) rethrow;
+      return conflicting;
+    }
+  }
+
   /// A non-folder child named [fileName] directly under [parentId], if one
-  /// already exists — paginated the same way folder_uploader_io.dart's
-  /// `_listExistingByName` is, since a folder can hold more than one page.
+  /// already exists — paginated, since a folder can hold more than one page.
   Future<FileDto?> _findExistingFile(String? parentId, String fileName) async {
     var page = 1;
     const pageSize = 200;
