@@ -2,9 +2,13 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using MediatR;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using ZDrive.FileService.Application.Commands.CreateFile;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.Shared.DTOs;
+using ZDrive.Shared.Exceptions;
 
 namespace ZDrive.FileService.Tests.Integration;
 
@@ -12,10 +16,12 @@ namespace ZDrive.FileService.Tests.Integration;
 public sealed class FileFlowTests : IClassFixture<FileServiceFactory>
 {
     private readonly HttpClient _client;
+    private readonly FileServiceFactory _factory;
 
     public FileFlowTests(FileServiceFactory factory)
     {
         _client = factory.CreateAuthenticatedClient();
+        _factory = factory;
     }
 
     [Fact]
@@ -298,26 +304,69 @@ public sealed class FileFlowTests : IClassFixture<FileServiceFactory>
         // "fıle-tr.txt" (Turkish fold) against "file-tr.txt" (SQL fold) never
         // matches, so the handler would let the insert proceed and the
         // database's own case-insensitive unique index would reject it with
-        // a raw constraint-violation error — surfacing as 500 here, not the
-        // clean 409 a real name collision should produce (PR #12 review
-        // round 4). This test only proves anything if CurrentCulture is
-        // actually tr-TR while the request runs; .NET flows CurrentCulture
-        // across await points within the same async call chain (see
-        // https://learn.microsoft.com/dotnet/standard/globalization-localization/synchronizing-cultures),
-        // and this test's HttpClient call is exactly that: one awaited chain
-        // from this method straight into the in-process TestServer pipeline.
+        // a raw constraint-violation error — surfacing as 500, not the clean
+        // 409 a real name collision should produce (PR #12 review round 4).
+        //
+        // This used to drive the create through the HttpClient, relying on
+        // CultureInfo.CurrentCulture flowing across awaits within one async
+        // call chain. It doesn't: a probe against this exact TestServer setup
+        // (PreserveExecutionContext at both its default and explicit true)
+        // showed the handler always observing the host's own culture, never
+        // the caller's — the ASP.NET request pipeline runs on infrastructure
+        // that does not inherit the test method's ExecutionContext. So the
+        // fix under test was a no-op either way and the test could not fail.
+        //
+        // Instead, invoke the handler directly via IMediator, resolved from
+        // the factory's own DI container, from this method's own async flow —
+        // CurrentCulture reliably flows across awaits there (see
+        // https://learn.microsoft.com/dotnet/standard/globalization-localization/synchronizing-cultures).
+        // Each Send gets its own DI scope (and so its own FileDbContext),
+        // matching how two separate HTTP requests would each get a fresh
+        // scope — but still against the real Postgres testcontainer.
         var originalCulture = CultureInfo.CurrentCulture;
         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
         try
         {
-            var first = await _client.PostAsJsonAsync("/api/v1/files", new { name = "file-tr.txt", isFolder = false });
-            first.StatusCode.Should().Be(HttpStatusCode.Created);
+            // Precondition 1: the culture is genuinely active right here, not
+            // just at the point it was assigned — a stray await or context
+            // hop earlier in the chain could have already reset it.
+            CultureInfo.CurrentCulture.Name.Should().Be("tr-TR",
+                "the test proves nothing about the Turkish-culture bug unless the handler actually runs under tr-TR");
+
+            // Precondition 2: the two names must genuinely fold differently
+            // under tr-TR vs the invariant culture. If they didn't, a
+            // passing test would prove nothing about culture-sensitivity at
+            // all — this is the same divergence CreateFileCommandHandler's
+            // ToLowerInvariant() fix targets.
+            "FILE-TR.TXT".ToLower().Should().NotBe("FILE-TR.TXT".ToLowerInvariant(),
+                "the test has no teeth unless Turkish case-folding of 'I' genuinely differs from the invariant fold");
+
+            using (var firstScope = _factory.Services.CreateScope())
+            {
+                var mediator = firstScope.ServiceProvider.GetRequiredService<IMediator>();
+                var first = await mediator.Send(new CreateFileCommand(
+                    _factory.TestUserId, _factory.TestTenantId, null, "file-tr.txt", false, null, null, null, null));
+                first.Name.Should().Be("file-tr.txt");
+            }
 
             // Differs from "file-tr.txt" only by the case of "i" -> "I", the
             // exact letter Turkish folds differently from every other culture.
-            var second = await _client.PostAsJsonAsync("/api/v1/files", new { name = "FILE-TR.TXT", isFolder = false });
+            using (var secondScope = _factory.Services.CreateScope())
+            {
+                var mediator = secondScope.ServiceProvider.GetRequiredService<IMediator>();
+                Func<Task> secondCreate = () => mediator.Send(new CreateFileCommand(
+                    _factory.TestUserId, _factory.TestTenantId, null, "FILE-TR.TXT", false, null, null, null, null));
 
-            second.StatusCode.Should().Be(HttpStatusCode.Conflict);
+                // The distinction under test: a clean ConflictException (-> 409
+                // via ExceptionHandlingMiddleware) means the handler's own
+                // duplicate check caught the collision under tr-TR. Any other
+                // exception (e.g. DbUpdateException from the Postgres unique
+                // index) means it fell through to a raw constraint violation
+                // (-> 500) instead.
+                await secondCreate.Should().ThrowAsync<ConflictException>(
+                    "a case-only collision under Turkish culture must be rejected by the handler's own duplicate " +
+                    "check (409 Conflict), not fall through to a raw database constraint violation (500)");
+            }
         }
         finally
         {
