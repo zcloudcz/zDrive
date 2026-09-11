@@ -108,14 +108,16 @@ builder.Services.AddRateLimiter(options =>
         }));
 
     // Chunk PUTs (storage-upload-route, /api/v1/storage/upload/**) get their
-    // own budget instead of sharing "fixed": each chunk is capped at 4 MiB,
-    // so the real constraint is bytes/second, not requests/minute, and a
-    // 1 GB upload is already ~256 of them. Sharing "fixed" meant a transfer
-    // in progress could 429 the same user's own file list, thumbnails, etc.
-    // 600/min (10/s) covers a sustained transfer without noticeably raising
-    // the abuse ceiling, since it is still bounded by the 4 MiB per-chunk
-    // size; a fixed window is used (instead of e.g. a ConcurrencyLimiter) so
-    // it keeps producing the same RetryAfter metadata the OnRejected handler
+    // own budget instead of sharing "fixed": clients (this app and BackupCli)
+    // use 4 MiB chunks by convention, so a 1 GB upload is already ~256 of
+    // them, and sharing "fixed" meant a transfer in progress could 429 the
+    // same user's own file list, thumbnails, etc. 4 MiB is not enforced
+    // anywhere server-side, though — StorageController.UploadChunk allows up
+    // to 50 MB per request, and Kestrel's own 30 MB default applies first —
+    // so 600/min is a budget for the well-behaved chunk size clients
+    // actually use, not a bandwidth cap backed by a real per-request limit.
+    // A fixed window is used (instead of e.g. a ConcurrencyLimiter) so it
+    // keeps producing the same RetryAfter metadata the OnRejected handler
     // above already relies on.
     options.AddPolicy("chunk", httpContext => RateLimitPartition.GetFixedWindowLimiter(
         RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
