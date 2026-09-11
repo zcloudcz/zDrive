@@ -253,4 +253,29 @@ void main() {
         const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-2', totalSize: 10));
     expect(await second, 'retry-id');
   });
+
+  group('uploadNewVersion', () {
+    test('uploads into the given id and records a version, without creating '
+        'a node', () async {
+      when(() => upload.uploadFile('existing-id', 'doc.txt', any(), 10,
+              onProgress: any(named: 'onProgress')))
+          .thenAnswer((_) async =>
+              const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-3', totalSize: 10));
+      when(() => remote.createFileVersion('existing-id',
+          blobVersionId: 'hash-3',
+          sizeBytes: 10,
+          manifestHash: 'hash-3')).thenAnswer((_) async => <String, dynamic>{});
+
+      await repository.uploadNewVersion(
+          'existing-id', 'doc.txt', const Stream.empty(), 10);
+
+      verify(() => remote.createFileVersion('existing-id',
+          blobVersionId: 'hash-3', sizeBytes: 10, manifestHash: 'hash-3')).called(1);
+      verifyNever(() => remote.createFile(
+          name: any(named: 'name'),
+          isFolder: any(named: 'isFolder'),
+          parentId: any(named: 'parentId'),
+          sizeBytes: any(named: 'sizeBytes')));
+    });
+  });
 }
