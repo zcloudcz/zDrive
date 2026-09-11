@@ -15,6 +15,20 @@ class FileRepositoryImpl implements FileRepository {
   final FileRemoteDataSource _remoteDataSource;
   final FileUploadDataSource _uploadDataSource;
 
+  /// Ids of nodes *this app instance* created via [_remoteDataSource.createFile]
+  /// and then failed to finish uploading into (chunk upload, complete, or
+  /// createFileVersion threw after the node existed). Used by
+  /// [_createOrReuseNode] to decide whether a 409's conflicting node is safe
+  /// to reuse: `manifestHash == null` alone is not enough, since it is also
+  /// true while an upload into that node is still running right now, from
+  /// this device or another (round-3 review finding 1 — reusing on
+  /// `manifestHash == null` alone could silently merge two independent
+  /// uploads). In-memory and per-instance (this class is a `@LazySingleton`)
+  /// on purpose: an app restart clears it, so an orphan from a previous run
+  /// gets the 409 instead of a silent reuse — loud over silent, the rule
+  /// this repo has followed since PR #10.
+  final Set<String> _failedUploadNodeIds = {};
+
   FileRepositoryImpl(this._remoteDataSource, this._uploadDataSource);
 
   @override
@@ -139,34 +153,48 @@ class FileRepositoryImpl implements FileRepository {
     //  3. FileService — record the version, binding the manifest to the file.
     final node = await _createOrReuseNode(parentId, fileName, sizeBytes);
 
-    final complete = await _uploadDataSource.uploadFile(
-      node.id,
-      fileName,
-      content,
-      sizeBytes,
-      onProgress: onProgress,
-    );
+    try {
+      final complete = await _uploadDataSource.uploadFile(
+        node.id,
+        fileName,
+        content,
+        sizeBytes,
+        onProgress: onProgress,
+      );
 
-    await _remoteDataSource.createFileVersion(
-      node.id,
-      blobVersionId: complete.manifestHash,
-      sizeBytes: complete.totalSize,
-      manifestHash: complete.manifestHash,
-    );
+      await _remoteDataSource.createFileVersion(
+        node.id,
+        blobVersionId: complete.manifestHash,
+        sizeBytes: complete.totalSize,
+        manifestHash: complete.manifestHash,
+      );
 
-    return node.id;
+      _failedUploadNodeIds.remove(node.id);
+      return node.id;
+    } catch (_) {
+      // Record the node as ours-and-failed *before* rethrowing, so a
+      // same-instance retry of the same name can recognise and reuse it on
+      // the next 409 (see _createOrReuseNode).
+      _failedUploadNodeIds.add(node.id);
+      rethrow;
+    }
   }
 
   /// Creates the file node for [fileName], or — only when FileService
   /// rejects it as a duplicate (409, CreateFileCommandHandler.cs) — reuses
-  /// the conflicting node, but only if it's an orphan from a previously
-  /// failed upload: [FileDto.manifestHash] null means no upload ever
-  /// completed for it (the chunk upload can die mid-transfer, e.g. the rate
-  /// limiter in dio_client.dart, after createFile already succeeded). A
-  /// conflicting node that already has a manifest is a genuine duplicate —
-  /// the 409 is rethrown unchanged, so the user sees the same "already
-  /// exists" failure as before this reuse logic existed, instead of a silent
-  /// overwrite of someone else's file.
+  /// the conflicting node, but only when both hold:
+  ///  - [FileDto.manifestHash] is null (no upload has completed for it yet),
+  ///    and
+  ///  - its id is in [_failedUploadNodeIds] — this app instance is the one
+  ///    that created it and then failed to finish uploading into it.
+  /// The first check alone is not enough: it is also true while an upload
+  /// into the node is still running right now, from this device or another,
+  /// so reusing on it alone could silently merge two independent uploads
+  /// (round-3 review finding 1). Anything that fails either check is treated
+  /// as a genuine duplicate as far as this instance can tell — the 409 is
+  /// rethrown unchanged, so the user sees the same "already exists" failure
+  /// as before this reuse logic existed, instead of a silent overwrite of
+  /// someone else's file.
   ///
   /// Looking this up only after a 409 (instead of listing children before
   /// every upload) keeps the common case a single request and avoids a
@@ -187,6 +215,7 @@ class FileRepositoryImpl implements FileRepository {
       if (e.response?.statusCode != 409) rethrow;
       final conflicting = await _findExistingFile(parentId, fileName);
       if (conflicting == null || conflicting.manifestHash != null) rethrow;
+      if (!_failedUploadNodeIds.contains(conflicting.id)) rethrow;
       return conflicting;
     }
   }

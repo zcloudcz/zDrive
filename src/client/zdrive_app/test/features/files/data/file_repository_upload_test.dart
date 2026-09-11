@@ -83,8 +83,11 @@ void main() {
   });
 
   test(
-      'uploadFile reuses the conflicting node on a 409 when it is an orphan '
-      '(manifestHash null) from a previously failed upload', () async {
+      'uploadFile surfaces the 409 unchanged when the conflicting node has '
+      'manifestHash null but this instance never created it — e.g. another '
+      'device\'s upload is still running, or an orphan from a previous app '
+      'run (round-3 review finding 1: manifestHash null alone must not '
+      'trigger reuse)', () async {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
@@ -92,19 +95,74 @@ void main() {
           sizeBytes: 10,
         )).thenThrow(conflict409());
     when(() => remote.listChildren(null, page: 1, pageSize: 200)).thenAnswer(
-        (_) async => paged([fileDto('orphan-id', 'report.pdf', manifestHash: null)]));
-    when(() => upload.uploadFile('orphan-id', 'report.pdf', any(), 10,
+        (_) async => paged([fileDto('stranger-id', 'report.pdf', manifestHash: null)]));
+    // Stubbed so that, if the guard under test regresses and reuse happens
+    // anyway, the test fails on a clean "did not throw" assertion instead of
+    // an incidental MissingStubError from an unstubbed downstream mock call.
+    when(() => upload.uploadFile('stranger-id', 'report.pdf', any(), 10,
+            onProgress: any(named: 'onProgress')))
+        .thenAnswer((_) async =>
+            const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-x', totalSize: 10));
+    when(() => remote.createFileVersion('stranger-id',
+        blobVersionId: 'hash-x',
+        sizeBytes: 10,
+        manifestHash: 'hash-x')).thenAnswer((_) async => <String, dynamic>{});
+
+    await expectLater(
+      repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null),
+      throwsA(isA<DioException>()),
+    );
+
+    // Must not touch the node another upload might still be writing into.
+    verifyNever(() => upload.uploadFile(any(), any(), any(), any(),
+        onProgress: any(named: 'onProgress')));
+  });
+
+  test(
+      'uploadFile reuses the conflicting node on a 409 only when this '
+      'instance itself created that exact node and then failed to upload '
+      'into it (round-3 review finding 1: the fix for the case above)',
+      () async {
+    when(() => remote.createFile(
+          name: 'report.pdf',
+          isFolder: false,
+          parentId: null,
+          sizeBytes: 10,
+        )).thenAnswer((_) async => fileDto('retry-id', 'report.pdf'));
+    when(() => upload.uploadFile('retry-id', 'report.pdf', any(), 10,
+            onProgress: any(named: 'onProgress')))
+        .thenThrow(Exception('network dropped mid-transfer'));
+
+    // First attempt: this instance creates 'retry-id' and then fails to
+    // upload into it — that failure is what makes the id eligible for reuse.
+    await expectLater(
+      repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null),
+      throwsException,
+    );
+
+    // Second attempt, same name: createFile 409s against the still-existing
+    // node from attempt 1. Because this instance remembers creating and
+    // failing that exact node, it reuses it instead of surfacing the 409.
+    when(() => remote.createFile(
+          name: 'report.pdf',
+          isFolder: false,
+          parentId: null,
+          sizeBytes: 10,
+        )).thenThrow(conflict409());
+    when(() => remote.listChildren(null, page: 1, pageSize: 200)).thenAnswer(
+        (_) async => paged([fileDto('retry-id', 'report.pdf', manifestHash: null)]));
+    when(() => upload.uploadFile('retry-id', 'report.pdf', any(), 10,
             onProgress: any(named: 'onProgress')))
         .thenAnswer((_) async =>
             const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-2', totalSize: 10));
-    when(() => remote.createFileVersion('orphan-id',
+    when(() => remote.createFileVersion('retry-id',
         blobVersionId: 'hash-2',
         sizeBytes: 10,
         manifestHash: 'hash-2')).thenAnswer((_) async => <String, dynamic>{});
 
     final id = await repository.uploadFile(null, 'report.pdf', const Stream.empty(), 10, null);
 
-    expect(id, 'orphan-id');
+    expect(id, 'retry-id');
   });
 
   test(
