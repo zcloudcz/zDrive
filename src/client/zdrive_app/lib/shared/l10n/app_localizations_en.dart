@@ -206,6 +206,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncNeverSynced => 'Never synced';
 
   @override
+  String get syncChooseFolder => 'Choose sync folder';
+
+  @override
+  String get syncFolderNotConfigured =>
+      'Pick a local folder to start syncing this device.';
+
+  @override
+  String get syncPulling => 'Syncing…';
+
+  @override
+  String get syncDeviceUpToDate => 'This device is up to date.';
+
+  @override
+  String get syncItemsSkipped => 'Some items could not be synced';
+
+  @override
+  String get syncSkippedItems => 'Skipped items';
+
+  @override
+  String get syncFolderNotEmptyTitle => 'Folder is not empty';
+
+  @override
+  String get syncFolderNotEmptyMessage =>
+      'This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.';
+
+  @override
   String get versionHistory => 'Version history';
 
   @override

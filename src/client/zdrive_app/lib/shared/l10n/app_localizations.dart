@@ -488,6 +488,54 @@ abstract class AppLocalizations {
   /// **'Never synced'**
   String get syncNeverSynced;
 
+  /// No description provided for @syncChooseFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose sync folder'**
+  String get syncChooseFolder;
+
+  /// No description provided for @syncFolderNotConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a local folder to start syncing this device.'**
+  String get syncFolderNotConfigured;
+
+  /// No description provided for @syncPulling.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing…'**
+  String get syncPulling;
+
+  /// No description provided for @syncDeviceUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'This device is up to date.'**
+  String get syncDeviceUpToDate;
+
+  /// No description provided for @syncItemsSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'Some items could not be synced'**
+  String get syncItemsSkipped;
+
+  /// No description provided for @syncSkippedItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped items'**
+  String get syncSkippedItems;
+
+  /// No description provided for @syncFolderNotEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder is not empty'**
+  String get syncFolderNotEmptyTitle;
+
+  /// No description provided for @syncFolderNotEmptyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.'**
+  String get syncFolderNotEmptyMessage;
+
   /// No description provided for @versionHistory.
   ///
   /// In en, this message translates to:

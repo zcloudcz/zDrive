@@ -23,12 +23,13 @@ public sealed class RenameFileCommandHandler : IRequestHandler<RenameFileCommand
                 cancellationToken)
             ?? throw new NotFoundException("FileNode", request.FileId);
 
-        // Prevent duplicate names in the same folder.
+        // Prevent duplicate names in the same folder. Case-insensitive —
+        // see CreateFileCommandHandler for why.
         var duplicate = await _db.FileNodes.AnyAsync(f =>
             f.TenantId == request.TenantId
             && f.UserId == request.UserId
             && f.ParentId == node.ParentId
-            && f.Name == request.NewName
+            && f.Name.ToLower() == request.NewName.ToLowerInvariant()
             && f.Id != node.Id
             && !f.IsDeleted,
             cancellationToken);
