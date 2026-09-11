@@ -1,5 +1,6 @@
 import 'package:injectable/injectable.dart';
 
+import '../domain/sync_mirror_repository.dart';
 import 'device_registration_service.dart';
 import 'sync_remote_data_source.dart';
 
@@ -19,14 +20,24 @@ enum SyncChangeType { create, update, delete, move, rename }
 class PushSyncService {
   final SyncRemoteDataSource _syncDataSource;
   final DeviceRegistrationService _deviceRegistration;
+  final SyncMirrorRepository _mirror;
 
-  PushSyncService(this._syncDataSource, this._deviceRegistration);
+  PushSyncService(this._syncDataSource, this._deviceRegistration, this._mirror);
 
   /// Reports one local change for [fileId] to the server.
   Future<void> reportChange(String fileId, SyncChangeType type) async {
     final deviceId = await _deviceRegistration.ensureRegistered();
-    await _syncDataSource.push(deviceId, [
-      {'fileId': fileId, 'eventType': type.index, 'metadata': null},
-    ]);
+    // The pull cursor this device had already applied at the time of the
+    // change — sent as baseCursor so the server can tell "I pushed after
+    // seeing everything up to here" from a push based on stale knowledge
+    // (see SyncRemoteDataSource.push's doc comment).
+    final baseCursor = await _mirror.getCursor(deviceId);
+    await _syncDataSource.push(
+      deviceId,
+      [
+        {'fileId': fileId, 'eventType': type.index, 'metadata': null},
+      ],
+      baseCursor: baseCursor,
+    );
   }
 }
