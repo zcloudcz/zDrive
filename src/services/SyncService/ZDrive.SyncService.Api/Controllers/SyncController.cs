@@ -71,7 +71,7 @@ public sealed class SyncController : ControllerBase
     {
         var userId = User.GetUserId();
         var events = request.Events.Select(e => new PushEventItem(e.FileId, e.EventType, e.Metadata)).ToList();
-        var result = await _mediator.Send(new PushChangesCommand(userId, request.DeviceId, events), ct);
+        var result = await _mediator.Send(new PushChangesCommand(userId, request.DeviceId, events, request.BaseCursor), ct);
         return Ok(ApiResponse<PushResultDto>.Ok(result));
     }
 
@@ -99,7 +99,7 @@ public sealed record RegisterDeviceRequest(string Name, DevicePlatform Platform)
 
 public sealed record PullChangesRequest(Guid DeviceId, long Cursor);
 
-public sealed record PushChangesRequest(Guid DeviceId, List<PushEventItemRequest> Events);
+public sealed record PushChangesRequest(Guid DeviceId, List<PushEventItemRequest> Events, long? BaseCursor = null);
 
 public sealed record PushEventItemRequest(Guid FileId, SyncEventType EventType, string? Metadata);
 

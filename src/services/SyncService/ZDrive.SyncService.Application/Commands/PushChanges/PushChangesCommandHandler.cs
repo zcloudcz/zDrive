@@ -23,6 +23,13 @@ public sealed class PushChangesCommandHandler : IRequestHandler<PushChangesComma
         var conflicts = new List<SyncConflictDto>();
         long newCursor = device.SyncCursor;
 
+        // Pull never advances device.SyncCursor (the client keeps its pull cursor
+        // locally), so device.SyncCursor alone cannot tell what this device has
+        // actually seen. Prefer the cursor the client reports it last pulled and
+        // applied; fall back to device.SyncCursor for callers that don't send it
+        // (old clients, existing tests) to keep their behaviour unchanged.
+        var baseCursor = request.BaseCursor ?? device.SyncCursor;
+
         foreach (var item in request.Events)
         {
             // Detect conflicts: check if another device pushed an event for the same file
@@ -32,7 +39,7 @@ public sealed class PushChangesCommandHandler : IRequestHandler<PushChangesComma
                     e.UserId == request.UserId
                     && e.FileId == item.FileId
                     && e.DeviceId != request.DeviceId
-                    && e.Id > device.SyncCursor)
+                    && e.Id > baseCursor)
                 .OrderByDescending(e => e.Id)
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -45,14 +52,19 @@ public sealed class PushChangesCommandHandler : IRequestHandler<PushChangesComma
                     FileId = item.FileId,
                     LocalDeviceId = request.DeviceId,
                     RemoteDeviceId = conflictingEvent.DeviceId,
-                    LocalVersion = device.SyncCursor,
+                    LocalVersion = baseCursor,
                     RemoteVersion = conflictingEvent.Id,
                     Status = ConflictStatus.Pending
                 };
 
+                // The conflict row stays as an informational record (status Pending,
+                // unchanged) so the conflicts API still reports the overlap -- but per
+                // the last-write-wins product decision, the event itself is NOT dropped.
+                // Falling through to add the SyncEvent below is what makes this device's
+                // change visible to other devices; the other device's earlier change
+                // stays reachable through FileService's version history.
                 _db.SyncConflicts.Add(conflict);
                 conflicts.Add(conflict.ToDto());
-                continue;
             }
 
             var syncEvent = new SyncEvent
@@ -78,6 +90,9 @@ public sealed class PushChangesCommandHandler : IRequestHandler<PushChangesComma
 
         newCursor = latestEventId;
 
+        // Kept as-is: device.SyncCursor is now only the fallback used above for
+        // callers that don't send baseCursor -- clients that do send it track their
+        // own pull cursor and don't rely on this field.
         device.SyncCursor = newCursor;
         device.LastSyncAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);

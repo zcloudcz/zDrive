@@ -131,6 +131,144 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
     }
 
     [Fact]
+    public async Task PushChanges_ConflictingEvent_StillRecordedForOtherDevices()
+    {
+        // Register two devices
+        var deviceAResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "LWW-A",
+            platform = (int)DevicePlatform.Windows
+        });
+        var deviceA = (await deviceAResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        var deviceBResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "LWW-B",
+            platform = (int)DevicePlatform.MacOS
+        });
+        var deviceB = (await deviceBResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        var fileId = Guid.NewGuid();
+
+        // Device A pushes an update
+        await _client.PostAsJsonAsync("/api/v1/sync/push", new
+        {
+            deviceId = deviceA.Id,
+            events = new[] { new { fileId, eventType = (int)SyncEventType.Update, metadata = (string?)null } }
+        });
+
+        // Device B pushes an update on the same file without having pulled first -- conflicts,
+        // but last-write-wins means the event must still be recorded, not dropped.
+        var conflictPush = await _client.PostAsJsonAsync("/api/v1/sync/push", new
+        {
+            deviceId = deviceB.Id,
+            events = new[] { new { fileId, eventType = (int)SyncEventType.Update, metadata = (string?)null } }
+        });
+        var pushResult = (await conflictPush.Content.ReadFromJsonAsync<ApiResponse<PushResultDto>>())!.Data!;
+        pushResult.Conflicts.Should().NotBeEmpty();
+
+        // Device A pulls from cursor 0 and must see device B's event -- proof it wasn't dropped.
+        var pullResp = await _client.PostAsJsonAsync("/api/v1/sync/pull", new
+        {
+            deviceId = deviceA.Id,
+            cursor = 0L
+        });
+        var pullResult = (await pullResp.Content.ReadFromJsonAsync<ApiResponse<PullResultDto>>())!.Data!;
+        pullResult.Events.Should().Contain(e => e.FileId == fileId && e.DeviceId == deviceB.Id);
+    }
+
+    [Fact]
+    public async Task PushChanges_BaseCursorAtOrAfterOtherDevicesEvent_NoConflict()
+    {
+        var deviceAResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "BaseCursor-NoConflict-A",
+            platform = (int)DevicePlatform.Windows
+        });
+        var deviceA = (await deviceAResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        var deviceBResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "BaseCursor-NoConflict-B",
+            platform = (int)DevicePlatform.MacOS
+        });
+        var deviceB = (await deviceBResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        var fileId = Guid.NewGuid();
+
+        // Device A pushes an update
+        await _client.PostAsJsonAsync("/api/v1/sync/push", new
+        {
+            deviceId = deviceA.Id,
+            events = new[] { new { fileId, eventType = (int)SyncEventType.Update, metadata = (string?)null } }
+        });
+
+        // Device B pulls first, so it has actually seen device A's event.
+        var pullResp = await _client.PostAsJsonAsync("/api/v1/sync/pull", new
+        {
+            deviceId = deviceB.Id,
+            cursor = 0L
+        });
+        var pullResult = (await pullResp.Content.ReadFromJsonAsync<ApiResponse<PullResultDto>>())!.Data!;
+
+        // Device B pushes with baseCursor at the cursor it just pulled -- no conflict.
+        var pushResp = await _client.PostAsJsonAsync("/api/v1/sync/push", new
+        {
+            deviceId = deviceB.Id,
+            events = new[] { new { fileId, eventType = (int)SyncEventType.Update, metadata = (string?)null } },
+            baseCursor = pullResult.NewCursor
+        });
+        var pushResult = (await pushResp.Content.ReadFromJsonAsync<ApiResponse<PushResultDto>>())!.Data!;
+        pushResult.Conflicts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PushChanges_BaseCursorBeforeOtherDevicesEvent_Conflict()
+    {
+        var deviceAResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "BaseCursor-Conflict-A",
+            platform = (int)DevicePlatform.Windows
+        });
+        var deviceA = (await deviceAResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        var deviceBResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "BaseCursor-Conflict-B",
+            platform = (int)DevicePlatform.MacOS
+        });
+        var deviceB = (await deviceBResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        var fileId = Guid.NewGuid();
+
+        // Device A pushes an update
+        await _client.PostAsJsonAsync("/api/v1/sync/push", new
+        {
+            deviceId = deviceA.Id,
+            events = new[] { new { fileId, eventType = (int)SyncEventType.Update, metadata = (string?)null } }
+        });
+
+        // Device B pushes with baseCursor explicitly 0 -- it never pulled A's event -> conflict.
+        var conflictPush = await _client.PostAsJsonAsync("/api/v1/sync/push", new
+        {
+            deviceId = deviceB.Id,
+            events = new[] { new { fileId, eventType = (int)SyncEventType.Update, metadata = (string?)null } },
+            baseCursor = 0L
+        });
+        var pushResult = (await conflictPush.Content.ReadFromJsonAsync<ApiResponse<PushResultDto>>())!.Data!;
+        pushResult.Conflicts.Should().NotBeEmpty();
+
+        // Device A pulls from cursor 0 and must see device B's event -- last-write-wins, not dropped.
+        var pullResp = await _client.PostAsJsonAsync("/api/v1/sync/pull", new
+        {
+            deviceId = deviceA.Id,
+            cursor = 0L
+        });
+        var pullResult = (await pullResp.Content.ReadFromJsonAsync<ApiResponse<PullResultDto>>())!.Data!;
+        pullResult.Events.Should().Contain(e => e.FileId == fileId && e.DeviceId == deviceB.Id);
+    }
+
+    [Fact]
     public async Task ResolveConflict_StatusUpdated()
     {
         // Register two devices and create a conflict

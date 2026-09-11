@@ -7,7 +7,8 @@ namespace ZDrive.SyncService.Application.Commands.PushChanges;
 public sealed record PushChangesCommand(
     Guid UserId,
     Guid DeviceId,
-    List<PushEventItem> Events) : IRequest<PushResultDto>;
+    List<PushEventItem> Events,
+    long? BaseCursor = null) : IRequest<PushResultDto>;
 
 public sealed record PushEventItem(
     Guid FileId,
