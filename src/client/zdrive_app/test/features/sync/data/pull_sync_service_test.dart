@@ -1177,6 +1177,9 @@ void main() {
               syncedAt: now,
             ),
           ]);
+      // Stubbed for any id so that, if the guard ever regresses, the test
+      // fails on the file it protects rather than on an unstubbed mock.
+      when(() => mockMirror.deleteByServerId(any())).thenAnswer((_) async {});
 
       await service.pullOnce(tempDir.path);
 
@@ -1225,7 +1228,9 @@ void main() {
               syncedAt: now,
             ),
           ]);
-      when(() => mockMirror.deleteByServerId('tracked-file-5')).thenAnswer((_) async {});
+      // Stubbed for any id so that, if the guard ever regresses, the test
+      // fails on the file it protects rather than on an unstubbed mock.
+      when(() => mockMirror.deleteByServerId(any())).thenAnswer((_) async {});
 
       await service.pullOnce(tempDir.path);
 
@@ -1272,7 +1277,9 @@ void main() {
               syncedAt: now,
             ),
           ]);
-      when(() => mockMirror.deleteByServerId('tracked-file-6')).thenAnswer((_) async {});
+      // Stubbed for any id so that, if the guard ever regresses, the test
+      // fails on the file it protects rather than on an unstubbed mock.
+      when(() => mockMirror.deleteByServerId(any())).thenAnswer((_) async {});
 
       await service.pullOnce(tempDir.path);
 
