@@ -166,45 +166,14 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   @override
   Future<void> rePathChildren(String oldPrefix, String newPrefix) async {
     final db = await _database;
-    // A LIKE query would need to escape '%'/'_' in the prefix (a legal
-    // filename character on both platforms), so this scans and filters in
-    // Dart instead — fine for a local per-user mirror table.
-    //
-    // oldPrefix already ends with the separator when the sync folder is a
-    // filesystem root ("C:\", "/") — appending another would build a
-    // prefix no stored path can ever start with, so every row under it
-    // silently stops matching (PR #12 review, F7). `prefix.length` (not
-    // oldPrefix.length) is used below for the same reason: it is the one
-    // guaranteed to strip exactly one separator regardless of whether
-    // oldPrefix already had one.
-    final prefix =
-        oldPrefix.endsWith(Platform.pathSeparator) ? oldPrefix : '$oldPrefix${Platform.pathSeparator}';
-    final rows = await db.query(_filesTable);
-    final batch = db.batch();
-    for (final row in rows) {
-      final path = row['localPath'] as String;
-      if (path.startsWith(prefix)) {
-        batch.update(
-          _filesTable,
-          {'localPath': p.join(newPrefix, path.substring(prefix.length))},
-          where: 'serverId = ?',
-          whereArgs: [row['serverId']],
-        );
-      }
-    }
-    await batch.commit(noResult: true);
+    await _rePathChildren(db, oldPrefix, newPrefix);
   }
 
   @override
   Future<List<SyncMirrorEntry>> getChildrenUnder(String dirPath) async {
     final db = await _database;
-    // Same scan-and-filter approach as rePathChildren, and for the same
-    // reason: a LIKE query would need to escape '%'/'_' in the prefix. See
-    // rePathChildren's doc comment for why a root path (already ending
-    // with the separator) must not get a second one appended (F7).
-    final prefix = dirPath.endsWith(Platform.pathSeparator) ? dirPath : '$dirPath${Platform.pathSeparator}';
-    final rows = await db.query(_filesTable);
-    return rows.map(_fromRow).where((entry) => entry.localPath.startsWith(prefix)).toList();
+    final rows = await _rowsUnder(db, dirPath);
+    return rows.map(_fromRow).toList();
   }
 
   @override
@@ -275,7 +244,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     // out of the transaction makes a rolled-back write stick).
     await db.transaction((txn) async {
       if (rePath != null) {
-        await _rePathChildrenTxn(txn, rePath.from, rePath.to);
+        await _rePathChildren(txn, rePath.from, rePath.to);
       }
       for (final entry in upserts) {
         await txn.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
@@ -284,7 +253,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
         await txn.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
       }
       if (deleteUnderPath != null) {
-        await _deleteChildrenTxn(txn, deleteUnderPath);
+        await _deleteChildren(txn, deleteUnderPath);
       }
       for (final item in enqueue) {
         await txn.insert(_outboxTable, {
@@ -297,35 +266,51 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     });
   }
 
-  // Same scan-and-filter approach as rePathChildren/getChildrenUnder above
-  // (a LIKE query would need to escape '%'/'_'), duplicated here rather than
-  // shared because these run against a Transaction, not the Database — see
-  // that pair's doc comments for the root-prefix double-separator rule (F7)
-  // this also has to honour.
-  Future<void> _rePathChildrenTxn(Transaction txn, String oldPrefix, String newPrefix) async {
-    final prefix = oldPrefix.endsWith(Platform.pathSeparator) ? oldPrefix : '$oldPrefix${Platform.pathSeparator}';
-    final rows = await txn.query(_filesTable);
+  // oldPrefix/dirPath already ends with the separator when the sync folder
+  // is a filesystem root ("C:\", "/") — appending another would build a
+  // prefix no stored path can ever start with, so every row under it
+  // silently stops matching (PR #12 review, F7). The one place this rule
+  // lives (PR #14 review round 4, R4-5) — every prefix-based query below
+  // goes through this instead of repeating it.
+  String _childPrefix(String dirPath) =>
+      dirPath.endsWith(Platform.pathSeparator) ? dirPath : '$dirPath${Platform.pathSeparator}';
+
+  // Scan-and-filter, not a LIKE query — a LIKE pattern would need to escape
+  // '%'/'_' in the prefix (both legal filename characters), fine for a local
+  // per-user mirror table. Takes a [DatabaseExecutor] rather than [Database]
+  // or [Transaction] specifically, since both implement it (PR #14 review
+  // round 4, R4-5) — shared by [getChildrenUnder] (outside any transaction)
+  // and [commit]'s deleteUnderPath handling (inside one).
+  Future<List<Map<String, Object?>>> _rowsUnder(DatabaseExecutor executor, String dirPath) async {
+    final prefix = _childPrefix(dirPath);
+    final rows = await executor.query(_filesTable);
+    return rows.where((row) => (row['localPath'] as String).startsWith(prefix)).toList();
+  }
+
+  // Shared by the public rePathChildren (outside any transaction) and
+  // commit's rePath handling (inside one) — see _rowsUnder's doc comment for
+  // why a DatabaseExecutor rather than one specific type.
+  Future<void> _rePathChildren(DatabaseExecutor executor, String oldPrefix, String newPrefix) async {
+    final prefix = _childPrefix(oldPrefix);
+    final rows = await _rowsUnder(executor, oldPrefix);
     for (final row in rows) {
       final path = row['localPath'] as String;
-      if (path.startsWith(prefix)) {
-        await txn.update(
-          _filesTable,
-          {'localPath': p.join(newPrefix, path.substring(prefix.length))},
-          where: 'serverId = ?',
-          whereArgs: [row['serverId']],
-        );
-      }
+      await executor.update(
+        _filesTable,
+        {'localPath': p.join(newPrefix, path.substring(prefix.length))},
+        where: 'serverId = ?',
+        whereArgs: [row['serverId']],
+      );
     }
   }
 
-  Future<void> _deleteChildrenTxn(Transaction txn, String dirPath) async {
-    final prefix = dirPath.endsWith(Platform.pathSeparator) ? dirPath : '$dirPath${Platform.pathSeparator}';
-    final rows = await txn.query(_filesTable);
+  // Only used from commit's deleteUnderPath handling (inside a transaction)
+  // today, but takes a DatabaseExecutor for the same reason as _rowsUnder
+  // and _rePathChildren above rather than being pinned to Transaction.
+  Future<void> _deleteChildren(DatabaseExecutor executor, String dirPath) async {
+    final rows = await _rowsUnder(executor, dirPath);
     for (final row in rows) {
-      final path = row['localPath'] as String;
-      if (path.startsWith(prefix)) {
-        await txn.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
-      }
+      await executor.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
     }
   }
 
