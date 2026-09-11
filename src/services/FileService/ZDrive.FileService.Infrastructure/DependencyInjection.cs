@@ -19,9 +19,8 @@ public static class DependencyInjection
         IConfiguration configuration,
         bool isDevelopment)
     {
-        // Change feed: origin resolver (X-Device-Id) and clock, both consumed
-        // by FileChangeInterceptor below and by the feed query handler.
-        services.AddSingleton(TimeProvider.System);
+        // Change feed: origin resolver (X-Device-Id), consumed by
+        // FileChangeInterceptor below to tag rows with their writing device.
         services.AddSingleton<IChangeOrigin, HttpContextChangeOrigin>();
         services.AddSingleton<FileChangeInterceptor>();
 

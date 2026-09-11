@@ -16,12 +16,10 @@ namespace ZDrive.FileService.Infrastructure.Persistence.Interceptors;
 public sealed class FileChangeInterceptor : SaveChangesInterceptor
 {
     private readonly IChangeOrigin _changeOrigin;
-    private readonly TimeProvider _timeProvider;
 
-    public FileChangeInterceptor(IChangeOrigin changeOrigin, TimeProvider timeProvider)
+    public FileChangeInterceptor(IChangeOrigin changeOrigin)
     {
         _changeOrigin = changeOrigin;
-        _timeProvider = timeProvider;
     }
 
     public override InterceptionResult<int> SavingChanges(
@@ -44,7 +42,6 @@ public sealed class FileChangeInterceptor : SaveChangesInterceptor
             return;
 
         var originDeviceId = _changeOrigin.DeviceId;
-        var occurredAt = _timeProvider.GetUtcNow().UtcDateTime;
 
         // Materialised first: AddChange adds FileChange entities to the same
         // change tracker, and adding entries while enumerating it can throw
@@ -56,7 +53,7 @@ public sealed class FileChangeInterceptor : SaveChangesInterceptor
             switch (entry.State)
             {
                 case EntityState.Added:
-                    AddChange(context, node, FileChangeType.Create, originDeviceId, occurredAt);
+                    AddChange(context, node, FileChangeType.Create, originDeviceId);
                     break;
 
                 case EntityState.Modified:
@@ -69,18 +66,18 @@ public sealed class FileChangeInterceptor : SaveChangesInterceptor
                         // restore already tells the other side everything it
                         // needs, a Move on top would be redundant noise.
                         var becameDeleted = (bool)isDeleted.CurrentValue!;
-                        AddChange(context, node, becameDeleted ? FileChangeType.Delete : FileChangeType.Create, originDeviceId, occurredAt);
+                        AddChange(context, node, becameDeleted ? FileChangeType.Delete : FileChangeType.Create, originDeviceId);
                         break;
                     }
 
                     if (entry.Property(f => f.ParentId).IsModified)
-                        AddChange(context, node, FileChangeType.Move, originDeviceId, occurredAt);
+                        AddChange(context, node, FileChangeType.Move, originDeviceId);
 
                     if (entry.Property(f => f.Name).IsModified)
-                        AddChange(context, node, FileChangeType.Rename, originDeviceId, occurredAt);
+                        AddChange(context, node, FileChangeType.Rename, originDeviceId);
 
                     if (entry.Property(f => f.ManifestHash).IsModified || entry.Property(f => f.SizeBytes).IsModified)
-                        AddChange(context, node, FileChangeType.Update, originDeviceId, occurredAt);
+                        AddChange(context, node, FileChangeType.Update, originDeviceId);
                     break;
 
                 case EntityState.Deleted:
@@ -91,17 +88,17 @@ public sealed class FileChangeInterceptor : SaveChangesInterceptor
         }
     }
 
-    private static void AddChange(
-        DbContext context, FileNode node, FileChangeType type, Guid? originDeviceId, DateTime occurredAt)
+    private static void AddChange(DbContext context, FileNode node, FileChangeType type, Guid? originDeviceId)
     {
+        // OccurredAt is left unset: the column's clock_timestamp() DB default
+        // stamps it, not this process's clock (see FileChangeConfiguration).
         context.Set<FileChange>().Add(new FileChange
         {
             TenantId = node.TenantId,
             UserId = node.UserId,
             FileId = node.Id,
             Type = type,
-            OriginDeviceId = originDeviceId,
-            OccurredAt = occurredAt
+            OriginDeviceId = originDeviceId
         });
     }
 }

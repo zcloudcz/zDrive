@@ -17,5 +17,9 @@ public sealed class FileChange
     public Guid FileId { get; set; }
     public FileChangeType Type { get; set; }
     public Guid? OriginDeviceId { get; set; }
-    public DateTime OccurredAt { get; set; } = DateTime.UtcNow;
+    // No C# default here: a non-default CLR value would make EF send it
+    // explicitly instead of letting the DB default (clock_timestamp()) apply.
+    // Stamping must come from the one DB clock, not the app process's own
+    // clock — see FileChangeConfiguration and the ADR's hold-back section.
+    public DateTime OccurredAt { get; set; }
 }

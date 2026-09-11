@@ -33,11 +33,6 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     public Guid TestUserId { get; } = Guid.NewGuid();
     public Guid TestTenantId { get; } = Guid.NewGuid();
 
-    // Shared by FileChangeInterceptor (stamps FileChange.OccurredAt) and
-    // GetFileChangesQueryHandler (computes the hold-back cutoff) — both
-    // resolve TimeProvider from DI, so this single instance drives both.
-    public ManualTimeProvider TimeProvider { get; } = new();
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
@@ -77,13 +72,6 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
                         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
                     .UseSnakeCaseNamingConvention()
                     .AddInterceptors(sp.GetRequiredService<ZDrive.FileService.Infrastructure.Persistence.Interceptors.FileChangeInterceptor>()));
-
-            // Replace the real clock with a manually-advanceable one so tests
-            // can exercise the change feed's 5-second hold-back deterministically.
-            var timeProviderDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(TimeProvider));
-            if (timeProviderDescriptor is not null)
-                services.Remove(timeProviderDescriptor);
-            services.AddSingleton<TimeProvider>(TimeProvider);
         });
     }
 

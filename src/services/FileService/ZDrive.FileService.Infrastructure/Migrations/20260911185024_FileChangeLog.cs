@@ -24,7 +24,7 @@ namespace ZDrive.FileService.Infrastructure.Migrations
                     file_id = table.Column<Guid>(type: "uuid", nullable: false),
                     type = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     origin_device_id = table.Column<Guid>(type: "uuid", nullable: true),
-                    occurred_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now() at time zone 'utc'")
+                    occurred_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "clock_timestamp()")
                 },
                 constraints: table =>
                 {

@@ -44,7 +44,7 @@ namespace ZDrive.FileService.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("occurred_at")
-                        .HasDefaultValueSql("now() at time zone 'utc'");
+                        .HasDefaultValueSql("clock_timestamp()");
 
                     b.Property<Guid?>("OriginDeviceId")
                         .HasColumnType("uuid")

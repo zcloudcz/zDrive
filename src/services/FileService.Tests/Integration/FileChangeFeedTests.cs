@@ -1,8 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using ZDrive.FileService.Application.DTOs;
+using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.Shared.DTOs;
 
 namespace ZDrive.FileService.Tests.Integration;
@@ -11,16 +14,16 @@ namespace ZDrive.FileService.Tests.Integration;
 /// Server-side change feed (docs/adr/0001-server-side-file-change-log.md):
 /// FileChangeInterceptor writes a FileChange row in the same SaveChanges
 /// call as every FileNode mutation, and GetFileChangesQuery serves them as a
-/// cursor-paged feed. All tests advance the factory's ManualTimeProvider by
-/// more than 5 seconds after making a change — the feed withholds anything
-/// younger than that (commit-order hold-back), so nothing would be visible
-/// otherwise.
+/// cursor-paged feed. OccurredAt is stamped by the database's own
+/// clock_timestamp() (FileChangeConfiguration), not by application code, so
+/// tests age a row past the 5-second hold-back with a raw SQL UPDATE against
+/// the real column instead of a fake clock — that is the only way to
+/// reproduce the commit-order skip bug (B1) the hold-back exists to close:
+/// two rows need INDEPENDENT ages, which a single shared clock cannot give.
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
 {
-    private static readonly TimeSpan HoldBack = TimeSpan.FromSeconds(5);
-
     private readonly FileServiceFactory _factory;
     private readonly HttpClient _client;
 
@@ -36,7 +39,7 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
         var baseline = await GetLatestCursorAsync();
 
         var file = await CreateFileAsync("change-create.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Create");
@@ -48,7 +51,7 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
         var baseline = await GetLatestCursorAsync();
 
         var folder = await CreateFileAsync("change-create-folder", isFolder: true);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == folder.Id && c.Type == "Create");
@@ -57,14 +60,15 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task RenameFile_ProducesRenameChange()
     {
+        var beforeCreate = await GetLatestCursorAsync();
         var file = await CreateFileAsync("change-rename-old.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(beforeCreate);
         var baseline = await GetLatestCursorAsync();
 
         var renameResponse = await _client.PutAsJsonAsync(
             $"/api/v1/files/{file.Id}/rename", new { newName = "change-rename-new.txt" });
         renameResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Rename");
@@ -73,15 +77,16 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task MoveFile_ProducesMoveChange()
     {
+        var beforeCreate = await GetLatestCursorAsync();
         var folder = await CreateFileAsync("change-move-target", isFolder: true);
         var file = await CreateFileAsync("change-move-me.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(beforeCreate);
         var baseline = await GetLatestCursorAsync();
 
         var moveResponse = await _client.PutAsJsonAsync(
             $"/api/v1/files/{file.Id}/move", new { newParentId = folder.Id });
         moveResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Move");
@@ -90,13 +95,14 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task DeleteFile_ProducesDeleteChange()
     {
+        var beforeCreate = await GetLatestCursorAsync();
         var file = await CreateFileAsync("change-delete-me.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(beforeCreate);
         var baseline = await GetLatestCursorAsync();
 
         var deleteResponse = await _client.DeleteAsync($"/api/v1/files/{file.Id}");
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Delete");
@@ -105,14 +111,15 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task DeleteFolder_ProducesDeleteChangeForFolderAndEachDescendant()
     {
+        var beforeCreate = await GetLatestCursorAsync();
         var folder = await CreateFileAsync("change-delete-folder", isFolder: true);
         var child = await CreateFileAsync("change-delete-child.txt", parentId: folder.Id);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(beforeCreate);
         var baseline = await GetLatestCursorAsync();
 
         var deleteResponse = await _client.DeleteAsync($"/api/v1/files/{folder.Id}");
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().Contain(c => c.FileId == folder.Id && c.Type == "Delete");
@@ -122,14 +129,15 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task RestoreFile_ProducesCreateChange()
     {
+        var beforeCreate = await GetLatestCursorAsync();
         var file = await CreateFileAsync("change-restore-me.txt");
         await _client.DeleteAsync($"/api/v1/files/{file.Id}");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(beforeCreate);
         var baseline = await GetLatestCursorAsync();
 
         var restoreResponse = await _client.PostAsync($"/api/v1/files/{file.Id}/restore", null);
         restoreResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Create");
@@ -138,8 +146,9 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     [Fact]
     public async Task CreateFileVersion_ProducesUpdateChange()
     {
+        var beforeCreate = await GetLatestCursorAsync();
         var file = await CreateFileAsync("change-version-me.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(beforeCreate);
         var baseline = await GetLatestCursorAsync();
 
         var versionResponse = await _client.PostAsJsonAsync($"/api/v1/files/{file.Id}/versions", new
@@ -148,7 +157,7 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
             sizeBytes = 42L
         });
         versionResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
         changes.Changes.Should().ContainSingle(c => c.FileId == file.Id && c.Type == "Update");
@@ -164,13 +173,38 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
         var fromOwnDevice = await CreateFileAsync("change-origin-own.txt", deviceId: ownDevice);
         var fromOtherDevice = await CreateFileAsync("change-origin-other.txt", deviceId: otherDevice);
         var withNoOrigin = await CreateFileAsync("change-origin-none.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline, deviceId: ownDevice);
 
         changes.Changes.Should().NotContain(c => c.FileId == fromOwnDevice.Id);
         changes.Changes.Should().Contain(c => c.FileId == fromOtherDevice.Id);
         changes.Changes.Should().Contain(c => c.FileId == withNoOrigin.Id);
+    }
+
+    [Fact]
+    public async Task GetChanges_AllRemainingRowsAreOwnDevice_StillAdvancesCursor()
+    {
+        // Review finding B2: the origin filter used to run before the cursor
+        // was fixed, so a page that turned out empty (everything left was
+        // this device's own write) echoed the request cursor back — the
+        // device would re-scan the same growing own-origin tail forever.
+        // Excluding a row must not stop it from moving the cursor.
+        var baseline = await GetLatestCursorAsync();
+        var device = Guid.NewGuid();
+
+        await CreateFileAsync("change-own-device-only.txt", deviceId: device);
+        await AgeSinceAsync(baseline);
+        var expectedCursor = await GetLatestCursorAsync();
+
+        var page = await GetChangesAsync(baseline, deviceId: device);
+        page.Changes.Should().BeEmpty();
+        page.NextCursor.Should().Be(expectedCursor);
+
+        // A second poll from that cursor must not re-read the same row.
+        var secondPage = await GetChangesAsync(page.NextCursor, deviceId: device);
+        secondPage.Changes.Should().BeEmpty();
+        secondPage.NextCursor.Should().Be(page.NextCursor);
     }
 
     [Fact]
@@ -188,7 +222,7 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
         var strangerFile = (await strangerFileResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
 
         var myFile = await CreateFileAsync("change-mine.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var changes = await GetChangesAsync(baseline);
 
@@ -203,7 +237,7 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
 
         for (var i = 0; i < 5; i++)
             await CreateFileAsync($"change-page-{Guid.NewGuid()}.txt");
-        AdvancePastHoldBack();
+        await AgeSinceAsync(baseline);
 
         var firstPage = await GetChangesAsync(baseline, limit: 2);
         firstPage.Changes.Should().HaveCount(2);
@@ -227,38 +261,83 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
     }
 
     [Fact]
-    public async Task GetChanges_WithinHoldBackWindow_ExcludedUntilClockAdvancesPastFiveSeconds()
+    public async Task GetChanges_ChangeWithinHoldBackWindow_ExcludedUntilAgedPastFiveSeconds()
     {
         var baseline = await GetLatestCursorAsync();
 
         var file = await CreateFileAsync("change-holdback.txt");
 
-        // Not advanced yet: the change is younger than the 5s hold-back.
+        // Freshly inserted: clock_timestamp() stamped it "now", still within
+        // the 5s hold-back — nothing to see yet, cursor stays put.
         var tooSoon = await GetChangesAsync(baseline);
-        tooSoon.Changes.Should().NotContain(c => c.FileId == file.Id);
+        tooSoon.Changes.Should().BeEmpty();
+        tooSoon.NextCursor.Should().Be(baseline);
 
-        // Still short of the window.
-        _factory.TimeProvider.Advance(TimeSpan.FromSeconds(4));
-        var stillTooSoon = await GetChangesAsync(baseline);
-        stillTooSoon.Changes.Should().NotContain(c => c.FileId == file.Id);
-
-        // Past 5s total: now visible.
-        _factory.TimeProvider.Advance(TimeSpan.FromSeconds(2));
-        var afterHoldBack = await GetChangesAsync(baseline);
-        afterHoldBack.Changes.Should().Contain(c => c.FileId == file.Id);
+        // Age it past the window with a real UPDATE against the DB clock's
+        // own column — not a fake app-level clock — and it becomes visible.
+        await AgeSinceAsync(baseline);
+        var afterAging = await GetChangesAsync(baseline);
+        afterAging.Changes.Should().ContainSingle(c => c.FileId == file.Id);
     }
 
-    private void AdvancePastHoldBack() => _factory.TimeProvider.Advance(HoldBack + TimeSpan.FromSeconds(1));
+    [Fact]
+    public async Task GetChanges_OlderRowNotYetAged_IsNotSkippedByAYoungerHigherIdRow()
+    {
+        // Reproduces review finding B1: a per-row time filter lets a
+        // higher-id row through while holding back a lower-id row that is
+        // still "too young", and advances the cursor past the lower-id row
+        // forever once its own age would otherwise have made it visible. The
+        // fix holds back everything from the first too-young row onward —
+        // a prefix of the id order, not a per-row filter.
+        var baseline = await GetLatestCursorAsync();
+
+        var changeA = await CreateFileAsync("change-order-a.txt"); // lower id, inserted first
+        var changeB = await CreateFileAsync("change-order-b.txt"); // higher id, inserted second
+
+        // Age only B: simulates A's transaction still being "slow" (not yet
+        // aged past the hold-back) while B's has already aged past it.
+        await AgeChangeAsync(changeB.Id);
+
+        var page = await GetChangesAsync(baseline);
+        page.Changes.Should().BeEmpty();
+        page.NextCursor.Should().Be(baseline);
+
+        // Now age A too: both become visible, still in id order.
+        await AgeChangeAsync(changeA.Id);
+        var afterAgingBoth = await GetChangesAsync(baseline);
+        afterAgingBoth.Changes.Select(c => c.FileId).Should().Equal(changeA.Id, changeB.Id);
+    }
 
     private async Task<long> GetLatestCursorAsync()
     {
-        // Earlier tests in this class already advanced the clock well past
-        // their own changes' hold-back window, so a full drain from 0 with a
+        // Earlier tests in this class already age every row they create
+        // before making their own assertions, so a full drain from 0 with a
         // generous limit reliably finds the current high-water mark.
         var page = await GetChangesAsync(cursor: 0, limit: 1000);
         while (page.HasMore)
             page = await GetChangesAsync(cursor: page.NextCursor, limit: 1000);
         return page.NextCursor;
+    }
+
+    /// <summary>
+    /// Moves every change row inserted after <paramref name="sinceCursor"/>
+    /// (i.e. this test's own rows) past the 5-second hold-back, by rewriting
+    /// occurred_at directly through a raw SQL UPDATE. OccurredAt now comes
+    /// from the database's clock_timestamp() default (FileChangeConfiguration),
+    /// not from application code, so there is no in-process clock left to fake.
+    /// </summary>
+    private Task AgeSinceAsync(long sinceCursor) =>
+        ExecuteSqlAsync($"UPDATE files.file_changes SET occurred_at = occurred_at - interval '6 seconds' WHERE id > {sinceCursor}");
+
+    /// <summary>Ages only the change row(s) for one file — lets a test control two rows' ages independently.</summary>
+    private Task AgeChangeAsync(Guid fileId) =>
+        ExecuteSqlAsync($"UPDATE files.file_changes SET occurred_at = occurred_at - interval '6 seconds' WHERE file_id = {fileId}");
+
+    private async Task ExecuteSqlAsync(FormattableString sql)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FileDbContext>();
+        await db.Database.ExecuteSqlInterpolatedAsync(sql);
     }
 
     private async Task<FileDto> CreateFileAsync(
