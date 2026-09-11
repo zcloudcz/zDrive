@@ -40,12 +40,14 @@ void main() {
   });
 
   testWidgets(
-      'the sync provider is eager: LoadSyncStatus is handled without any '
-      'descendant ever reading the bloc (F1) — proves lazy: false, not the '
-      'default lazy: true a widget-triggered read would also satisfy',
+      'syncSupported: true builds the sync provider eagerly: LoadSyncStatus '
+      'is handled without any descendant ever reading the bloc (F1) — '
+      'proves lazy: false, not the default lazy: true a widget-triggered '
+      'read would also satisfy',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: buildSyncShellProvider(
+        syncSupported: true,
         createBloc: () => SyncBloc(
           dataSource: mockDataSource,
           syncCoordinator: mockSyncCoordinator,
@@ -64,5 +66,37 @@ void main() {
 
     verify(() => mockSyncCoordinator.startSession('user-1')).called(1);
     verify(() => mockDataSource.getDevices()).called(1);
+  });
+
+  testWidgets(
+      'syncSupported: false never calls createBloc at all — desktop sync '
+      '(and, through it, SyncCoordinator/PullSyncService/'
+      'LocalChangeScanner, whose constructors read Platform.isWindows) '
+      'must never be built for web or mobile (PR #16 review round 2, '
+      'blocking finding 1)',
+      (tester) async {
+    var createBlocCalled = false;
+
+    await tester.pumpWidget(MaterialApp(
+      home: buildSyncShellProvider(
+        syncSupported: false,
+        createBloc: () {
+          createBlocCalled = true;
+          return SyncBloc(
+            dataSource: mockDataSource,
+            syncCoordinator: mockSyncCoordinator,
+            pullService: mockPullService,
+            preferences: mockPreferences,
+            userId: 'user-1',
+          );
+        },
+        child: const SizedBox(),
+      ),
+    ));
+    await tester.pump();
+
+    expect(createBlocCalled, isFalse);
+    verifyZeroInteractions(mockSyncCoordinator);
+    verifyZeroInteractions(mockDataSource);
   });
 }

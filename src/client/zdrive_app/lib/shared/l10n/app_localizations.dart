@@ -530,6 +530,12 @@ abstract class AppLocalizations {
   /// **'This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.'**
   String get syncFolderNotEmptyMessage;
 
+  /// No description provided for @syncUnsupportedPlatform.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync is available in the Windows and macOS app'**
+  String get syncUnsupportedPlatform;
+
   /// No description provided for @versionHistory.
   ///
   /// In en, this message translates to:

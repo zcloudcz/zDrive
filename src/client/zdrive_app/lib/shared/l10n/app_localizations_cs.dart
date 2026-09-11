@@ -230,6 +230,10 @@ class AppLocalizationsCs extends AppLocalizations {
       'Tato složka už obsahuje soubory. Synchronizace nic z toho, co v ní není z jejího vlastního zásahu, nepřepíše — kolidující soubory zůstanou beze změny a zobrazí se jako přeskočené.';
 
   @override
+  String get syncUnsupportedPlatform =>
+      'Synchronizace je k dispozici v aplikaci pro Windows a macOS';
+
+  @override
   String get versionHistory => 'Historie verzí';
 
   @override

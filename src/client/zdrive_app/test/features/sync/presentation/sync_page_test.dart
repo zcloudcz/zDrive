@@ -110,6 +110,29 @@ void main() {
       expect(find.text('Laptop'), findsOneWidget);
     });
 
+    testWidgets(
+        'shows the unsupported-platform message instead of reading the '
+        'bloc when no ancestor SyncBloc is provided — the state on web and '
+        'mobile, where app_router.dart never provides one (PR #16 review '
+        'round 2, blocking finding 1)', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('en'),
+        // No BlocProvider<SyncBloc> ancestor at all — deliberately, unlike
+        // buildTestWidget() above.
+        home: const SyncPage(),
+      ));
+      await tester.pump();
+
+      expect(find.text('Sync is available in the Windows and macOS app'), findsOneWidget);
+    });
+
     testWidgets('shows skipped items when pull quarantined something',
         (tester) async {
       when(() => mockPreferences.syncFolderPath).thenReturn('/local/sync');

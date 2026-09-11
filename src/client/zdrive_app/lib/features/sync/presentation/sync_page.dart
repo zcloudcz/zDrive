@@ -19,7 +19,31 @@ class SyncPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // On web and mobile, app_router.dart's buildSyncShellProvider never
+    // provides a SyncBloc at all (desktop sync is not built there — PR #16
+    // review round 2, blocking finding 1) — read() throws
+    // ProviderNotFoundException instead of finding one, which is the
+    // signal to show the unsupported message instead of a page that would
+    // otherwise crash reading a bloc that was never provided.
+    try {
+      context.read<SyncBloc>();
+    } on ProviderNotFoundException {
+      return const _SyncUnsupportedView();
+    }
     return const _SyncView();
+  }
+}
+
+class _SyncUnsupportedView extends StatelessWidget {
+  const _SyncUnsupportedView();
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Scaffold(
+      appBar: AppBar(title: Text(l10n.syncStatus)),
+      body: Center(child: Text(l10n.syncUnsupportedPlatform)),
+    );
   }
 }
 

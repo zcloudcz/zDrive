@@ -18,6 +18,7 @@ import '../../features/sync/data/sync_remote_data_source.dart';
 import '../../core/storage/app_preferences.dart';
 import '../../features/sync/presentation/sync_bloc.dart';
 import '../../features/sync/presentation/sync_page.dart';
+import '../../features/sync/sync_support.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
   return GoRouter(
@@ -50,6 +51,7 @@ GoRouter createRouter(AuthBloc authBloc) {
           // back keeps that invariant loud if it is ever violated.
           final userId = (authBloc.state as Authenticated).user.id;
           return buildSyncShellProvider(
+            syncSupported: isDesktopSyncSupported,
             createBloc: () => SyncBloc(
               dataSource: getIt<SyncRemoteDataSource>(),
               syncCoordinator: getIt<SyncCoordinator>(),
@@ -121,10 +123,19 @@ GoRouter createRouter(AuthBloc authBloc) {
 /// mean sync did not start until the user opened the Sync page — `lazy:
 /// false` makes flutter_bloc call it as soon as this provider is built
 /// instead, i.e. at login (PR #16 review round 1, F1).
-BlocProvider<SyncBloc> buildSyncShellProvider({
+///
+/// [syncSupported] is threaded in rather than read from [Platform] here so
+/// a test can drive both branches without depending on the host OS: when
+/// false, [createBloc] is never called at all, so [SyncCoordinator] (and
+/// the Platform.isWindows-reading dependencies constructing it would pull
+/// in) is never resolved — desktop sync must not be built for web or
+/// mobile (PR #16 review round 2, blocking finding 1).
+Widget buildSyncShellProvider({
+  required bool syncSupported,
   required SyncBloc Function() createBloc,
   required Widget child,
 }) {
+  if (!syncSupported) return child;
   return BlocProvider<SyncBloc>(
     lazy: false,
     create: (_) => createBloc()..add(const LoadSyncStatus()),

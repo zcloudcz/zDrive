@@ -72,6 +72,7 @@
   "syncSkippedItems": "Přeskočené položky",
   "syncFolderNotEmptyTitle": "Složka není prázdná",
   "syncFolderNotEmptyMessage": "Tato složka už obsahuje soubory. Synchronizace nic z toho, co v ní není z jejího vlastního zásahu, nepřepíše — kolidující soubory zůstanou beze změny a zobrazí se jako přeskočené.",
+  "syncUnsupportedPlatform": "Synchronizace je k dispozici v aplikaci pro Windows a macOS",
   "versionHistory": "Historie verzí",
   "noVersions": "Zatím žádné verze",
   "restoreVersion": "Obnovit",
