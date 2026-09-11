@@ -406,5 +406,32 @@ void main() {
 
       await (await migrated.debugDatabase).close();
     });
+
+    // Teeth check: drop IF NOT EXISTS from _createOutboxTableSql and this
+    // fails with "table sync_outbox already exists".
+    test('v2 -> v1 -> v2 (no onDowngrade, standing in for a rollback then '
+        'an upgrade again) does not throw — outbox rows survive the '
+        'roundtrip (PR #14 review round 4, R4-3)', () async {
+      final tempDir = Directory.systemTemp.createTempSync('sync_mirror_downgrade_test_');
+      final dbPath = p.join(tempDir.path, 'mirror.db');
+      addTearDown(() => tempDir.deleteSync(recursive: true));
+
+      final v2 = SqfliteSyncMirrorRepository.withDbPath(dbPath);
+      await v2.commit(enqueue: [outboxItem(fileId: 'file-1')]);
+      expect(await v2.outboxCount(), 1);
+      await (await v2.debugDatabase).close();
+
+      // sqflite_common_ffi has no onDowngrade: setting user_version back to
+      // 1 (standing in for a rollback to a pre-#14 build) leaves the
+      // sync_outbox table in place, so the *next* v2 open re-runs
+      // onUpgrade(1, 2) against a database that already has it.
+      final raw = await databaseFactoryFfi.openDatabase(dbPath);
+      await raw.execute('PRAGMA user_version = 1');
+      await raw.close();
+
+      final reopened = SqfliteSyncMirrorRepository.withDbPath(dbPath);
+      expect(await reopened.outboxCount(), 1);
+      await (await reopened.debugDatabase).close();
+    });
   });
 }

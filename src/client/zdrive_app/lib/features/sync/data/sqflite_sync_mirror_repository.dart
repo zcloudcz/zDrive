@@ -20,8 +20,12 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   static const _failedTable = 'failed_events';
   static const _outboxTable = 'sync_outbox';
 
+  // IF NOT EXISTS: onUpgrade must be idempotent (PR #14 review round 4,
+  // R4-3) — sqflite_common_ffi has no onDowngrade, so opening a v2 db,
+  // rolling back to a v1 build, then opening v2 again re-runs onUpgrade(1,
+  // 2) and would otherwise fail with "table already exists".
   static const _createOutboxTableSql = '''
-    CREATE TABLE $_outboxTable (
+    CREATE TABLE IF NOT EXISTS $_outboxTable (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fileId TEXT NOT NULL,
       changeType INTEGER NOT NULL,
