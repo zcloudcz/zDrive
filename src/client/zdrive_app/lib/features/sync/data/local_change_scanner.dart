@@ -23,10 +23,17 @@ import 'sync_name_rules.dart';
 /// test can exercise the detection on every host without needing an actual
 /// case-sensitive disk to create the collision on (PR #14 review round 4,
 /// R4-4).
+/// The one definition of "the same name" for sync: names are
+/// case-insensitive end to end, so every comparison the scanner makes —
+/// including [collidingKeys] — goes through this. Two copies of the rule
+/// could drift apart and silently turn the collision check off (PR #14
+/// review round 5).
+String syncPathKey(String path) => p.normalize(path).toLowerCase();
+
 Set<String> collidingKeys(Iterable<String> paths) {
   final counts = <String, int>{};
   for (final path in paths) {
-    final key = p.normalize(path).toLowerCase();
+    final key = syncPathKey(path);
     counts[key] = (counts[key] ?? 0) + 1;
   }
   return {for (final entry in counts.entries) if (entry.value > 1) entry.key};
@@ -99,7 +106,7 @@ class LocalChangeScanner {
   /// case-only sibling duplicates), so this is the key everything in this
   /// class diffs and backs off by. Two paths that normalize to the same key
   /// are the same item, whatever case either happens to be spelled in.
-  String _key(String path) => p.normalize(path).toLowerCase();
+  String _key(String path) => syncPathKey(path);
 
   bool _isBackedOff(String path) {
     final failedAt = _failedPaths[_key(path)];

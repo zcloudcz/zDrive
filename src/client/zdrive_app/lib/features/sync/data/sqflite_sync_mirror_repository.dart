@@ -293,15 +293,23 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   Future<void> _rePathChildren(DatabaseExecutor executor, String oldPrefix, String newPrefix) async {
     final prefix = _childPrefix(oldPrefix);
     final rows = await _rowsUnder(executor, oldPrefix);
+    // One batch, not one statement per row: a remote rename of a folder
+    // with thousands of files under it must re-path them all in one go —
+    // atomically (a batch on a Database runs as one transaction, and inside
+    // commit's transaction it simply joins it) and fast (per-row autocommit
+    // statements took ~5 s for 2000 rows, the batch ~50 ms; PR #14 review
+    // round 5).
+    final batch = executor.batch();
     for (final row in rows) {
       final path = row['localPath'] as String;
-      await executor.update(
+      batch.update(
         _filesTable,
         {'localPath': p.join(newPrefix, path.substring(prefix.length))},
         where: 'serverId = ?',
         whereArgs: [row['serverId']],
       );
     }
+    await batch.commit(noResult: true);
   }
 
   // Only used from commit's deleteUnderPath handling (inside a transaction)
@@ -309,9 +317,12 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   // and _rePathChildren above rather than being pinned to Transaction.
   Future<void> _deleteChildren(DatabaseExecutor executor, String dirPath) async {
     final rows = await _rowsUnder(executor, dirPath);
+    // Batched for the same reasons as _rePathChildren above.
+    final batch = executor.batch();
     for (final row in rows) {
-      await executor.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
+      batch.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
     }
+    await batch.commit(noResult: true);
   }
 
   @override

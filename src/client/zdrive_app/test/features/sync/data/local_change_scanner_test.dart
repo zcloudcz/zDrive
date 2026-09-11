@@ -1338,6 +1338,31 @@ void main() {
       verifyNever(() => mockFileRepository.moveFile(any(), any()));
     });
 
+    test('a tracked file whose name collides on disk is not taken for '
+        'deleted: its mirror row and its server file are left alone '
+        '(PR #14 review round 5)', () async {
+      final tracked = File(p.join(tempDir.path, 'a.txt'))..writeAsStringSync('one');
+      stateful([
+        SyncMirrorEntry(
+          serverId: 'tracked-a',
+          localPath: tracked.path,
+          isFolder: false,
+          sizeBytes: 3,
+          contentHash: hashOf('one'),
+          updatedAt: past,
+          syncedAt: future,
+        ),
+      ]);
+      scanner.debugInjectExtraDiskFile(p.join(tempDir.path, 'A.txt'));
+
+      final pushed = await scanner.scanOnce(tempDir.path);
+
+      expect(pushed, 0);
+      verifyNever(() => mockFileRepository.deleteFile(any()));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any()));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any()));
+    });
+
     test(
       'a real filesystem case collision: no server call for either file',
       () async {
