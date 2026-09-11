@@ -309,12 +309,19 @@ void main() {
     // logic. A plain (non-broadcast) controller is enough: the bloc
     // subscribes to it exactly once, from LoadSyncStatus below.
     late StreamController<FileSystemEvent> watchController;
+    // Second controller only the folder-switch test below needs, standing
+    // in for the watch stream on a *different* path than watchController.
+    late StreamController<FileSystemEvent> oldController;
 
     setUp(() {
       watchController = StreamController<FileSystemEvent>();
+      oldController = StreamController<FileSystemEvent>();
     });
 
-    tearDown(() => watchController.close());
+    tearDown(() {
+      watchController.close();
+      oldController.close();
+    });
 
     blocTest<SyncBloc, SyncState>(
       'a burst of watch events triggers exactly one extra sync, 2s after '
@@ -342,6 +349,74 @@ void main() {
       verify: (_) {
         // One call from LoadSyncStatus's own initial PullRequested, plus
         // exactly one more from the debounced watch burst — not five.
+        verify(() => mockSyncCoordinator.syncOnce('/watched/folder')).called(2);
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'switching the sync folder cancels the old watch subscription — an '
+      'event on the old controller after the switch triggers nothing',
+      build: () => buildBloc(
+        watch: (path) => path == '/old/folder' ? oldController.stream : watchController.stream,
+      ),
+      setUp: () {
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
+        when(() => mockPreferences.syncFolderPath).thenReturn('/old/folder');
+        when(() => mockPreferences.setSyncFolderPath('/new/folder')).thenAnswer((_) async {});
+        when(() => mockSyncCoordinator.syncOnce(any()))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+      },
+      act: (bloc) async {
+        bloc.add(const LoadSyncStatus());
+        // Let LoadSyncStatus finish: fetch state, start watching
+        // '/old/folder', and run its own initial sync.
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        bloc.add(const SyncFolderChosen('/new/folder'));
+        // Let SyncFolderChosen finish: this is what must cancel the
+        // '/old/folder' subscription and start a fresh one on
+        // '/new/folder' — see _startWatching's doc comment.
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        // No one is listening to this anymore; if the old subscription
+        // were still live, this would debounce into a third sync call.
+        oldController.add(FileSystemModifyEvent('/old/folder/a.txt', false, true));
+        await Future<void>.delayed(const Duration(seconds: 3));
+      },
+      wait: const Duration(milliseconds: 50),
+      verify: (_) {
+        // LoadSyncStatus's own initial pull, plus SyncFolderChosen's own
+        // pull — exactly 2, not 3.
+        verify(() => mockSyncCoordinator.syncOnce(any())).called(2);
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'an error on the watch stream does not break the bloc — a later '
+      'manual sync (standing in for the periodic poll) still runs',
+      build: () => buildBloc(watch: (_) => watchController.stream),
+      setUp: () {
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getConflicts()).thenAnswer((_) async => []);
+        when(() => mockPreferences.syncFolderPath).thenReturn('/watched/folder');
+        when(() => mockSyncCoordinator.syncOnce('/watched/folder'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+      },
+      act: (bloc) async {
+        bloc.add(const LoadSyncStatus());
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        // Recursive watching is not supported on every platform (e.g.
+        // Linux throws asynchronously via the stream rather than on the
+        // listen call itself) — must not crash or unsubscribe the bloc.
+        watchController.addError(Exception('recursive watch not supported'));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        bloc.add(const PullRequested());
+      },
+      wait: const Duration(milliseconds: 50),
+      verify: (_) {
+        // LoadSyncStatus's own initial pull, plus the manual PullRequested
+        // dispatched after the watch error — the bloc is still alive.
         verify(() => mockSyncCoordinator.syncOnce('/watched/folder')).called(2);
       },
     );
