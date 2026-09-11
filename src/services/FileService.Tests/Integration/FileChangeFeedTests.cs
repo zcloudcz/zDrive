@@ -260,6 +260,17 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
         fourthPage.NextCursor.Should().Be(thirdPage.NextCursor);
     }
 
+    [Theory]
+    [InlineData("limit=0")]
+    [InlineData("cursor=-1")]
+    public async Task GetChanges_InvalidQueryParameter_ReturnsBadRequest(string invalidQuery)
+    {
+        // CLAUDE.md: every endpoint needs a happy-path and an error-path
+        // integration test — this endpoint only had the former.
+        var response = await _client.GetAsync($"/api/v1/files/changes?{invalidQuery}");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
     [Fact]
     public async Task GetChanges_ChangeWithinHoldBackWindow_ExcludedUntilAgedPastFiveSeconds()
     {
