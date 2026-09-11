@@ -43,15 +43,23 @@ GoRouter createRouter(AuthBloc authBloc) {
         // rather than only while the sync page happens to be open, and
         // logout disposes this shell — stopping the poll timer and folder
         // watch along with it — instead of leaving them running headless.
-        builder: (_, _, navigationShell) => BlocProvider<SyncBloc>(
-          create: (_) => SyncBloc(
-            dataSource: getIt<SyncRemoteDataSource>(),
-            syncCoordinator: getIt<SyncCoordinator>(),
-            pullService: getIt<PullSyncService>(),
-            preferences: getIt<AppPreferences>(),
-          )..add(const LoadSyncStatus()),
-          child: HomePage(navigationShell: navigationShell),
-        ),
+        builder: (_, _, navigationShell) {
+          // The redirect above already sends an unauthenticated visitor to
+          // /login before this shell is ever built, so authBloc.state here
+          // is always Authenticated — casting instead of silently falling
+          // back keeps that invariant loud if it is ever violated.
+          final userId = (authBloc.state as Authenticated).user.id;
+          return buildSyncShellProvider(
+            createBloc: () => SyncBloc(
+              dataSource: getIt<SyncRemoteDataSource>(),
+              syncCoordinator: getIt<SyncCoordinator>(),
+              pullService: getIt<PullSyncService>(),
+              preferences: getIt<AppPreferences>(),
+              userId: userId,
+            ),
+            child: HomePage(navigationShell: navigationShell),
+          );
+        },
         branches: [
           StatefulShellBranch(
             routes: [
@@ -102,6 +110,25 @@ GoRouter createRouter(AuthBloc authBloc) {
         ],
       ),
     ],
+  );
+}
+
+/// Builds the sync feature's ancestor [BlocProvider] for the authenticated
+/// shell — factored out of the route builder above so a widget test can
+/// pump it directly, with mocked dependencies, without needing a real
+/// [GoRouter]. Eager (`lazy: false`): the default `lazy: true` only calls
+/// [createBloc] once something reads the bloc from context, which used to
+/// mean sync did not start until the user opened the Sync page — `lazy:
+/// false` makes flutter_bloc call it as soon as this provider is built
+/// instead, i.e. at login (PR #16 review round 1, F1).
+BlocProvider<SyncBloc> buildSyncShellProvider({
+  required SyncBloc Function() createBloc,
+  required Widget child,
+}) {
+  return BlocProvider<SyncBloc>(
+    lazy: false,
+    create: (_) => createBloc()..add(const LoadSyncStatus()),
+    child: child,
   );
 }
 
