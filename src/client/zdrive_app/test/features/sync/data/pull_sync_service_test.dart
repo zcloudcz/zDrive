@@ -662,6 +662,21 @@ void main() {
   });
 
   group('Win32 name rules (B2)', () {
+    // The Win32 gate is now an injected decision (see PullSyncService's
+    // `isWindows` parameter), not a direct Platform.isWindows read — so
+    // these tests pin it explicitly instead of inheriting whatever OS
+    // happens to run them. Without this, the four tests below only passed
+    // on a Windows dev machine and were silently skipped-by-passing-wrong on
+    // Linux CI (they hit the unstubbed downloadFile mock instead of ever
+    // exercising the name check).
+    PullSyncService serviceWith({required bool isWindows}) => PullSyncService(
+          mockSyncDataSource,
+          mockDeviceRegistration,
+          mockMirror,
+          mockFileRepository,
+          isWindows: isWindows,
+        );
+
     test('violatesWin32NameRules flags a trailing dot or space, the alias '
         'that let a remote "foo." merge into an existing "foo"', () {
       expect(violatesWin32NameRules('foo.'), isTrue);
@@ -706,7 +721,7 @@ void main() {
           ));
       when(() => mockMirror.getByServerId('bad-name-1')).thenAnswer((_) async => null);
 
-      final applied = await service.pullOnce(tempDir.path);
+      final applied = await serviceWith(isWindows: true).pullOnce(tempDir.path);
 
       expect(applied, 1);
       verifyNever(() => mockFileRepository.downloadFile(any()));
@@ -735,7 +750,7 @@ void main() {
           ));
       when(() => mockMirror.getByServerId('bad-name-2')).thenAnswer((_) async => null);
 
-      await service.pullOnce(tempDir.path);
+      await serviceWith(isWindows: true).pullOnce(tempDir.path);
 
       verifyNever(() => mockFileRepository.downloadFile(any()));
       verify(() => mockMirror.recordFailedEvent(
@@ -765,7 +780,7 @@ void main() {
           ));
       when(() => mockMirror.getByServerId('folder-dot')).thenAnswer((_) async => null);
 
-      await service.pullOnce(tempDir.path);
+      await serviceWith(isWindows: true).pullOnce(tempDir.path);
 
       verify(() => mockMirror.recordFailedEvent(
             'folder-dot',
@@ -805,7 +820,7 @@ void main() {
             syncedAt: now,
           ));
 
-      await service.pullOnce(tempDir.path);
+      await serviceWith(isWindows: true).pullOnce(tempDir.path);
 
       verify(() => mockMirror.recordFailedEvent(
             'folder-1',
@@ -815,6 +830,46 @@ void main() {
       expect(oldDir.existsSync(), isTrue);
       expect(untracked.readAsStringSync(), 'never sent to the server');
       verifyNever(() => mockMirror.rePathChildren(any(), any()));
+    });
+
+    test('allows a name Win32 would reject through and writes it when the '
+        'injected platform decision is not Windows — the input that '
+        'distinguishes "Win32 rules on Windows only" from "Win32 rules '
+        'everywhere": a regression enforcing them on macOS/Linux too would '
+        'still pass every other test in this group. Uses a reserved device '
+        'stem rather than an illegal character (e.g. "?") because the '
+        'latter is rejected by the real Windows filesystem itself — even '
+        'with isWindows: false — which would prove nothing about this '
+        "app's own gate; a reserved stem is flagged by "
+        '[violatesWin32NameRules] purely as a defensive check (see its doc '
+        'comment) and genuinely writes fine on real Windows, so it isolates '
+        'the gate itself from what the OS enforces regardless', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final bytes = Uint8List.fromList(utf8.encode('not a Win32 client'));
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'ok-on-non-windows', 'eventType': 'Create', 'metadata': null},
+          ], 1));
+      when(() => mockFileRepository.getFile('ok-on-non-windows')).thenAnswer((_) async => FileItem(
+            id: 'ok-on-non-windows',
+            name: 'com1.txt', // reserved Win32 device stem, rejected only when isWindows
+            isFolder: false,
+            sizeBytes: bytes.length,
+            parentId: null,
+            createdAt: now,
+            updatedAt: now,
+          ));
+      when(() => mockMirror.getByServerId('ok-on-non-windows')).thenAnswer((_) async => null);
+      when(() => mockFileRepository.downloadFile('ok-on-non-windows')).thenAnswer((_) async => bytes);
+
+      final applied = await serviceWith(isWindows: false).pullOnce(tempDir.path);
+
+      expect(applied, 1);
+      final written = File(p.join(tempDir.path, 'com1.txt'));
+      expect(written.existsSync(), isTrue);
+      expect(written.readAsBytesSync(), bytes);
+      verifyNever(() => mockMirror.recordFailedEvent(any(), any(), any()));
     });
   });
 

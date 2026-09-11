@@ -83,12 +83,20 @@ class PullSyncService {
   final SyncMirrorRepository _mirror;
   final FileRepository _fileRepository;
 
+  // Win32 name rules (see [violatesWin32NameRules]) only apply on the
+  // Windows client — the server does not enforce them and a macOS/Linux
+  // client syncs such names normally. Injected (defaulting to the real
+  // host) so tests can exercise both branches instead of inheriting
+  // whatever OS happens to run them.
+  final bool _isWindows;
+
   PullSyncService(
     this._syncDataSource,
     this._deviceRegistration,
     this._mirror,
-    this._fileRepository,
-  );
+    this._fileRepository, {
+    bool? isWindows,
+  }) : _isWindows = isWindows ?? Platform.isWindows;
 
   // Guards pullOnce against concurrent invocations on this singleton. The
   // bloc already has its own isPulling check (sync_bloc.dart), but that only
@@ -292,7 +300,7 @@ class PullSyncService {
 
     final previous = await _mirror.getByServerId(fileId);
     final dirPath = await _resolveLocalDirPath(remote.parentId, syncFolderPath);
-    final localPath = _safeChildPath(syncFolderPath, dirPath, remote.name);
+    final localPath = _safeChildPath(syncFolderPath, dirPath, remote.name, _isWindows);
     final moved = previous != null && previous.localPath != localPath;
 
     String? contentHash;
@@ -376,7 +384,7 @@ class PullSyncService {
 
     final folder = await _fileRepository.getFile(folderId);
     final parentPath = await _resolveLocalDirPath(folder.parentId, syncFolderPath);
-    final dirPath = _safeChildPath(syncFolderPath, parentPath, folder.name);
+    final dirPath = _safeChildPath(syncFolderPath, parentPath, folder.name, _isWindows);
 
     await Directory(dirPath).create(recursive: true);
     await _mirror.upsert(SyncMirrorEntry(
@@ -518,7 +526,7 @@ class PullSyncService {
         localPath = existing.localPath;
       } else {
         try {
-          localPath = _safeChildPath(syncFolderPath, dirPath, item.name);
+          localPath = _safeChildPath(syncFolderPath, dirPath, item.name, _isWindows);
           await Directory(localPath).create(recursive: true);
           await _mirror.upsert(SyncMirrorEntry(
             serverId: item.id,
@@ -552,7 +560,7 @@ class PullSyncService {
     if (existing != null) return; // Already delivered by the drain above, or a previous run.
 
     try {
-      final localPath = _safeChildPath(syncFolderPath, dirPath, item.name);
+      final localPath = _safeChildPath(syncFolderPath, dirPath, item.name, _isWindows);
       // Same untracked-file guard as delta apply (F3): backfill must not
       // clobber a file the user already has.
       if (await File(localPath).exists()) {
@@ -597,7 +605,7 @@ class PullSyncService {
 /// R1). Rejecting anything that is *only* dots and spaces closes that
 /// without needing the two literal checks separately. A server-supplied
 /// name has to be exactly one plain path segment for `p.join` to be safe.
-bool _isPlainSegment(String name) =>
+bool _isPlainSegment(String name, bool isWindows) =>
     name.isNotEmpty &&
     !RegExp(r'^[. ]+$').hasMatch(name) &&
     !name.contains('/') &&
@@ -606,9 +614,12 @@ bool _isPlainSegment(String name) =>
     // Win32-specific unwritable names (a trailing dot/space, a reserved
     // device stem, an illegal character) are rejected only on Windows —
     // per the PR #12 review round 3 human decision, the server does not
-    // enforce these and a macOS client syncs such names normally. See
-    // [violatesWin32NameRules].
-    !(Platform.isWindows && violatesWin32NameRules(name));
+    // enforce these and a macOS client syncs such names normally. [isWindows]
+    // is [PullSyncService]'s injected platform decision (defaulting to
+    // [Platform.isWindows]), not a direct read of the host here, so tests can
+    // exercise both branches without depending on the OS they happen to run
+    // on. See [violatesWin32NameRules].
+    !(isWindows && violatesWin32NameRules(name));
 
 /// Characters Win32 forbids in a path segment beyond the ones already
 /// checked above (`/`, `\`, `:`): `< > " | ? *` and the C0 control range.
@@ -634,8 +645,9 @@ const _win32ReservedStems = {
 /// already occupies — PR #12 review round 3, B1), one of
 /// [_win32IllegalChars], or a reserved device stem. Deliberately
 /// platform-agnostic: the only production call site ([_isPlainSegment])
-/// gates it behind [Platform.isWindows], but the rule table itself is
-/// exercised directly in tests without needing to fake the host OS.
+/// gates it behind [PullSyncService]'s injected `isWindows` decision, but the
+/// rule table itself is exercised directly in tests without needing to fake
+/// the host OS.
 @visibleForTesting
 bool violatesWin32NameRules(String name) =>
     name.endsWith('.') ||
@@ -652,8 +664,8 @@ bool violatesWin32NameRules(String name) =>
 /// `p.canonicalize` lowercases the whole path, and that is not the path
 /// this app should be writing to, storing in the mirror, or showing the
 /// user.
-String _safeChildPath(String syncFolderPath, String dirPath, String name) {
-  if (!_isPlainSegment(name)) {
+String _safeChildPath(String syncFolderPath, String dirPath, String name, bool isWindows) {
+  if (!_isPlainSegment(name, isWindows)) {
     throw UnsafeRemoteNameException(name);
   }
   final joined = p.join(dirPath, name);
