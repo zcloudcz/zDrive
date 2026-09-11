@@ -33,15 +33,19 @@ public sealed class CreateFileCommandHandler : IRequestHandler<CreateFileCommand
         // directory, so a case-only difference is a real collision, not a
         // cosmetic one (see PR #12 review round 3, B1). Backed by a
         // matching unique index (FileNodeConfiguration) for the race case.
-        // f.Name.ToLower() is translated to SQL lower(), which always folds
-        // using Postgres's (culture-invariant) default collation.
-        // request.Name.ToLower() runs client-side under the CURRENT
-        // culture — under Turkish, "FILE".ToLower() is "fıle" (dotless ı)
-        // while Postgres's lower() gives "file", so the two sides would
-        // silently never match and the insert would proceed to fail on the
-        // unique index instead of returning a clean 409. ToLowerInvariant()
-        // keeps both sides folding the same way regardless of server
-        // locale (PR #12 review round 4).
+        // f.Name.ToLower() is translated to SQL lower(), which folds using
+        // whatever collation/LC_CTYPE the database was created with — not
+        // necessarily culture-invariant. request.Name.ToLower() runs
+        // client-side under the CURRENT culture — under Turkish, "FILE".ToLower()
+        // is "fıle" (dotless ı) while Postgres's lower() may give "file", so
+        // the two sides would silently never match and the insert would
+        // proceed to fail on the unique index instead of returning a clean
+        // 409. ToLowerInvariant() keeps the .NET side folding the same way
+        // regardless of server locale; where the two folds still disagree
+        // (the DB's collation folds differently than .NET invariant), the
+        // unique index still rejects the duplicate on insert, and
+        // ExceptionHandlingMiddleware maps that violation to a 409 instead
+        // of a 500 (PR #12 review round 4, N4/C2).
         var duplicate = await _db.FileNodes.AnyAsync(f =>
             f.TenantId == request.TenantId
             && f.UserId == request.UserId

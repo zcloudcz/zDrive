@@ -294,6 +294,31 @@ public sealed class FileFlowTests : IClassFixture<FileServiceFactory>
     }
 
     [Fact]
+    public async Task RestoreFile_CaseOnlyCollisionWithLiveSibling_Returns409()
+    {
+        // RestoreFileCommandHandler has no sibling pre-check (unlike create/
+        // rename/move) — restore relies entirely on the unique index on
+        // (tenant_id, user_id, parent_id, name_normalized) WHERE is_deleted =
+        // false to catch this. Before ExceptionHandlingMiddleware mapped a
+        // unique-violation DbUpdateException to 409, that raw constraint
+        // violation surfaced as a 500 (PR #12 review round 4, C2).
+        var original = await _client.PostAsJsonAsync("/api/v1/files", new { name = "Report", isFolder = false });
+        original.StatusCode.Should().Be(HttpStatusCode.Created);
+        var originalFile = (await original.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var deleteResponse = await _client.DeleteAsync($"/api/v1/files/{originalFile.Id}");
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // A case-only namesake now lives live at the same spot the restore
+        // would put "Report" back into.
+        var sibling = await _client.PostAsJsonAsync("/api/v1/files", new { name = "report", isFolder = false });
+        sibling.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var restoreResponse = await _client.PostAsync($"/api/v1/files/{originalFile.Id}/restore", null);
+        restoreResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
     public async Task CreateDuplicate_CaseOnlyDifferenceUnderTurkishCulture_Returns409NotServerError()
     {
         // f.Name.ToLower() is translated to SQL lower(), which folds "I" to

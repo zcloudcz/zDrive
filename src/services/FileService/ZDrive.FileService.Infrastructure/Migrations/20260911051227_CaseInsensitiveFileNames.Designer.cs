@@ -130,6 +130,8 @@ namespace ZDrive.FileService.Infrastructure.Migrations
                         .HasDatabaseName("ix_file_nodes_tenant_id_user_id_parent_id_name_normalized")
                         .HasFilter("is_deleted = false");
 
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "UserId", "ParentId", "name_normalized"), false);
+
                     b.ToTable("file_nodes", "files");
                 });
 

@@ -46,6 +46,10 @@ void main() {
       mockDeviceRegistration,
       mockMirror,
       mockFileRepository,
+      // Pin to Linux-CI behaviour regardless of the host running the test —
+      // without this the default inherits Platform.isWindows, and four
+      // tests once passed only on Windows (PR #12 review round 4, N6).
+      isWindows: false,
     );
     tempDir = Directory.systemTemp.createTempSync('pull_sync_test_');
 
@@ -989,8 +993,16 @@ void main() {
       expect(applied, 1);
       expect(File(p.join(tempDir.path, 'fresh.txt')).readAsBytesSync(), bytes);
       // The quarantined row is still quarantined — re-stamped, not resolved
-      // and not left to abort the poll.
-      verify(() => mockMirror.recordFailedEvent('stuck-1', 1, 'was a local conflict')).called(1);
+      // and not left to abort the poll. The reason now reflects this
+      // retry's own exception (the DioException from getFile), not the
+      // stale first-attempt reason ('was a local conflict') — a later
+      // different failure must be visible, not hidden behind whatever
+      // tripped first (PR #12 review round 4, N2).
+      verify(() => mockMirror.recordFailedEvent(
+            'stuck-1',
+            1,
+            any(that: contains('DioException')),
+          )).called(1);
     });
   });
 
@@ -1086,6 +1098,52 @@ void main() {
       expect(folderDir.existsSync(), isFalse);
       verify(() => mockMirror.deleteByServerId('tracked-file-2')).called(1);
       verify(() => mockMirror.deleteByServerId('folder-del-2')).called(1);
+      verifyNever(() => mockMirror.recordFailedEvent(any(), any(), any()));
+    });
+
+    test('removes the folder even when only OS metadata files (.DS_Store, '
+        'Thumbs.db, desktop.ini) are left behind alongside a matching '
+        'tracked file', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      final folderDir = Directory(p.join(tempDir.path, 'Opened-in-finder'))..createSync();
+      final trackedBytes = Uint8List.fromList(utf8.encode('server content'));
+      final trackedFile = File(p.join(folderDir.path, 'tracked.jpg'))
+        ..writeAsBytesSync(trackedBytes);
+      // Regenerable OS metadata, not user data — none of these are tracked
+      // by the mirror.
+      File(p.join(folderDir.path, '.DS_Store')).writeAsStringSync('finder metadata');
+      File(p.join(folderDir.path, 'Thumbs.db')).writeAsStringSync('thumbnail cache');
+      File(p.join(folderDir.path, 'desktop.ini')).writeAsStringSync('[.ShellClassInfo]');
+
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockSyncDataSource.pull('dev-1', 0)).thenAnswer((_) async => page([
+            {'id': 1, 'fileId': 'folder-del-3', 'eventType': 'Delete', 'metadata': null},
+          ], 1));
+      when(() => mockMirror.getByServerId('folder-del-3')).thenAnswer((_) async => SyncMirrorEntry(
+            serverId: 'folder-del-3',
+            localPath: folderDir.path,
+            isFolder: true,
+            updatedAt: now,
+            syncedAt: now,
+          ));
+      when(() => mockMirror.getChildrenUnder(folderDir.path)).thenAnswer((_) async => [
+            SyncMirrorEntry(
+              serverId: 'tracked-file-3',
+              localPath: trackedFile.path,
+              isFolder: false,
+              contentHash: sha256.convert(trackedBytes).toString(),
+              updatedAt: now,
+              syncedAt: now,
+            ),
+          ]);
+      when(() => mockMirror.deleteByServerId('tracked-file-3')).thenAnswer((_) async {});
+      when(() => mockMirror.deleteByServerId('folder-del-3')).thenAnswer((_) async {});
+
+      await service.pullOnce(tempDir.path);
+
+      expect(folderDir.existsSync(), isFalse);
+      verify(() => mockMirror.deleteByServerId('tracked-file-3')).called(1);
+      verify(() => mockMirror.deleteByServerId('folder-del-3')).called(1);
       verifyNever(() => mockMirror.recordFailedEvent(any(), any(), any()));
     });
   });

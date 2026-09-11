@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using FluentValidation;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using ZDrive.Shared.DTOs;
 using ZDrive.Shared.Exceptions;
 
@@ -61,6 +63,20 @@ public sealed class ExceptionHandlingMiddleware
             ForbiddenException forbiddenEx => (
                 HttpStatusCode.Forbidden,
                 new ErrorResponse("FORBIDDEN", forbiddenEx.Message)),
+
+            // The per-handler `AnyAsync` sibling-name pre-check is only a fast
+            // path, not the real guard — the unique index on
+            // (tenant_id, user_id, parent_id, name_normalized) WHERE is_deleted
+            // = false is. It can fire past the pre-check: restore has no
+            // pre-check at all, two concurrent requests can both pass it before
+            // either inserts, and .NET's ToLowerInvariant and Postgres's
+            // lower() do not fold every character identically. A unique
+            // violation here is a naming conflict the caller can react to, not
+            // a server bug — map it to 409 instead of letting it fall through
+            // to the 500 default below.
+            DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } } => (
+                HttpStatusCode.Conflict,
+                new ErrorResponse("CONFLICT", "A file or folder with that name already exists in this location.")),
 
             _ => (
                 HttpStatusCode.InternalServerError,
