@@ -547,7 +547,8 @@ class LocalChangeScanner {
         // mirror by name instead of waiting for the next pull — so children
         // under it can still be uploaded into it this same scan (the
         // resolveParent lookup above needs a mirror row to find).
-        final existing = await _findExistingFolderByName(resolution.parentId, p.basename(dirPath));
+        final existing =
+            await _findExistingByName(resolution.parentId, p.basename(dirPath), isFolder: true);
         if (existing != null) {
           final entry = _mirrorRow(
             serverId: existing.id,
@@ -565,24 +566,6 @@ class LocalChangeScanner {
       _recordFailure(dirPath, e, StackTrace.current);
     } catch (e, st) {
       _recordFailure(dirPath, e, st);
-    }
-  }
-
-  /// A folder child named [name] directly under [parentId], if one already
-  /// exists — used by [_createFolder]'s 409 handling to adopt a folder
-  /// another device already created. Case-insensitive and paginated, same
-  /// shape as [_findExistingFileByName] below (FileService rejects a
-  /// case-only sibling duplicate for folders too).
-  Future<FileItem?> _findExistingFolderByName(String? parentId, String name) async {
-    var page = 1;
-    const pageSize = 200;
-    while (true) {
-      final result = await _fileRepository.listChildren(parentId, page: page, pageSize: pageSize);
-      for (final item in result.items) {
-        if (item.name.toLowerCase() == name.toLowerCase() && item.isFolder) return item;
-      }
-      if (!result.hasMore) return null;
-      page++;
     }
   }
 
@@ -803,7 +786,7 @@ class LocalChangeScanner {
       // Last write wins: a file with this name already exists server-side
       // in this folder (created on another device, not yet pulled here) —
       // upload into it as a new version instead of failing.
-      final existing = await _findExistingFileByName(resolution.parentId, name);
+      final existing = await _findExistingByName(resolution.parentId, name, isFolder: false);
       if (existing == null) rethrow;
       await _fileRepository.uploadNewVersion(
         existing.id,
@@ -843,16 +826,25 @@ class LocalChangeScanner {
   /// A non-folder child named [name] directly under [parentId], if one
   /// already exists — paginated, since a folder can hold more than one
   /// page. Mirrors FileRepositoryImpl._findExistingFile's shape.
-  Future<FileItem?> _findExistingFileByName(String? parentId, String name) async {
+  /// A child named [name] directly under [parentId] whose [FileItem.isFolder]
+  /// matches [isFolder], if one already exists — used by [_createFolder]'s
+  /// and the new-file upload path's 409 handling to adopt an item another
+  /// device already created. Case-insensitive, like every other name
+  /// comparison here: FileService rejects a sibling that differs only by
+  /// case, so the 409 for `Photo.jpg` may be about an existing `photo.jpg`
+  /// (and the same rule applies to folders). Paginated, since a folder can
+  /// hold more than one page of children.
+  Future<FileItem?> _findExistingByName(
+    String? parentId,
+    String name, {
+    required bool isFolder,
+  }) async {
     var page = 1;
     const pageSize = 200;
     while (true) {
       final result = await _fileRepository.listChildren(parentId, page: page, pageSize: pageSize);
       for (final item in result.items) {
-        // Case-insensitive, like every other name comparison here: FileService
-        // rejects a sibling that differs only by case, so the 409 for
-        // `Photo.jpg` may be about an existing `photo.jpg`.
-        if (item.name.toLowerCase() == name.toLowerCase() && !item.isFolder) return item;
+        if (item.name.toLowerCase() == name.toLowerCase() && item.isFolder == isFolder) return item;
       }
       if (!result.hasMore) return null;
       page++;

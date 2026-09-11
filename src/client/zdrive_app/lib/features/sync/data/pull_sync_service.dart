@@ -235,16 +235,16 @@ class PullSyncService {
     final fileId = change.fileId;
 
     try {
-      if (change.type == 'Delete') {
-        await _applyDeleteEvent(fileId, syncFolderPath);
-      } else {
-        // Create/Update/Move/Rename are all handled the same way: fetch the
-        // file's current state and reconcile the local copy against it.
-        // This also covers move/rename without a separate code path — the
-        // mirror lookup inside finds the entry's previous local path (if
-        // any) and relocates it when the resolved path has changed.
-        await _applyUpsert(fileId, syncFolderPath);
-      }
+      // Create/Update/Move/Rename/Delete are all handled the same way:
+      // fetch the file's current state and reconcile the local copy against
+      // it. _applyUpsert's own getFile call already 404s straight into
+      // _applyDelete, so a Delete feed item needs no separate branch — and
+      // a file that is live again (deleted, then restored before this
+      // device pulled) is simply upserted instead of wrongly removed. This
+      // also covers move/rename without a separate code path — the mirror
+      // lookup inside finds the entry's previous local path (if any) and
+      // relocates it when the resolved path has changed.
+      await _applyUpsert(fileId, syncFolderPath);
       // A previous failure for this file, if any, no longer applies now
       // that a later event for it has gone through cleanly.
       await _mirror.clearFailedEvent(fileId);
@@ -264,26 +264,6 @@ class PullSyncService {
     }
 
     await _mirror.setCursor(deviceId, eventId);
-  }
-
-  /// A Delete feed item does not necessarily mean the file is gone right
-  /// now — it may have been deleted and then restored (e.g. from trash)
-  /// before this device got around to pulling. Checked here, with its own
-  /// [_fileRepository.getFile] call, rather than folded into [_applyUpsert]'s
-  /// own 404 handling (which exists for the opposite case: an Upsert-shaped
-  /// event for a file that has since become 404) — the two are separate
-  /// checks for separate event types, not one shared code path.
-  Future<void> _applyDeleteEvent(String fileId, String syncFolderPath) async {
-    try {
-      await _fileRepository.getFile(fileId);
-    } on DioException catch (e) {
-      if (e.response?.statusCode != 404) rethrow;
-      await _applyDelete(fileId, syncFolderPath);
-      return;
-    }
-    // Still exists server-side — restored since the event was raised, so
-    // this is reconciled as an upsert instead of a delete.
-    await _applyUpsert(fileId, syncFolderPath);
   }
 
   Future<void> _applyDelete(String fileId, String syncFolderPath) async {
