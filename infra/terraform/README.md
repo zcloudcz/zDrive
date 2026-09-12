@@ -112,10 +112,17 @@ terraform output -raw gateway_fqdn
   grandfathered, no classic-tier `sku_name` override fixes that — you'd
   need to provision Azure Managed Redis instead, which is a different
   resource type and out of scope for this module.
-- **Gateway → service routing env var names are a best-effort guess.**
-  They mirror `ApiGateway/appsettings.json`'s current `ReverseProxy:Clusters`
-  keys verbatim (`auth-cluster`/`auth-service`, etc.) turned into
-  `ReverseProxy__Clusters__auth-cluster__Destinations__auth-service__Address`
-  style env vars. Agent 1's task (making these configurable from env) runs
-  in parallel — if it renames the config keys, update
-  `modules/container_apps/main.tf`'s `local.gateway_clusters` to match.
+- **Gateway → service routing env var names mirror the config keys.**
+  They take `ApiGateway/appsettings.json`'s `ReverseProxy:Clusters` keys
+  (`authCluster`/`authService`, etc.) and turn them into
+  `ReverseProxy__Clusters__authCluster__Destinations__authService__Address`
+  env vars, built in `modules/container_apps/main.tf`'s
+  `local.gateway_clusters`. Rename a cluster or destination id in
+  `appsettings.json` and you must rename it there too — a mismatch does not
+  fail, YARP just adds a *second* destination and load-balances half the
+  traffic to the unreachable `localhost:510x` default.
+
+  **Keep those ids free of hyphens.** Azure App Service on Linux turns app
+  settings into environment variables and rejects any name containing `-`
+  with a bare `Bad Request`, so the earlier `auth-cluster`/`auth-service`
+  ids made the gateway impossible to configure there at all.

@@ -79,8 +79,59 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
             route => route.Match.Path == "/hubs/sync/{**catch-all}",
             "the SignalR hub must be routed").Subject;
 
-        hubRoute.ClusterId.Should().Be("notification-cluster");
+        hubRoute.ClusterId.Should().Be("notificationCluster");
         hubRoute.AuthorizationPolicy.Should().BeNull(
             "the hub authenticates from the access_token query string, which the gateway does not read");
+    }
+
+    /// <summary>
+    /// A route naming a cluster that does not exist is not a startup error in
+    /// YARP — the request simply fails at proxy time, and the status-code tests
+    /// above still pass because an unmatched cluster never reaches them. Every
+    /// ClusterId therefore has to be checked against the cluster table.
+    /// </summary>
+    [Fact]
+    public void EveryRoute_PointsAtADefinedCluster()
+    {
+        var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();
+        var clusterIds = config.Clusters.Select(cluster => cluster.ClusterId).ToHashSet();
+
+        foreach (var route in config.Routes)
+        {
+            clusterIds.Should().Contain(
+                route.ClusterId,
+                "route {0} names cluster {1}, which is not defined",
+                route.RouteId,
+                route.ClusterId);
+        }
+    }
+
+    /// <summary>
+    /// Cluster and destination ids are spliced into environment variable names
+    /// (<c>ReverseProxy__Clusters__{cluster}__Destinations__{destination}__Address</c>)
+    /// to point a deployment at its real service URLs. Azure App Service on
+    /// Linux rejects any app setting name containing a hyphen with a bare
+    /// "Bad Request", so a hyphen here silently costs us the ability to
+    /// configure the gateway at all — it would keep proxying to localhost.
+    /// </summary>
+    [Fact]
+    public void ClusterAndDestinationIds_ContainNoHyphens()
+    {
+        var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();
+
+        foreach (var cluster in config.Clusters)
+        {
+            cluster.ClusterId.Should().NotContain(
+                "-", "cluster ids become environment variable names, which cannot contain hyphens");
+
+            foreach (var destinationId in cluster.Destinations?.Keys ?? Enumerable.Empty<string>())
+            {
+                destinationId.Should().NotContain(
+                    "-",
+                    "destination id {0} in cluster {1} becomes part of an environment variable name",
+                    destinationId,
+                    cluster.ClusterId);
+            }
+        }
     }
 }

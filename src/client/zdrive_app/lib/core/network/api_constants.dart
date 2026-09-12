@@ -1,6 +1,11 @@
 class ApiConstants {
   // API Gateway (YARP) — routes /api/v1/{service}/** to each microservice.
-  static const String baseUrl = 'http://localhost:5100/api/v1';
+  // Deployed builds point at their own gateway; pass it at build time, e.g.
+  // flutter build web --dart-define=API_BASE_URL=https://<gateway>/api/v1
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://localhost:5100/api/v1',
+  );
 
   // Auth (auth-service)
   static const String authRegister = '/auth/register';

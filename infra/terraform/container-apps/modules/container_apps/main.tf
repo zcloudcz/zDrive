@@ -215,18 +215,24 @@ resource "azurerm_container_app" "worker" {
 
 # Gateway: external ingress (public FQDN + managed TLS), min 1 replica, and
 # the YARP cluster addresses pointed at the other apps' internal FQDNs.
-# Cluster/destination IDs match ApiGateway/appsettings.json's ReverseProxy
-# section verbatim — see docs/release-test-deploy.md Agent 1 task 4, which
-# moves the *values* to config/env without renaming the keys.
+# Cluster/destination IDs must match ApiGateway/appsettings.json's
+# ReverseProxy section verbatim: they are spliced into the env var name below,
+# and a mismatch does not fail — YARP adds a *second* destination and sends
+# half the traffic to the unreachable localhost default from appsettings.
+#
+# The IDs deliberately carry no hyphens. Azure App Service on Linux exposes app
+# settings as environment variables and rejects any name containing "-" with a
+# bare "Bad Request", which made the original auth-cluster/auth-service ids
+# impossible to configure there.
 locals {
   gateway_clusters = {
-    auth    = { cluster_id = "auth-cluster", destination_id = "auth-service" }
-    file    = { cluster_id = "file-cluster", destination_id = "file-service" }
-    storage = { cluster_id = "storage-cluster", destination_id = "storage-service" }
-    sync    = { cluster_id = "sync-cluster", destination_id = "sync-service" }
-    photo   = { cluster_id = "photo-cluster", destination_id = "photo-service" }
+    auth    = { cluster_id = "authCluster", destination_id = "authService" }
+    file    = { cluster_id = "fileCluster", destination_id = "fileService" }
+    storage = { cluster_id = "storageCluster", destination_id = "storageService" }
+    sync    = { cluster_id = "syncCluster", destination_id = "syncService" }
+    photo   = { cluster_id = "photoCluster", destination_id = "photoService" }
     # Carries both /api/v1/notifications and the SignalR hub at /hubs/sync/**.
-    notification = { cluster_id = "notification-cluster", destination_id = "notification-service" }
+    notification = { cluster_id = "notificationCluster", destination_id = "notificationService" }
   }
 }
 
