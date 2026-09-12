@@ -220,13 +220,13 @@ resource "azurerm_container_app" "worker" {
 # moves the *values* to config/env without renaming the keys.
 locals {
   gateway_clusters = {
-    auth    = { cluster_id = "auth-cluster", destination_id = "auth-service" }
-    file    = { cluster_id = "file-cluster", destination_id = "file-service" }
-    storage = { cluster_id = "storage-cluster", destination_id = "storage-service" }
-    sync    = { cluster_id = "sync-cluster", destination_id = "sync-service" }
-    photo   = { cluster_id = "photo-cluster", destination_id = "photo-service" }
+    auth    = { cluster_id = "authCluster", destination_id = "authService" }
+    file    = { cluster_id = "fileCluster", destination_id = "fileService" }
+    storage = { cluster_id = "storageCluster", destination_id = "storageService" }
+    sync    = { cluster_id = "syncCluster", destination_id = "syncService" }
+    photo   = { cluster_id = "photoCluster", destination_id = "photoService" }
     # Carries both /api/v1/notifications and the SignalR hub at /hubs/sync/**.
-    notification = { cluster_id = "notification-cluster", destination_id = "notification-service" }
+    notification = { cluster_id = "notificationCluster", destination_id = "notificationService" }
   }
 }
 

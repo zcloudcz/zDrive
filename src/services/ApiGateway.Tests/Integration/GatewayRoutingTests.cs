@@ -79,7 +79,7 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
             route => route.Match.Path == "/hubs/sync/{**catch-all}",
             "the SignalR hub must be routed").Subject;
 
-        hubRoute.ClusterId.Should().Be("notification-cluster");
+        hubRoute.ClusterId.Should().Be("notificationCluster");
         hubRoute.AuthorizationPolicy.Should().BeNull(
             "the hub authenticates from the access_token query string, which the gateway does not read");
     }
