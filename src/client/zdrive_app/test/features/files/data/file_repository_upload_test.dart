@@ -277,5 +277,72 @@ void main() {
           parentId: any(named: 'parentId'),
           sizeBytes: any(named: 'sizeBytes')));
     });
+
+    test('passes originDeviceId through to createFileVersion (F5, PR #16 '
+        'review round 1) — dropping it here makes every device re-download '
+        'its own uploaded version', () async {
+      when(() => upload.uploadFile('existing-id', 'doc.txt', any(), 10,
+              onProgress: any(named: 'onProgress')))
+          .thenAnswer((_) async =>
+              const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-4', totalSize: 10));
+      when(() => remote.createFileVersion('existing-id',
+          blobVersionId: 'hash-4',
+          sizeBytes: 10,
+          manifestHash: 'hash-4',
+          originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async => <String, dynamic>{});
+
+      await repository.uploadNewVersion(
+          'existing-id', 'doc.txt', const Stream.empty(), 10, originDeviceId: 'dev-1');
+
+      final captured = verify(() => remote.createFileVersion('existing-id',
+              blobVersionId: 'hash-4',
+              sizeBytes: 10,
+              manifestHash: 'hash-4',
+              originDeviceId: captureAny(named: 'originDeviceId')))
+          .captured;
+      expect(captured.single, 'dev-1');
+    });
+  });
+
+  test('uploadFile passes originDeviceId through to *both* createFile and '
+      'createFileVersion (F5, PR #16 review round 1) — the same write '
+      'produces two FileService calls (create the node, then record the '
+      'version), and dropping the tag from either makes this device '
+      're-download its own upload on the next pull', () async {
+    when(() => remote.createFile(
+          name: 'report.pdf',
+          isFolder: false,
+          parentId: null,
+          sizeBytes: 10,
+          originDeviceId: any(named: 'originDeviceId'),
+        )).thenAnswer((_) async => fileDto('new-id', 'report.pdf'));
+    when(() => upload.uploadFile('new-id', 'report.pdf', any(), 10,
+            onProgress: any(named: 'onProgress')))
+        .thenAnswer((_) async =>
+            const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-5', totalSize: 10));
+    when(() => remote.createFileVersion('new-id',
+        blobVersionId: 'hash-5',
+        sizeBytes: 10,
+        manifestHash: 'hash-5',
+        originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async => <String, dynamic>{});
+
+    await repository.uploadFile(
+        null, 'report.pdf', const Stream.empty(), 10, null, originDeviceId: 'dev-2');
+
+    final createCaptured = verify(() => remote.createFile(
+            name: 'report.pdf',
+            isFolder: false,
+            parentId: null,
+            sizeBytes: 10,
+            originDeviceId: captureAny(named: 'originDeviceId')))
+        .captured;
+    expect(createCaptured.single, 'dev-2');
+    final versionCaptured = verify(() => remote.createFileVersion('new-id',
+            blobVersionId: 'hash-5',
+            sizeBytes: 10,
+            manifestHash: 'hash-5',
+            originDeviceId: captureAny(named: 'originDeviceId')))
+        .captured;
+    expect(versionCaptured.single, 'dev-2');
   });
 }

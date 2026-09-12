@@ -1,11 +1,5 @@
 import 'package:equatable/equatable.dart';
 
-/// Mirrors SyncService's `SyncEventType` enum by declaration order — the
-/// server binds it from the ordinal, not the name (see
-/// `SyncRemoteDataSource.push`), so this enum's order must keep matching
-/// `ZDrive.SyncService.Domain.Enums.SyncEventType` exactly.
-enum SyncChangeType { create, update, delete, move, rename }
-
 /// One row of the local metadata mirror: what pull has already applied for
 /// one remote file/folder, and where it landed on disk.
 ///
@@ -59,30 +53,4 @@ class SyncFailedEvent extends Equatable {
 
   @override
   List<Object?> get props => [fileId, eventId, reason, failedAt];
-}
-
-/// One row of the persistent push outbox (`sync_outbox`): a report still
-/// owed to SyncService for a local change [LocalChangeScanner] has already
-/// committed to the mirror. [id] is null before the row exists (a fresh item
-/// not yet enqueued); [PushSyncService.drainOutbox] processes rows oldest id
-/// first. [baseCursor] is this device's pull cursor at the moment the change
-/// was made — see [SyncRemoteDataSource.push]'s doc comment for what the
-/// server does with it.
-class OutboxItem extends Equatable {
-  final int? id;
-  final String fileId;
-  final SyncChangeType type;
-  final int baseCursor;
-  final DateTime createdAt;
-
-  const OutboxItem({
-    this.id,
-    required this.fileId,
-    required this.type,
-    required this.baseCursor,
-    required this.createdAt,
-  });
-
-  @override
-  List<Object?> get props => [id, fileId, type, baseCursor, createdAt];
 }

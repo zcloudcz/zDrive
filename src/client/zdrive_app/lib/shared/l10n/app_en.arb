@@ -69,7 +69,6 @@
   "allSynced": "Everything is synced",
   "syncDescription": "Your files are up to date across all devices.",
   "syncDevices": "Devices",
-  "syncConflicts": "Conflicts",
   "syncNoDevices": "No devices registered",
   "syncNeverSynced": "Never synced",
   "syncChooseFolder": "Choose sync folder",
@@ -80,12 +79,7 @@
   "syncSkippedItems": "Skipped items",
   "syncFolderNotEmptyTitle": "Folder is not empty",
   "syncFolderNotEmptyMessage": "This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.",
-  "syncOutboxPending": "{count, plural, one{1 change waiting to be sent} other{{count} changes waiting to be sent}}",
-  "@syncOutboxPending": {
-    "placeholders": {
-      "count": { "type": "int" }
-    }
-  },
+  "syncUnsupportedPlatform": "Sync is available in the Windows and macOS app",
   "versionHistory": "Version history",
   "noVersions": "No versions yet",
   "restoreVersion": "Restore",

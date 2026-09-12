@@ -7,6 +7,8 @@ import 'core/auth/auth_bloc.dart';
 import 'core/auth/token_storage.dart';
 import 'core/di/injection.dart';
 import 'features/auth/domain/auth_repository.dart';
+import 'features/sync/data/sync_coordinator.dart';
+import 'features/sync/sync_support.dart';
 import 'shared/router/app_router.dart';
 import 'shared/theme/app_theme.dart';
 import 'shared/theme/theme_cubit.dart';
@@ -28,6 +30,14 @@ class ZDriveApp extends StatelessWidget {
     final authBloc = AuthBloc(
       authRepository: getIt<AuthRepository>(),
       tokenStorage: getIt<TokenStorage>(),
+      // core/auth must not depend on the sync feature directly — passed in
+      // as a plain callback instead (see AuthBloc's own doc comment). Only
+      // wired on platforms that run desktop sync at all, and resolved
+      // lazily inside the closure rather than here in build(): getIt<
+      // SyncCoordinator>() would construct PullSyncService/
+      // LocalChangeScanner, whose constructors read Platform.isWindows,
+      // which throws on web (PR #16 review round 2, blocking finding 1).
+      beforeLogout: isDesktopSyncSupported ? () => getIt<SyncCoordinator>().endSession() : null,
     )..add(const CheckAuthStatus());
 
     final router = createRouter(authBloc);

@@ -10,10 +10,16 @@ abstract class FileRepository {
     int page = 1,
     int pageSize = 50,
   });
-  Future<FileItem> createFolder(String? parentId, String name);
-  Future<FileItem> renameFile(String id, String newName);
-  Future<FileItem> moveFile(String id, String? newParentId);
-  Future<void> deleteFile(String id);
+  // [originDeviceId], when given, is passed through to FileService as
+  // X-Device-Id so the change-feed row this write produces is excluded from
+  // this same device's future pulls — see FileRemoteDataSource.getChanges.
+  // Only LocalChangeScanner's own writes pass it; the file browser's writes
+  // leave it null, so pull applies them locally like a change made from any
+  // other device.
+  Future<FileItem> createFolder(String? parentId, String name, {String? originDeviceId});
+  Future<FileItem> renameFile(String id, String newName, {String? originDeviceId});
+  Future<FileItem> moveFile(String id, String? newParentId, {String? originDeviceId});
+  Future<void> deleteFile(String id, {String? originDeviceId});
   Future<FileItem> restoreFile(String id);
   Future<PagedResult<FileItem>> listTrash({int page = 1, int pageSize = 50});
   Future<void> emptyTrash();
@@ -39,8 +45,9 @@ abstract class FileRepository {
     String fileName,
     Stream<List<int>> content,
     int sizeBytes,
-    void Function(double progress)? onProgress,
-  );
+    void Function(double progress)? onProgress, {
+    String? originDeviceId,
+  });
 
   /// Downloads and reassembles a file's complete content from its chunks —
   /// there is no assembled whole-file blob on the server.
@@ -55,8 +62,9 @@ abstract class FileRepository {
     String fileId,
     String fileName,
     Stream<List<int>> content,
-    int sizeBytes,
-  );
+    int sizeBytes, {
+    String? originDeviceId,
+  });
 
   /// Lists recorded versions of a file, newest first.
   Future<List<FileVersion>> getVersions(String fileId);

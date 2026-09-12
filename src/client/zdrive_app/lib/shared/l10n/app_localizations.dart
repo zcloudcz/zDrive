@@ -470,12 +470,6 @@ abstract class AppLocalizations {
   /// **'Devices'**
   String get syncDevices;
 
-  /// No description provided for @syncConflicts.
-  ///
-  /// In en, this message translates to:
-  /// **'Conflicts'**
-  String get syncConflicts;
-
   /// No description provided for @syncNoDevices.
   ///
   /// In en, this message translates to:
@@ -536,11 +530,11 @@ abstract class AppLocalizations {
   /// **'This folder already has files in it. Syncing will not overwrite anything it did not put there itself — files that would collide are left alone and listed as skipped instead.'**
   String get syncFolderNotEmptyMessage;
 
-  /// No description provided for @syncOutboxPending.
+  /// No description provided for @syncUnsupportedPlatform.
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, one{1 change waiting to be sent} other{{count} changes waiting to be sent}}'**
-  String syncOutboxPending(int count);
+  /// **'Sync is available in the Windows and macOS app'**
+  String get syncUnsupportedPlatform;
 
   /// No description provided for @versionHistory.
   ///

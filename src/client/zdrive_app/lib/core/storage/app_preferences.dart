@@ -8,6 +8,7 @@ class AppPreferences {
   static const _themeModeKey = 'theme_mode';
   static const _localeKey = 'locale';
   static const _syncFolderPathKey = 'sync_folder_path';
+  static const _syncOwnerUserIdKey = 'sync_owner_user_id';
 
   late Box<dynamic> _box;
 
@@ -42,5 +43,27 @@ class AppPreferences {
 
   Future<void> setSyncFolderPath(String path) async {
     await _box.put(_syncFolderPathKey, path);
+  }
+
+  /// Forgets the chosen sync folder — called by
+  /// [SyncCoordinator.startSession] when a different account is signing in
+  /// than the one this machine's sync state currently belongs to.
+  Future<void> clearSyncFolderPath() async {
+    await _box.delete(_syncFolderPathKey);
+  }
+
+  /// The user id this machine's sync state (mirror, device id, chosen
+  /// folder) currently belongs to. Null until the first sync session this
+  /// machine has ever had. Checked by [SyncCoordinator.startSession] so a
+  /// different account logging in on the same machine does not inherit the
+  /// previous one's sync state — see that method's doc comment.
+  String? get syncOwnerUserId => _box.get(_syncOwnerUserIdKey) as String?;
+
+  Future<void> setSyncOwnerUserId(String userId) async {
+    await _box.put(_syncOwnerUserIdKey, userId);
+  }
+
+  Future<void> clearSyncOwnerUserId() async {
+    await _box.delete(_syncOwnerUserIdKey);
   }
 }

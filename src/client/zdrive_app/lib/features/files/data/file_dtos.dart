@@ -41,6 +41,52 @@ class FileDto {
   Map<String, dynamic> toJson() => _$FileDtoToJson(this);
 }
 
+/// One row of the server's append-only change feed (`GET /files/changes`) —
+/// see `FileRemoteDataSource.getChanges`. [type] is the wire string
+/// ("Create"|"Update"|"Delete"|"Move"|"Rename"), kept as-is rather than
+/// parsed into an enum here since `PullSyncService` only ever needs to tell
+/// "Delete" apart from everything else.
+@JsonSerializable()
+class ChangeFeedItemDto {
+  final int id;
+  final String fileId;
+  final String type;
+  final DateTime occurredAt;
+
+  const ChangeFeedItemDto({
+    required this.id,
+    required this.fileId,
+    required this.type,
+    required this.occurredAt,
+  });
+
+  factory ChangeFeedItemDto.fromJson(Map<String, dynamic> json) =>
+      _$ChangeFeedItemDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$ChangeFeedItemDtoToJson(this);
+}
+
+/// One page of the change feed. [hasMore] is the server's own word on
+/// whether another page follows — [PullSyncService] pages on it directly
+/// instead of inferring "more" from a full page of [changes].
+@JsonSerializable()
+class ChangeFeedPageDto {
+  final List<ChangeFeedItemDto> changes;
+  final int nextCursor;
+  final bool hasMore;
+
+  const ChangeFeedPageDto({
+    required this.changes,
+    required this.nextCursor,
+    required this.hasMore,
+  });
+
+  factory ChangeFeedPageDto.fromJson(Map<String, dynamic> json) =>
+      _$ChangeFeedPageDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$ChangeFeedPageDtoToJson(this);
+}
+
 @JsonSerializable()
 class ShareDto {
   final String id;

@@ -18,21 +18,6 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   static const _cursorTable = 'sync_cursor';
   static const _bootstrapTable = 'bootstrap_state';
   static const _failedTable = 'failed_events';
-  static const _outboxTable = 'sync_outbox';
-
-  // IF NOT EXISTS: onUpgrade must be idempotent (PR #14 review round 4,
-  // R4-3) — sqflite_common_ffi has no onDowngrade, so opening a v2 db,
-  // rolling back to a v1 build, then opening v2 again re-runs onUpgrade(1,
-  // 2) and would otherwise fail with "table already exists".
-  static const _createOutboxTableSql = '''
-    CREATE TABLE IF NOT EXISTS $_outboxTable (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      fileId TEXT NOT NULL,
-      changeType INTEGER NOT NULL,
-      baseCursor INTEGER NOT NULL,
-      createdAt TEXT NOT NULL
-    )
-  ''';
 
   final String? _dbPathOverride;
 
@@ -66,7 +51,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     final db = await databaseFactory.openDatabase(
       dbPath,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onCreate: (db, version) async {
           await db.execute('''
             CREATE TABLE $_filesTable (
@@ -98,15 +83,33 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
               failedAt TEXT NOT NULL
             )
           ''');
-          await db.execute(_createOutboxTableSql);
+          // No sync_outbox table — the push outbox this version once had is
+          // gone (FileService's server-generated change feed replaces
+          // client push entirely, see PullSyncService/LocalChangeScanner).
         },
         // A device already running #12 has a version-1 database (every
-        // table above except sync_outbox) — add just the new table rather
-        // than recreating the schema, so its existing mirror rows survive
-        // the upgrade untouched.
+        // table above except sync_outbox); #14 added sync_outbox for v2.
+        // Both steps below run in sequence for a v1 database, in order, so
+        // it ends up at v3 exactly like a v2 database does.
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
-            await db.execute(_createOutboxTableSql);
+            // Historical v1 -> v2 step (PR #14): create the outbox table
+            // that existed between v2 and v3. Kept working even though the
+            // v3 step below immediately drops it again, so an old v1
+            // database passes through the same intermediate shape a v2
+            // database always did on its way to v3.
+            await db.execute(_historicOutboxTableSql);
+          }
+          if (oldVersion < 3) {
+            // The push outbox no longer exists — drop it if this database
+            // ever had one.
+            await db.execute('DROP TABLE IF EXISTS sync_outbox');
+            // The feed is a brand new id sequence that starts empty when
+            // the server change ships — every stored cursor from before it
+            // must reset to 0 ("everything since then"); pull is
+            // idempotent, so re-applying whatever a stale cursor would
+            // have skipped is safe. Mirror rows themselves are untouched.
+            await db.update(_cursorTable, {'cursor': 0});
           }
         },
       ),
@@ -114,6 +117,21 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     _db = db;
     return db;
   }
+
+  // IF NOT EXISTS: this step must stay idempotent (PR #14 review round 4,
+  // R4-3) — sqflite_common_ffi has no onDowngrade, so opening a v2 db,
+  // rolling back to a v1 build, then opening v2 again re-runs onUpgrade(1,
+  // 2) and would otherwise fail with "table already exists". Kept only for
+  // [onUpgrade]'s oldVersion < 2 step above — see its comment.
+  static const _historicOutboxTableSql = '''
+    CREATE TABLE IF NOT EXISTS sync_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fileId TEXT NOT NULL,
+      changeType INTEGER NOT NULL,
+      baseCursor INTEGER NOT NULL,
+      createdAt TEXT NOT NULL
+    )
+  ''';
 
   @override
   Future<SyncMirrorEntry?> getByServerId(String serverId) async {
@@ -234,7 +252,6 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     List<String> deleteServerIds = const [],
     String? deleteUnderPath,
     ({String from, String to})? rePath,
-    List<OutboxItem> enqueue = const [],
   }) async {
     final db = await _database;
     // Everything below runs against `txn`, never `db` — a plain db.insert
@@ -255,14 +272,17 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
       if (deleteUnderPath != null) {
         await _deleteChildren(txn, deleteUnderPath);
       }
-      for (final item in enqueue) {
-        await txn.insert(_outboxTable, {
-          'fileId': item.fileId,
-          'changeType': item.type.index,
-          'baseCursor': item.baseCursor,
-          'createdAt': item.createdAt.toIso8601String(),
-        });
-      }
+    });
+  }
+
+  @override
+  Future<void> clearAll() async {
+    final db = await _database;
+    await db.transaction((txn) async {
+      await txn.delete(_filesTable);
+      await txn.delete(_cursorTable);
+      await txn.delete(_bootstrapTable);
+      await txn.delete(_failedTable);
     });
   }
 
@@ -325,38 +345,8 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     await batch.commit(noResult: true);
   }
 
-  @override
-  Future<List<OutboxItem>> peekOutbox({int limit = 100}) async {
-    final db = await _database;
-    final rows = await db.query(_outboxTable, orderBy: 'id ASC', limit: limit);
-    return rows
-        .map((row) => OutboxItem(
-              id: row['id'] as int,
-              fileId: row['fileId'] as String,
-              type: SyncChangeType.values[row['changeType'] as int],
-              baseCursor: row['baseCursor'] as int,
-              createdAt: DateTime.parse(row['createdAt'] as String),
-            ))
-        .toList();
-  }
-
-  @override
-  Future<void> removeOutbox(int id) async {
-    final db = await _database;
-    await db.delete(_outboxTable, where: 'id = ?', whereArgs: [id]);
-  }
-
-  @override
-  Future<int> outboxCount() async {
-    final db = await _database;
-    final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM $_outboxTable');
-    return (rows.first['c'] as int?) ?? 0;
-  }
-
   /// Test-only escape hatch so a repository test can force a mid-transaction
-  /// failure (e.g. drop the outbox table before calling [commit]) to prove
-  /// atomicity, without a way to construct an invalid [OutboxItem] through
-  /// the public API — every one of its fields is already non-nullable.
+  /// failure (e.g. drop a table before calling [commit]) to prove atomicity.
   @visibleForTesting
   Future<Database> get debugDatabase => _database;
 

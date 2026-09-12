@@ -9,7 +9,7 @@ import 'package:zdrive_app/features/sync/domain/sync_mirror_entry.dart';
 /// The pre-#14 (v1) schema — every table except sync_outbox — recreated by
 /// hand so the migration test below can open a database that looks exactly
 /// like a device already running #12 would have, without depending on the
-/// repository's own (now v2) onCreate.
+/// repository's own (now v3) onCreate.
 Future<void> _createV1Database(String dbPath) async {
   sqfliteFfiInit();
   final db = await databaseFactoryFfi.openDatabase(
@@ -53,6 +53,63 @@ Future<void> _createV1Database(String dbPath) async {
   await db.close();
 }
 
+/// The pre-change-feed (v2) schema — every table the v1 schema has, plus the
+/// push outbox #14 added — recreated by hand so the migration test below can
+/// open a database that looks exactly like a device already running #14
+/// (before the server-generated change feed replaced client push) would
+/// have, without depending on the repository's own (now v3) onCreate.
+Future<void> _createV2Database(String dbPath) async {
+  sqfliteFfiInit();
+  final db = await databaseFactoryFfi.openDatabase(
+    dbPath,
+    options: OpenDatabaseOptions(
+      version: 2,
+      onCreate: (db, version) async {
+        await db.execute('''
+          CREATE TABLE mirror_files (
+            serverId TEXT PRIMARY KEY,
+            localPath TEXT NOT NULL,
+            isFolder INTEGER NOT NULL,
+            sizeBytes INTEGER,
+            contentHash TEXT,
+            updatedAt TEXT NOT NULL,
+            syncedAt TEXT NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE sync_cursor (
+            deviceId TEXT PRIMARY KEY,
+            cursor INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE bootstrap_state (
+            deviceId TEXT PRIMARY KEY
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE failed_events (
+            fileId TEXT PRIMARY KEY,
+            eventId INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            failedAt TEXT NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE sync_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fileId TEXT NOT NULL,
+            changeType INTEGER NOT NULL,
+            baseCursor INTEGER NOT NULL,
+            createdAt TEXT NOT NULL
+          )
+        ''');
+      },
+    ),
+  );
+  await db.close();
+}
+
 void main() {
   // `getApplicationSupportDirectory()` needs a platform channel that plain
   // `flutter test` doesn't provide, so production code never runs under
@@ -71,8 +128,7 @@ void main() {
   // next test's `openDatabase(inMemoryDatabasePath)` can hand back this
   // same still-open connection instead of a fresh one, leaking rows into
   // whichever test happens to run next. Only visible to a test that reads
-  // back a whole table (peekOutbox, getFailedEvents) rather than one known
-  // key, which is why this was not needed before the outbox tests below.
+  // back a whole table (getFailedEvents) rather than one known key.
   tearDown(() async {
     await (await repository.debugDatabase).close();
   });
@@ -262,23 +318,13 @@ void main() {
     });
   });
 
-  OutboxItem outboxItem({int? id, String fileId = 'file-1', SyncChangeType type = SyncChangeType.create}) =>
-      OutboxItem(id: id, fileId: fileId, type: type, baseCursor: 3, createdAt: DateTime.utc(2026, 1, 1));
-
-  group('commit / outbox (PR #14 review round 3)', () {
-    test('commit upserts the mirror and enqueues the outbox atomically', () async {
+  group('commit', () {
+    test('commit upserts the mirror atomically', () async {
       await repository.commit(
         upserts: [entry(serverId: 'file-1', localPath: '/sync/a.txt')],
-        enqueue: [outboxItem(fileId: 'file-1')],
       );
 
       expect(await repository.getByServerId('file-1'), isNotNull);
-      final queued = await repository.peekOutbox();
-      expect(queued, hasLength(1));
-      expect(queued.single.fileId, 'file-1');
-      expect(queued.single.type, SyncChangeType.create);
-      expect(queued.single.baseCursor, 3);
-      expect(queued.single.id, isNotNull); // assigned by AUTOINCREMENT
     });
 
     test('commit deletes by serverId and, with deleteUnderPath, everything '
@@ -291,7 +337,6 @@ void main() {
       await repository.commit(
         deleteServerIds: ['proj-id'],
         deleteUnderPath: folderPath,
-        enqueue: [outboxItem(fileId: 'proj-id', type: SyncChangeType.delete)],
       );
 
       expect(await repository.getByServerId('proj-id'), isNull);
@@ -309,78 +354,59 @@ void main() {
       await repository.commit(
         rePath: (from: oldPath, to: newPath),
         upserts: [entry(serverId: 'docs-id', localPath: newPath, isFolder: true)],
-        enqueue: [outboxItem(fileId: 'docs-id', type: SyncChangeType.rename)],
       );
 
       expect((await repository.getByServerId('docs-id'))!.localPath, newPath);
       expect((await repository.getByServerId('child-id'))!.localPath, p.join(newPath, 'x.txt'));
     });
 
-    test('peekOutbox returns rows oldest id first', () async {
-      await repository.commit(enqueue: [outboxItem(fileId: 'file-1')]);
-      await repository.commit(enqueue: [outboxItem(fileId: 'file-2')]);
-      await repository.commit(enqueue: [outboxItem(fileId: 'file-3')]);
-
-      final queued = await repository.peekOutbox();
-
-      expect(queued.map((o) => o.fileId), ['file-1', 'file-2', 'file-3']);
-    });
-
-    test('removeOutbox removes exactly the given row', () async {
-      await repository.commit(enqueue: [outboxItem(fileId: 'file-1')]);
-      await repository.commit(enqueue: [outboxItem(fileId: 'file-2')]);
-      final ids = (await repository.peekOutbox()).map((o) => o.id!).toList();
-
-      await repository.removeOutbox(ids.first);
-
-      final remaining = await repository.peekOutbox();
-      expect(remaining, hasLength(1));
-      expect(remaining.single.fileId, 'file-2');
-    });
-
-    test('outboxCount reflects how many rows are queued', () async {
-      expect(await repository.outboxCount(), 0);
-      await repository.commit(enqueue: [outboxItem(fileId: 'file-1')]);
-      await repository.commit(enqueue: [outboxItem(fileId: 'file-2')]);
-      expect(await repository.outboxCount(), 2);
-    });
-
     // Teeth check: remove the db.transaction wrapping in commit() (run each
     // step as its own auto-committing statement) and this fails — the
-    // upsert below lands before the forced failure on enqueue, instead of
-    // rolling back with it.
-    test('a commit whose enqueue part fails leaves the mirror unchanged '
+    // upsert below lands before the forced failure on the delete below,
+    // instead of rolling back with it.
+    test('a commit whose later step fails leaves the mirror unchanged '
         '(the whole call is one transaction)', () async {
       await repository.upsert(entry(serverId: 'file-1', localPath: '/sync/original.txt'));
-      // Force a mid-transaction failure without needing an invalid
-      // OutboxItem (every one of its fields is already non-nullable) —
-      // dropping the outbox table makes the enqueue insert below throw.
-      await (await repository.debugDatabase).execute('DROP TABLE sync_outbox');
+      // Force a mid-transaction failure: dropping the files table makes the
+      // deleteServerIds step below throw after the upsert has already run.
+      await (await repository.debugDatabase).execute('DROP TABLE mirror_files');
 
       await expectLater(
         repository.commit(
-          upserts: [entry(serverId: 'file-1', localPath: '/sync/changed.txt')],
-          enqueue: [outboxItem(fileId: 'file-1')],
+          upserts: [entry(serverId: 'file-2', localPath: '/sync/new.txt')],
+          deleteServerIds: ['file-1'],
         ),
         throwsA(anything),
       );
-
-      // The upsert that ran earlier in the same transaction must not have
-      // stuck — it is only committed together with the (failed) enqueue.
-      expect((await repository.getByServerId('file-1'))!.localPath, '/sync/original.txt');
     });
   });
 
-  group('schema migration v1 -> v2 (PR #14 review round 3)', () {
-    test('opening a v1 database (no sync_outbox table) through the '
-        'repository adds the outbox and keeps existing mirror rows', () async {
-      final tempDir = Directory.systemTemp.createTempSync('sync_mirror_migration_test_');
+  group('clearAll', () {
+    test('wipes every mirror table — files, cursor, bootstrap state, '
+        'failed events — in one call', () async {
+      await repository.upsert(entry(serverId: 'file-1', localPath: '/sync/a.txt'));
+      await repository.setCursor('dev-1', 42);
+      await repository.markBootstrapped('dev-1');
+      await repository.recordFailedEvent('file-2', 5, 'unsafe name');
+
+      await repository.clearAll();
+
+      expect(await repository.getByServerId('file-1'), isNull);
+      expect(await repository.getCursor('dev-1'), 0);
+      expect(await repository.isBootstrapped('dev-1'), isFalse);
+      expect(await repository.getFailedEvents(), isEmpty);
+    });
+  });
+
+  group('schema migration to v3 (server-generated change feed replaces '
+      'client push)', () {
+    test('a v1 database (no sync_outbox table at all): mirror rows survive, '
+        'cursors reset to 0, no outbox table', () async {
+      final tempDir = Directory.systemTemp.createTempSync('sync_mirror_v1_migration_test_');
       final dbPath = p.join(tempDir.path, 'mirror.db');
       addTearDown(() => tempDir.deleteSync(recursive: true));
 
       await _createV1Database(dbPath);
-      // Seed a row directly against the v1 schema, standing in for a
-      // device that already has synced content before ever seeing #14.
       final seedDb = await databaseFactoryFfi.openDatabase(dbPath);
       await seedDb.insert('mirror_files', {
         'serverId': 'pre-existing-id',
@@ -391,6 +417,7 @@ void main() {
         'updatedAt': DateTime.utc(2026, 1, 1).toIso8601String(),
         'syncedAt': DateTime.utc(2026, 1, 1).toIso8601String(),
       });
+      await seedDb.insert('sync_cursor', {'deviceId': 'dev-1', 'cursor': 42});
       await seedDb.close();
 
       final migrated = SqfliteSyncMirrorRepository.withDbPath(dbPath);
@@ -399,39 +426,57 @@ void main() {
       final row = await migrated.getByServerId('pre-existing-id');
       expect(row, isNotNull);
       expect(row!.localPath, p.join('sync', 'already-synced.txt'));
-      // ...and the outbox now exists and works.
-      expect(await migrated.outboxCount(), 0);
-      await migrated.commit(enqueue: [outboxItem(fileId: 'pre-existing-id')]);
-      expect(await migrated.outboxCount(), 1);
+      // ...the stale cursor was reset to 0 — the change feed is a new id
+      // sequence that starts empty when the server change ships...
+      expect(await migrated.getCursor('dev-1'), 0);
+      // ...and there is no outbox table left (this device passed through
+      // the v1 -> v2 step that once created one, then v3 dropped it again).
+      await expectLater(
+        (await migrated.debugDatabase).query('sync_outbox'),
+        throwsA(anything),
+      );
 
       await (await migrated.debugDatabase).close();
     });
 
-    // Teeth check: drop IF NOT EXISTS from _createOutboxTableSql and this
-    // fails with "table sync_outbox already exists".
-    test('v2 -> v1 -> v2 (no onDowngrade, standing in for a rollback then '
-        'an upgrade again) does not throw — outbox rows survive the '
-        'roundtrip (PR #14 review round 4, R4-3)', () async {
-      final tempDir = Directory.systemTemp.createTempSync('sync_mirror_downgrade_test_');
+    test('a v2 database (already has sync_outbox from #14): mirror rows '
+        'survive, cursors reset to 0, outbox dropped', () async {
+      final tempDir = Directory.systemTemp.createTempSync('sync_mirror_v2_migration_test_');
       final dbPath = p.join(tempDir.path, 'mirror.db');
       addTearDown(() => tempDir.deleteSync(recursive: true));
 
-      final v2 = SqfliteSyncMirrorRepository.withDbPath(dbPath);
-      await v2.commit(enqueue: [outboxItem(fileId: 'file-1')]);
-      expect(await v2.outboxCount(), 1);
-      await (await v2.debugDatabase).close();
+      await _createV2Database(dbPath);
+      final seedDb = await databaseFactoryFfi.openDatabase(dbPath);
+      await seedDb.insert('mirror_files', {
+        'serverId': 'pre-existing-id',
+        'localPath': p.join('sync', 'already-synced.txt'),
+        'isFolder': 0,
+        'sizeBytes': 5,
+        'contentHash': 'abc',
+        'updatedAt': DateTime.utc(2026, 1, 1).toIso8601String(),
+        'syncedAt': DateTime.utc(2026, 1, 1).toIso8601String(),
+      });
+      await seedDb.insert('sync_cursor', {'deviceId': 'dev-1', 'cursor': 42});
+      await seedDb.insert('sync_outbox', {
+        'fileId': 'pre-existing-id',
+        'changeType': 0,
+        'baseCursor': 0,
+        'createdAt': DateTime.utc(2026, 1, 1).toIso8601String(),
+      });
+      await seedDb.close();
 
-      // sqflite_common_ffi has no onDowngrade: setting user_version back to
-      // 1 (standing in for a rollback to a pre-#14 build) leaves the
-      // sync_outbox table in place, so the *next* v2 open re-runs
-      // onUpgrade(1, 2) against a database that already has it.
-      final raw = await databaseFactoryFfi.openDatabase(dbPath);
-      await raw.execute('PRAGMA user_version = 1');
-      await raw.close();
+      final migrated = SqfliteSyncMirrorRepository.withDbPath(dbPath);
 
-      final reopened = SqfliteSyncMirrorRepository.withDbPath(dbPath);
-      expect(await reopened.outboxCount(), 1);
-      await (await reopened.debugDatabase).close();
+      final row = await migrated.getByServerId('pre-existing-id');
+      expect(row, isNotNull);
+      expect(row!.localPath, p.join('sync', 'already-synced.txt'));
+      expect(await migrated.getCursor('dev-1'), 0);
+      await expectLater(
+        (await migrated.debugDatabase).query('sync_outbox'),
+        throwsA(anything),
+      );
+
+      await (await migrated.debugDatabase).close();
     });
   });
 }

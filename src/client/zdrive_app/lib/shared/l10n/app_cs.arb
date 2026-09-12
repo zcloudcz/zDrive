@@ -62,7 +62,6 @@
   "allSynced": "Vše je synchronizované",
   "syncDescription": "Vaše soubory jsou aktuální na všech zařízeních.",
   "syncDevices": "Zařízení",
-  "syncConflicts": "Konflikty",
   "syncNoDevices": "Žádná zaregistrovaná zařízení",
   "syncNeverSynced": "Nikdy nesynchronizováno",
   "syncChooseFolder": "Vybrat synchronizovanou složku",
@@ -73,12 +72,7 @@
   "syncSkippedItems": "Přeskočené položky",
   "syncFolderNotEmptyTitle": "Složka není prázdná",
   "syncFolderNotEmptyMessage": "Tato složka už obsahuje soubory. Synchronizace nic z toho, co v ní není z jejího vlastního zásahu, nepřepíše — kolidující soubory zůstanou beze změny a zobrazí se jako přeskočené.",
-  "syncOutboxPending": "{count, plural, one{1 změna čeká na odeslání} few{{count} změny čekají na odeslání} other{{count} změn čeká na odeslání}}",
-  "@syncOutboxPending": {
-    "placeholders": {
-      "count": { "type": "int" }
-    }
-  },
+  "syncUnsupportedPlatform": "Synchronizace je k dispozici v aplikaci pro Windows a macOS",
   "versionHistory": "Historie verzí",
   "noVersions": "Zatím žádné verze",
   "restoreVersion": "Obnovit",

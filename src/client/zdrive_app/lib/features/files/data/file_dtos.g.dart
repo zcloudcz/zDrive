@@ -32,6 +32,38 @@ Map<String, dynamic> _$FileDtoToJson(FileDto instance) => <String, dynamic>{
   'isDeleted': instance.isDeleted,
 };
 
+ChangeFeedItemDto _$ChangeFeedItemDtoFromJson(Map<String, dynamic> json) =>
+    ChangeFeedItemDto(
+      id: (json['id'] as num).toInt(),
+      fileId: json['fileId'] as String,
+      type: json['type'] as String,
+      occurredAt: DateTime.parse(json['occurredAt'] as String),
+    );
+
+Map<String, dynamic> _$ChangeFeedItemDtoToJson(ChangeFeedItemDto instance) =>
+    <String, dynamic>{
+      'id': instance.id,
+      'fileId': instance.fileId,
+      'type': instance.type,
+      'occurredAt': instance.occurredAt.toIso8601String(),
+    };
+
+ChangeFeedPageDto _$ChangeFeedPageDtoFromJson(Map<String, dynamic> json) =>
+    ChangeFeedPageDto(
+      changes: (json['changes'] as List<dynamic>)
+          .map((e) => ChangeFeedItemDto.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      nextCursor: (json['nextCursor'] as num).toInt(),
+      hasMore: json['hasMore'] as bool,
+    );
+
+Map<String, dynamic> _$ChangeFeedPageDtoToJson(ChangeFeedPageDto instance) =>
+    <String, dynamic>{
+      'changes': instance.changes,
+      'nextCursor': instance.nextCursor,
+      'hasMore': instance.hasMore,
+    };
+
 ShareDto _$ShareDtoFromJson(Map<String, dynamic> json) => ShareDto(
   id: json['id'] as String,
   fileId: json['fileId'] as String,

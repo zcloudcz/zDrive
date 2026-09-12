@@ -6,19 +6,14 @@ import 'package:dio/dio.dart';
 import 'package:injectable/injectable.dart';
 import 'package:path/path.dart' as p;
 
+import '../../files/data/file_dtos.dart';
+import '../../files/data/file_remote_data_source.dart';
 import '../../files/domain/file_item.dart';
 import '../../files/domain/file_repository.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
 import 'device_registration_service.dart';
 import 'sync_name_rules.dart';
-import 'sync_remote_data_source.dart';
-
-/// The server returns at most this many events per pull
-/// (`PullChangesQueryHandler.MaxEventsPerPull`) — a full page means there may
-/// be more, so [pullOnce] keeps polling until a short page tells it the tail
-/// is reached.
-const _maxEventsPerPage = 500;
 
 /// Thrown when a server-supplied name cannot become a safe local path —
 /// either it is not a single plain path segment (a drive letter, a UNC
@@ -79,7 +74,7 @@ class LocalConflictException implements Exception {
 /// those usually do resolve on a later retry.
 @lazySingleton
 class PullSyncService {
-  final SyncRemoteDataSource _syncDataSource;
+  final FileRemoteDataSource _filesDataSource;
   final DeviceRegistrationService _deviceRegistration;
   final SyncMirrorRepository _mirror;
   final FileRepository _fileRepository;
@@ -92,7 +87,7 @@ class PullSyncService {
   final bool _isWindows;
 
   PullSyncService(
-    this._syncDataSource,
+    this._filesDataSource,
     this._deviceRegistration,
     this._mirror,
     this._fileRepository, {
@@ -151,16 +146,25 @@ class PullSyncService {
     var applied = 0;
     while (true) {
       final cursor = await _mirror.getCursor(deviceId);
-      final page = await _syncDataSource.pull(deviceId, cursor);
-      final events = (page['events'] as List).cast<Map<String, dynamic>>();
-      if (events.isEmpty) break;
+      final page = await _filesDataSource.getChanges(cursor, deviceId: deviceId);
 
-      for (final event in events) {
-        await _applyEvent(event, deviceId, syncFolderPath);
+      for (final change in page.changes) {
+        await _applyEvent(change, deviceId, syncFolderPath);
         applied++;
       }
 
-      if (events.length < _maxEventsPerPage) break;
+      // The server drops this device's own writes from the page *after*
+      // fixing nextCursor, so nextCursor can lie beyond the last item here —
+      // or a page can be empty while nextCursor still moved. Persist it, or
+      // every poll re-reads the same run of this device's own changes (and,
+      // with an empty page, never gets past them). Only written when it is
+      // ahead of what _applyEvent already stored for the last item.
+      final lastStored = page.changes.isEmpty ? cursor : page.changes.last.id;
+      if (page.nextCursor > lastStored) {
+        await _mirror.setCursor(deviceId, page.nextCursor);
+      }
+
+      if (!page.hasMore || page.nextCursor <= cursor) break;
     }
 
     // Runs after the event-log drain above, not before: that way the
@@ -223,25 +227,24 @@ class PullSyncService {
   }
 
   Future<void> _applyEvent(
-    Map<String, dynamic> event,
+    ChangeFeedItemDto change,
     String deviceId,
     String syncFolderPath,
   ) async {
-    final eventId = (event['id'] as num).toInt();
-    final fileId = event['fileId'] as String;
-    final eventType = event['eventType'] as String;
+    final eventId = change.id;
+    final fileId = change.fileId;
 
     try {
-      if (eventType == 'Delete') {
-        await _applyDelete(fileId, syncFolderPath);
-      } else {
-        // Create/Update/Move/Rename are all handled the same way: fetch the
-        // file's current state and reconcile the local copy against it.
-        // This also covers move/rename without a separate code path — the
-        // mirror lookup inside finds the entry's previous local path (if
-        // any) and relocates it when the resolved path has changed.
-        await _applyUpsert(fileId, syncFolderPath);
-      }
+      // Create/Update/Move/Rename/Delete are all handled the same way:
+      // fetch the file's current state and reconcile the local copy against
+      // it. _applyUpsert's own getFile call already 404s straight into
+      // _applyDelete, so a Delete feed item needs no separate branch — and
+      // a file that is live again (deleted, then restored before this
+      // device pulled) is simply upserted instead of wrongly removed. This
+      // also covers move/rename without a separate code path — the mirror
+      // lookup inside finds the entry's previous local path (if any) and
+      // relocates it when the resolved path has changed.
+      await _applyUpsert(fileId, syncFolderPath);
       // A previous failure for this file, if any, no longer applies now
       // that a later event for it has gone through cleanly.
       await _mirror.clearFailedEvent(fileId);

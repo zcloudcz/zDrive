@@ -198,9 +198,6 @@ class AppLocalizationsCs extends AppLocalizations {
   String get syncDevices => 'Zařízení';
 
   @override
-  String get syncConflicts => 'Konflikty';
-
-  @override
   String get syncNoDevices => 'Žádná zaregistrovaná zařízení';
 
   @override
@@ -233,16 +230,8 @@ class AppLocalizationsCs extends AppLocalizations {
       'Tato složka už obsahuje soubory. Synchronizace nic z toho, co v ní není z jejího vlastního zásahu, nepřepíše — kolidující soubory zůstanou beze změny a zobrazí se jako přeskočené.';
 
   @override
-  String syncOutboxPending(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count změn čeká na odeslání',
-      few: '$count změny čekají na odeslání',
-      one: '1 změna čeká na odeslání',
-    );
-    return '$_temp0';
-  }
+  String get syncUnsupportedPlatform =>
+      'Synchronizace je k dispozici v aplikaci pro Windows a macOS';
 
   @override
   String get versionHistory => 'Historie verzí';
