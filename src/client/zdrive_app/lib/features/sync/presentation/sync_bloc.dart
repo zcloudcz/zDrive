@@ -190,6 +190,12 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       // this handler already gets.
       await _syncCoordinator.startSession(_userId);
       final loaded = await _fetchLoadedState();
+      // Same close()-during-await guard as _onSyncFolderChosen (see its
+      // comment) — the bloc can close while either await above is pending,
+      // and without this, a handler resuming during that window would
+      // re-arm _startPolling/_startWatching on a bloc that already closed
+      // (PR #16 review round 6, F2).
+      if (emit.isDone || isClosed) return;
       emit(loaded);
       if (loaded.syncFolderPath != null) {
         _startPolling();
@@ -224,16 +230,19 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         await _preferences.setSyncFolderPath(event.path);
       }
       // The bloc can close while the await above is pending (e.g. logout
-      // during a folder switch). emit() itself is harmless at that point —
-      // Bloc.close() cancels this handler's emitter before awaiting the
-      // handler's future, and a canceled emitter just drops the state
-      // silently — but _startPolling/_startWatching below are not: a
-      // Timer.periodic or stream subscription created after close() outlives
-      // the bloc, and the timer's add() then throws an uncaught StateError
-      // once it next fires, with the folder watch left running forever
-      // (PR #16 review round 5, Codex C1). Bailing out here skips both the
-      // stale emit and the re-arm.
-      if (emit.isDone) return;
+      // during a folder switch). emit.isDone alone does not cover that:
+      // Bloc.close() (bloc 9.x) awaits _eventController.close() FIRST and
+      // only cancels this handler's emitter afterwards, so a handler
+      // resuming inside that first await still sees emit.isDone == false and
+      // would re-arm _startPolling/_startWatching below on a bloc that is
+      // already shutting down — a Timer.periodic or stream subscription
+      // created after close() outlives the bloc, and the timer's add() then
+      // throws an uncaught StateError once it next fires, with the folder
+      // watch left running forever (PR #16 review round 6, F1). isClosed
+      // flips synchronously the instant close() is called, so checking it
+      // too closes that window. Bailing out here skips both the stale emit
+      // and the re-arm.
+      if (emit.isDone || isClosed) return;
 
       // Reads `state` again here instead of reusing `current`: the in-flight
       // pull's own handler can land its "pull finished" emit (isPulling:
@@ -256,9 +265,10 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         emit(latest.copyWith(syncFolderPath: event.path, isPulling: false));
       } else {
         final loaded = await _fetchLoadedState();
-        // Same close()-during-await guard as above, for this branch's own
-        // await.
-        if (emit.isDone) return;
+        // Same close()-during-await guard as above (see its comment), for
+        // this branch's own await — isClosed is required here too, not just
+        // emit.isDone, for the same reason.
+        if (emit.isDone || isClosed) return;
         emit(loaded);
       }
       _startPolling();

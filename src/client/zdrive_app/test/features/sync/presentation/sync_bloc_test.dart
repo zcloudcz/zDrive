@@ -49,6 +49,12 @@ void main() {
       );
 
   group('LoadSyncStatus', () {
+    // Shared by the round-6 F2 test below only, like pullGate in the
+    // 'PullRequested' group — reassigned fresh in that test's own setUp.
+    late Completer<List<Map<String, dynamic>>> devicesGate;
+    late Completer<void> reachedGetDevices;
+    late bool watchStarted;
+
     blocTest<SyncBloc, SyncState>(
       'emits [SyncLoading, SyncLoaded] with mapped devices',
       build: buildBloc,
@@ -162,6 +168,49 @@ void main() {
       wait: const Duration(milliseconds: 20),
       verify: (_) {
         verifyNever(() => mockDataSource.getDevices());
+        verifyNever(() => mockSyncCoordinator.syncOnce(any()));
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'does not re-arm the poll timer or the folder watch when getDevices() '
+      'resolves *during* close() itself — _onLoadSyncStatus had no '
+      'close()-during-await guard at all before this fix, unlike '
+      'SyncFolderChosen\'s round-5 guard (PR #16 review round 6, F2)',
+      build: () => buildBloc(watch: (_) {
+        watchStarted = true;
+        return const Stream<FileSystemEvent>.empty();
+      }),
+      setUp: () {
+        watchStarted = false;
+        devicesGate = Completer<List<Map<String, dynamic>>>();
+        reachedGetDevices = Completer<void>();
+        when(() => mockDataSource.getDevices()).thenAnswer((_) {
+          reachedGetDevices.complete();
+          return devicesGate.future;
+        });
+        when(() => mockPreferences.syncFolderPath).thenReturn('/local/sync');
+        // Stubbed broadly so that, if the guard is missing, the handler
+        // runs to completion and fails on the verifyNever below instead of
+        // on an unstubbed-mock error.
+        when(() => mockSyncCoordinator.syncOnce(any()))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+      },
+      act: (bloc) async {
+        bloc.add(const LoadSyncStatus());
+        await reachedGetDevices.future;
+        // Unlike `await bloc.close(); devicesGate.complete();`, which would
+        // only prove the after-close case already covered elsewhere,
+        // releasing the gate WHILE close() is still in flight lands
+        // getDevices()'s continuation inside the close()-in-progress window
+        // this test is pinning.
+        final closing = bloc.close();
+        devicesGate.complete([]);
+        await closing;
+      },
+      verify: (_) {
+        expect(watchStarted, isFalse);
         verifyNever(() => mockSyncCoordinator.syncOnce(any()));
       },
     );
@@ -727,6 +776,53 @@ void main() {
         resetGate.complete();
         await Future<void>.value();
         await Future<void>.value();
+      },
+      verify: (_) {
+        expect(watchStarted, isFalse);
+        verifyNever(() => mockSyncCoordinator.syncOnce(any()));
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'does not re-arm the poll timer or the folder watch when the reset '
+      'resolves *during* close() itself, not only after close() has fully '
+      'finished — the round-5 C1 test above releases its gate only once '
+      '`await bloc.close()` has already completed, so it cannot see this '
+      'narrower window: emit.isDone stays false until close() has awaited '
+      '_eventController.close() to completion, but isClosed flips '
+      'synchronously the instant close() is called, so only checking both '
+      'closes the window (PR #16 review round 6, F1)',
+      build: () => buildBloc(watch: (_) {
+        watchStarted = true;
+        return const Stream<FileSystemEvent>.empty();
+      }),
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        watchStarted = false;
+        resetGate = Completer<void>();
+        reachedReset = Completer<void>();
+        when(() => mockSyncCoordinator.resetForNewFolder('/new')).thenAnswer((_) {
+          reachedReset.complete();
+          return resetGate.future;
+        });
+        // Stubbed broadly so that, if the guard is missing, the handler
+        // runs to completion and fails on the verifyNever below instead of
+        // on an unstubbed-mock error.
+        when(() => mockSyncCoordinator.syncOnce('/new'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+      },
+      act: (bloc) async {
+        bloc.add(const SyncFolderChosen('/new'));
+        await reachedReset.future;
+        // Unlike `await bloc.close(); resetGate.complete();` above, the gate
+        // is released WHILE close() is still in flight — not after it has
+        // fully finished — to land resetForNewFolder's continuation inside
+        // the close()-in-progress window this test is pinning.
+        final closing = bloc.close();
+        resetGate.complete();
+        await closing;
       },
       verify: (_) {
         expect(watchStarted, isFalse);
