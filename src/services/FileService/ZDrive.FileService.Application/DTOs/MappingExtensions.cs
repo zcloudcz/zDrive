@@ -40,4 +40,10 @@ public static class MappingExtensions
         version.CreatedBy,
         version.Comment,
         version.CreatedAt);
+
+    public static FileChangeDto ToDto(this FileChange change) => new(
+        change.Id,
+        change.FileId,
+        change.Type.ToString(),
+        change.OccurredAt);
 }

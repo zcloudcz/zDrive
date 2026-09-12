@@ -11,6 +11,7 @@ public sealed class FileDbContext : DbContext, IFileDbContext
     public DbSet<FileNode> FileNodes => Set<FileNode>();
     public DbSet<FileVersion> FileVersions => Set<FileVersion>();
     public DbSet<Share> Shares => Set<Share>();
+    public DbSet<FileChange> FileChanges => Set<FileChange>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
