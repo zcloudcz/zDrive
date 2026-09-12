@@ -223,6 +223,17 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       } else {
         await _preferences.setSyncFolderPath(event.path);
       }
+      // The bloc can close while the await above is pending (e.g. logout
+      // during a folder switch). emit() itself is harmless at that point —
+      // Bloc.close() cancels this handler's emitter before awaiting the
+      // handler's future, and a canceled emitter just drops the state
+      // silently — but _startPolling/_startWatching below are not: a
+      // Timer.periodic or stream subscription created after close() outlives
+      // the bloc, and the timer's add() then throws an uncaught StateError
+      // once it next fires, with the folder watch left running forever
+      // (PR #16 review round 5, Codex C1). Bailing out here skips both the
+      // stale emit and the re-arm.
+      if (emit.isDone) return;
 
       // Reads `state` again here instead of reusing `current`: the in-flight
       // pull's own handler can land its "pull finished" emit (isPulling:
@@ -244,7 +255,11 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         // (PR #16 review round 2, finding 4).
         emit(latest.copyWith(syncFolderPath: event.path, isPulling: false));
       } else {
-        emit(await _fetchLoadedState());
+        final loaded = await _fetchLoadedState();
+        // Same close()-during-await guard as above, for this branch's own
+        // await.
+        if (emit.isDone) return;
+        emit(loaded);
       }
       _startPolling();
       _startWatching(event.path);
@@ -315,6 +330,17 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
       final failedEvents = await _pullService.getFailedEvents();
+      if (generation != _syncGeneration) {
+        // A second, independent check — the one above only proves this run
+        // wasn't already stale before spending the two requests just made;
+        // it says nothing about whether a folder switch landed *during*
+        // either await. Without this, a switch that lands here would still
+        // let this tail emit the OLD folder's device list and failed-events
+        // snapshot (and isPulling: false) into whatever the NEW folder's own
+        // run has since put in state (PR #16 review round 5, Codex C2).
+        log('stale sync run for $path finished after folder change; dropping result', name: 'SyncBloc');
+        return;
+      }
       final latest = state;
       if (latest is SyncLoaded) {
         emit(latest.copyWith(

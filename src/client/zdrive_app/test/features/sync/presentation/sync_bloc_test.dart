@@ -302,6 +302,20 @@ void main() {
     // below, so the new folder's own run can be held open independently of
     // the stale old run's pullGate.
     late Completer<SyncRunResult> newSyncGate;
+    // Shared by the round-5 C2 test only: gates the stale old run's
+    // getDevices() call so it can be released after the new folder's own
+    // run has already finished, and signals once that call has actually
+    // been reached.
+    late Completer<List<Map<String, dynamic>>> devicesGate;
+    late Completer<void> reachedGetDevices;
+    // Shared by the round-5 C1 test only: gates resetForNewFolder so
+    // bloc.close() can be called while _onSyncFolderChosen is still awaiting
+    // it, and signals once that call has actually been reached.
+    late Completer<void> resetGate;
+    late Completer<void> reachedReset;
+    // Records whether _startWatching's injected watch function was invoked
+    // — the round-5 C1 test's proxy for "polling/watching was re-armed".
+    late bool watchStarted;
 
     blocTest<SyncBloc, SyncState>(
       'persists the chosen folder and triggers a sync, when no folder was '
@@ -599,6 +613,125 @@ void main() {
         await bloc.stream.firstWhere((s) => s is SyncLoaded && !s.isPulling);
       },
       verify: (_) => verify(() => mockSyncCoordinator.syncOnce('/old')).called(2),
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'a stale old-folder run does not clobber the new folder\'s state by '
+      'waking up between getDevices() and the emit, after the new folder\'s '
+      'own run has already finished — the generation was checked right '
+      'after syncOnce, but not again right before this emit, so a switch '
+      'landing during getDevices()/getFailedEvents() was not caught (PR #16 '
+      'review round 5, Codex C2)',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        devicesGate = Completer<List<Map<String, dynamic>>>();
+        reachedGetDevices = Completer<void>();
+        var getDevicesCalls = 0;
+        // syncOnce('/old') resolves immediately — this test is about the
+        // two awaits *after* it, not about syncOnce itself.
+        when(() => mockSyncCoordinator.syncOnce('/old'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 1, pushed: 0));
+        when(() => mockSyncCoordinator.syncOnce('/new'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockSyncCoordinator.resetForNewFolder('/new')).thenAnswer((_) async {});
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        // The FIRST call is the old run's — held open so the folder switch
+        // below can land while it is still in flight. The SECOND call is
+        // the new run's own — resolves immediately with a distinct device
+        // so a leaked old-run emit is unmistakable in the final state.
+        when(() => mockDataSource.getDevices()).thenAnswer((_) {
+          getDevicesCalls++;
+          if (getDevicesCalls == 1) {
+            reachedGetDevices.complete();
+            return devicesGate.future;
+          }
+          return Future.value([
+            {'id': 'dev-new', 'name': 'New device', 'platform': 'windows'},
+          ]);
+        });
+      },
+      act: (bloc) async {
+        bloc.add(const PullRequested());
+        // Deterministic proof the old run is suspended inside getDevices(),
+        // past its first (post-syncOnce) generation check — not a guessed
+        // number of microtask flushes.
+        await reachedGetDevices.future;
+        bloc.add(const SyncFolderChosen('/new'));
+        // Not `!isPulling` alone — _onSyncFolderChosen forces isPulling:
+        // false onto the state *before* _runSync('/new') even starts (to
+        // stop it seeing a stale isPulling: true and skipping the new
+        // folder's first sync — see that emit's own doc comment), so that
+        // predicate would match immediately, long before the new run's own
+        // getDevices/getFailedEvents tail has actually landed. Waiting for a
+        // non-empty device list is what actually proves the new run's own
+        // result — not just its isPulling toggle — is the one in state.
+        await bloc.stream.firstWhere(
+          (s) => s is SyncLoaded && s.syncFolderPath == '/new' && !s.isPulling && s.devices.isNotEmpty,
+        );
+        // The new folder's own run has already reported its result — now
+        // let the stale old run's getDevices() resolve.
+        devicesGate.complete([
+          {'id': 'dev-old-stale', 'name': 'Old device', 'platform': 'windows'},
+        ]);
+        // Drains the old run's remaining chain (getFailedEvents, then the
+        // emit under test) instead of guessing a microtask count — that
+        // chain is one hop longer than the round-4 N1 test's, which only
+        // needed to flush a single synchronous check.
+        await pumpEventQueue();
+      },
+      verify: (bloc) {
+        final state = bloc.state as SyncLoaded;
+        expect(state.syncFolderPath, '/new');
+        expect(state.isPulling, isFalse);
+        // Only the stale old run's device would appear here if the pre-emit
+        // generation check were missing.
+        expect(state.devices, const [SyncDevice(id: 'dev-new', name: 'New device', platform: 'windows')]);
+      },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'closing the bloc while a folder switch is still awaiting the reset '
+      'does not re-arm the poll timer or the folder watch once the reset '
+      'resolves — a switch that resumes after close() used to still call '
+      '_startPolling/_startWatching, both created *after* close() cancelled '
+      'the originals, so they live for the process lifetime: the timer\'s '
+      'add() throws an uncaught StateError once it next fires, 30s later, '
+      'and the folder watch is never cancelled (PR #16 review round 5, '
+      'Codex C1)',
+      build: () => buildBloc(watch: (_) {
+        watchStarted = true;
+        return const Stream<FileSystemEvent>.empty();
+      }),
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        watchStarted = false;
+        resetGate = Completer<void>();
+        reachedReset = Completer<void>();
+        when(() => mockSyncCoordinator.resetForNewFolder('/new')).thenAnswer((_) {
+          reachedReset.complete();
+          return resetGate.future;
+        });
+        // Stubbed broadly so that, if the isDone guard is removed, the
+        // handler runs to completion and fails on the verifyNever below
+        // instead of on an unstubbed-mock error.
+        when(() => mockSyncCoordinator.syncOnce('/new'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+      },
+      act: (bloc) async {
+        bloc.add(const SyncFolderChosen('/new'));
+        await reachedReset.future;
+        await bloc.close();
+        resetGate.complete();
+        await Future<void>.value();
+        await Future<void>.value();
+      },
+      verify: (_) {
+        expect(watchStarted, isFalse);
+        verifyNever(() => mockSyncCoordinator.syncOnce(any()));
+      },
     );
   });
 
