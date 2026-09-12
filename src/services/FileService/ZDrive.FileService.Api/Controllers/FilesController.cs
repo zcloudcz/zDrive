@@ -10,7 +10,9 @@ using ZDrive.FileService.Application.Commands.CreateFileVersion;
 using ZDrive.FileService.Application.Commands.RestoreFile;
 using ZDrive.FileService.Application.Commands.RestoreFileVersion;
 using ZDrive.FileService.Application.DTOs;
+using ZDrive.FileService.Application.Interfaces;
 using ZDrive.FileService.Application.Queries.GetFile;
+using ZDrive.FileService.Application.Queries.GetFileChanges;
 using ZDrive.FileService.Application.Queries.GetFileVersions;
 using ZDrive.FileService.Application.Queries.ListChildren;
 using ZDrive.FileService.Application.Queries.ListTrash;
@@ -26,8 +28,13 @@ namespace ZDrive.FileService.Api.Controllers;
 public sealed class FilesController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly IChangeOrigin _changeOrigin;
 
-    public FilesController(IMediator mediator) => _mediator = mediator;
+    public FilesController(IMediator mediator, IChangeOrigin changeOrigin)
+    {
+        _mediator = mediator;
+        _changeOrigin = changeOrigin;
+    }
 
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(ApiResponse<FileDto>), StatusCodes.Status200OK)]
@@ -210,6 +217,25 @@ public sealed class FilesController : ControllerBase
         var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
         var result = await _mediator.Send(new GetFileVersionsQuery(userId, tenantId, id), ct);
         return Ok(ApiResponse<List<FileVersionDto>>.Ok(result));
+    }
+
+    /// <summary>
+    /// Cursor-paged feed of file changes for sync clients. Excludes changes
+    /// that originated from the caller's own device (X-Device-Id) so a
+    /// device does not download back the writes it just made.
+    /// </summary>
+    [HttpGet("changes")]
+    [ProducesResponseType(typeof(ApiResponse<FileChangesPageDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetFileChanges(
+        [FromQuery] long cursor = 0,
+        [FromQuery] int limit = 500,
+        CancellationToken ct = default)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
+        var result = await _mediator.Send(
+            new GetFileChangesQuery(userId, tenantId, cursor, limit, _changeOrigin.DeviceId), ct);
+        return Ok(ApiResponse<FileChangesPageDto>.Ok(result));
     }
 }
 

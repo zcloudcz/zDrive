@@ -5,7 +5,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using ZDrive.FileService.Application.Interfaces;
+using ZDrive.FileService.Infrastructure.Http;
 using ZDrive.FileService.Infrastructure.Persistence;
+using ZDrive.FileService.Infrastructure.Persistence.Interceptors;
 using ZDrive.Shared.Auth;
 
 namespace ZDrive.FileService.Infrastructure;
@@ -17,13 +19,21 @@ public static class DependencyInjection
         IConfiguration configuration,
         bool isDevelopment)
     {
+        // Change feed: origin resolver (X-Device-Id), consumed by
+        // FileChangeInterceptor below to tag rows with their writing device.
+        services.AddSingleton<IChangeOrigin, HttpContextChangeOrigin>();
+        services.AddSingleton<FileChangeInterceptor>();
+
         // EF Core + PostgreSQL
         // Snake-case naming matches the raw SQL (search query, index filters) used below.
-        services.AddDbContext<FileDbContext>(options =>
+        // The (sp, options) overload lets AddInterceptors pull the interceptor from DI
+        // instead of constructing it by hand, so it shares the same registrations above.
+        services.AddDbContext<FileDbContext>((sp, options) =>
             options.UseNpgsql(
                     configuration.GetConnectionString("FileDb"),
                     npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
-                .UseSnakeCaseNamingConvention());
+                .UseSnakeCaseNamingConvention()
+                .AddInterceptors(sp.GetRequiredService<FileChangeInterceptor>()));
 
         services.AddScoped<IFileDbContext>(sp => sp.GetRequiredService<FileDbContext>());
 
