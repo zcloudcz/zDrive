@@ -1,0 +1,78 @@
+name: Deploy web client
+
+# Builds the Flutter web client and publishes it to GitHub Pages, replacing the
+# previous flow where the bundle was built on a developer machine and pushed to
+# a gh-pages branch by hand — nothing recorded which commit was live, and the
+# classic Pages branch build gave no log when it failed.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "src/client/**"
+      # Editing this workflow must run it, or a change to the pipeline ships
+      # unexercised.
+      - ".github/workflows/deploy-web.yml"
+  # Lets a deploy be retried without an empty commit — GitHub Pages
+  # infrastructure fails often enough to need it.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  # actions/deploy-pages authenticates to Pages with an OIDC token, not a PAT.
+  id-token: write
+
+# A superseded deploy is worthless: only the newest commit should reach the
+# site, and two concurrent Pages deployments conflict anyway.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Same pin as flutter-ci.yml, and for the same reason: the SDK bundles
+      # its own package versions, so a floating `stable` resolves something
+      # other than the committed lock. Bump both workflows together.
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.41.2"
+
+      - name: Get dependencies
+        run: flutter pub get --enforce-lockfile
+        working-directory: src/client/zdrive_app
+
+      # API_BASE_URL is baked into the bundle at compile time
+      # (ApiConstants.baseUrl is a const String.fromEnvironment), so the
+      # deployed origin has to be decided here rather than at runtime. The
+      # base-href is "/" because the site is served from a custom domain root,
+      # not from /<repo>/.
+      - name: Build web
+        run: >-
+          flutter build web --release
+          --dart-define=API_BASE_URL=${{ vars.WEB_API_BASE_URL || 'https://zdrive-gateway.azurewebsites.net/api/v1' }}
+          --base-href /
+        working-directory: src/client/zdrive_app
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: src/client/zdrive_app/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
