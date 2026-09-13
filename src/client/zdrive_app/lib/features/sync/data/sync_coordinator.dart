@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:injectable/injectable.dart';
@@ -6,8 +7,10 @@ import 'package:injectable/injectable.dart';
 import '../../../core/storage/app_preferences.dart';
 import '../domain/sync_mirror_repository.dart';
 import 'device_id_storage.dart';
+import 'device_registration_service.dart';
 import 'local_change_scanner.dart';
 import 'pull_sync_service.dart';
+import 'sync_remote_data_source.dart';
 
 /// Thrown when the designated sync folder no longer exists on disk (the
 /// user renamed or deleted it since it was chosen — the watcher and poll
@@ -48,8 +51,18 @@ class SyncCoordinator {
   final SyncMirrorRepository _mirror;
   final DeviceIdStorage _deviceIdStorage;
   final AppPreferences _preferences;
+  final DeviceRegistrationService _deviceRegistration;
+  final SyncRemoteDataSource _remote;
 
-  SyncCoordinator(this._pull, this._scanner, this._mirror, this._deviceIdStorage, this._preferences);
+  SyncCoordinator(
+    this._pull,
+    this._scanner,
+    this._mirror,
+    this._deviceIdStorage,
+    this._preferences,
+    this._deviceRegistration,
+    this._remote,
+  );
 
   // Dedupe is scoped to the path it was started for — not "whatever run is
   // currently in flight" — because the mutex below can queue a stale
@@ -136,8 +149,42 @@ class SyncCoordinator {
       throw SyncFolderMissingException(syncFolderPath);
     }
     final pulled = await _pull.pullOnce(syncFolderPath);
+    // Rule: the timestamp means "this device last contacted the server
+    // successfully" — so a pull that completed without throwing counts,
+    // even if it applied zero events. Only a pull that throws skips the
+    // heartbeat. It deliberately does not wait for the scan below, so it
+    // does not claim the local half of the reconciliation happened; the
+    // account-wide device list is the only thing that reads it, and this
+    // installation's own push state has its own tile on the sync page.
+    //
+    // Fire and forget, and NOT awaited anywhere in this run: the whole
+    // method body holds _mutex, and the shared Dio client retries a
+    // 429/5xx heartbeat up to three times, honouring `Retry-After` capped
+    // at 120s. Awaiting it — even after the scan — keeps the lock for
+    // minutes, which would hang `endSession()` on logout (auth_bloc waits
+    // on the same mutex, so the tokens never get cleared) and drop the 30s
+    // poll ticks that arrive meanwhile. Nothing in the run needs the
+    // result, and _sendHeartbeat catches everything internally, so the
+    // dangling future can never surface as an unhandled async error.
+    unawaited(_sendHeartbeat());
     final pushed = await _scanner.scanOnce(syncFolderPath);
     return SyncRunResult(pulled: pulled, pushed: pushed);
+  }
+
+  /// Best-effort: pull's results are already applied and persisted by the
+  /// time this runs, so a heartbeat failure (network blip, server error)
+  /// must not undo that or abort the scan that runs alongside it — it is
+  /// logged and swallowed instead. [DeviceRegistrationService.localDeviceId]
+  /// is inside the try too — it reads platform secure storage, which can
+  /// throw just as easily as the network call (Codex review).
+  Future<void> _sendHeartbeat() async {
+    try {
+      final deviceId = await _deviceRegistration.localDeviceId();
+      if (deviceId == null) return; // First-run edge case — nothing registered yet.
+      await _remote.heartbeat(deviceId);
+    } catch (e, st) {
+      log('heartbeat failed', error: e, stackTrace: st, name: 'SyncCoordinator');
+    }
   }
 
   /// Re-enables syncing after [endSession] — called by [SyncBloc] on

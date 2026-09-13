@@ -17,11 +17,13 @@ namespace ZDrive.SyncService.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
 {
+    private readonly SyncServiceFactory _factory;
     private readonly HttpClient _client;
     private readonly Guid _userId = Guid.NewGuid();
 
     public SyncFlowTests(SyncServiceFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
         _client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", GenerateTestJwt(factory.Rsa, _userId));
@@ -398,6 +400,61 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
         var listResp2 = await _client.GetAsync("/api/v1/sync/devices");
         var devices2 = (await listResp2.Content.ReadFromJsonAsync<ApiResponse<List<DeviceDto>>>())!.Data!;
         devices2.Should().NotContain(d => d.Id == device.Id);
+    }
+
+    [Fact]
+    public async Task HeartbeatDevice_SetsLastSyncAt_VisibleInDevicesList()
+    {
+        var registerResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "Heartbeat device",
+            platform = (int)DevicePlatform.Windows
+        });
+        var device = (await registerResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+        device.LastSyncAt.Should().BeNull();
+
+        // Captured before the call so the assertion below pins the timestamp
+        // to *this* request: asserting only non-null would also pass if the
+        // handler regressed into copying CreatedAt, or if registration had
+        // set LastSyncAt in the first place.
+        var beforeHeartbeat = DateTime.UtcNow;
+
+        var heartbeatResp = await _client.PostAsync($"/api/v1/sync/devices/{device.Id}/heartbeat", null);
+        heartbeatResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var heartbeatResult = await heartbeatResp.Content.ReadFromJsonAsync<ApiResponse<bool>>();
+        heartbeatResult!.Data.Should().BeTrue();
+
+        var listResp = await _client.GetAsync("/api/v1/sync/devices");
+        var devices = (await listResp.Content.ReadFromJsonAsync<ApiResponse<List<DeviceDto>>>())!.Data!;
+        var synced = devices.Should().ContainSingle(d => d.Id == device.Id).Subject;
+        synced.LastSyncAt.Should().NotBeNull();
+        synced.LastSyncAt!.Value.Should().BeOnOrAfter(beforeHeartbeat);
+    }
+
+    [Fact]
+    public async Task HeartbeatDevice_ForeignDeviceId_NotFound()
+    {
+        // Device is registered by _client's user.
+        var registerResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "Someone else's device",
+            platform = (int)DevicePlatform.Windows
+        });
+        var device = (await registerResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        // A different user tries to send a heartbeat for that device id.
+        using var otherClient = _factory.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", GenerateTestJwt(_factory.Rsa, Guid.NewGuid()));
+
+        var heartbeatResp = await otherClient.PostAsync($"/api/v1/sync/devices/{device.Id}/heartbeat", null);
+        heartbeatResp.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        // The rejected attempt must not have touched the device at all —
+        // re-query as its actual owner and confirm LastSyncAt is still null.
+        var listResp = await _client.GetAsync("/api/v1/sync/devices");
+        var devices = (await listResp.Content.ReadFromJsonAsync<ApiResponse<List<DeviceDto>>>())!.Data!;
+        devices.Should().Contain(d => d.Id == device.Id && d.LastSyncAt == null);
     }
 
     /// <summary>

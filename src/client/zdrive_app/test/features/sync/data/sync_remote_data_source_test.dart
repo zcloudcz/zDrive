@@ -60,6 +60,15 @@ void main() {
     verify(() => dio.delete('/sync/devices/dev-1')).called(1);
   });
 
+  test('heartbeat posts to the device heartbeat endpoint', () async {
+    when(() => dio.post('/sync/devices/dev-1/heartbeat'))
+        .thenAnswer((_) async => response(true, '/sync/devices/dev-1/heartbeat'));
+
+    await dataSource.heartbeat('dev-1');
+
+    verify(() => dio.post('/sync/devices/dev-1/heartbeat')).called(1);
+  });
+
   test('propagates DioException from the HTTP layer', () async {
     when(() => dio.get('/sync/devices')).thenThrow(
       DioException(

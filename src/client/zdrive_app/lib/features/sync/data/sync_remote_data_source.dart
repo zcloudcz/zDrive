@@ -27,4 +27,9 @@ class SyncRemoteDataSource {
     final response = await _dio.delete('/sync/devices/$id');
     ensureSuccess(response);
   }
+
+  Future<void> heartbeat(String deviceId) async {
+    final response = await _dio.post('/sync/devices/$deviceId/heartbeat');
+    ensureSuccess(response);
+  }
 }

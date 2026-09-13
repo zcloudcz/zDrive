@@ -166,6 +166,8 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i500.SyncMirrorRepository>(),
         gh<_i918.DeviceIdStorage>(),
         gh<_i736.AppPreferences>(),
+        gh<_i318.DeviceRegistrationService>(),
+        gh<_i319.SyncRemoteDataSource>(),
       ),
     );
     return this;
