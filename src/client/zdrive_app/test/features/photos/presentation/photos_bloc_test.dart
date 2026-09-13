@@ -91,12 +91,16 @@ void main() {
         );
       },
       act: (bloc) => bloc.add(const LoadTimeline()),
+      // The bloc carries the error itself now; turning it into text needs
+      // AppLocalizations and therefore happens in the widget layer, so the
+      // "no DioException dump reaches the user" guarantee is asserted in
+      // test/core/network/error_message_test.dart instead of here.
       expect: () => [
         const PhotosLoading(),
         isA<PhotosError>().having(
-          (s) => s.message,
-          'message',
-          isNot(contains('DioException')),
+          (s) => s.error,
+          'error',
+          isA<DioException>(),
         ),
       ],
     );

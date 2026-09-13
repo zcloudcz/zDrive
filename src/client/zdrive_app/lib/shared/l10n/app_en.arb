@@ -85,11 +85,16 @@
   "versionLabel": "Version {number}",
   "@versionLabel": {
     "placeholders": {
-      "number": { "type": "int" }
+      "number": {
+        "type": "int"
+      }
     }
   },
   "confirmRestoreVersion": "Restore this version?",
   "versionRestored": "Version restored",
   "latestVersion": "Latest",
-  "close": "Close"
+  "close": "Close",
+  "errorNoConnection": "Could not reach the server. Check your connection and try again.",
+  "errorServiceUnavailable": "This feature is temporarily unavailable. Please try again later.",
+  "errorRequestFailed": "The request could not be completed."
 }

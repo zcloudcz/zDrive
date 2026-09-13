@@ -275,7 +275,13 @@ void main() {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const PullRequested()),
-      verify: (_) => verifyNever(() => mockRemoteChangeNotifier.notifyChanged()),
+      verify: (_) {
+        // The run must have actually happened: without this, the test also
+        // passes when _runSync bails out on a guard and never syncs at all,
+        // which would prove nothing about the applied-nothing case.
+        verify(() => mockSyncCoordinator.syncOnce('/local/sync')).called(1);
+        verifyNever(() => mockRemoteChangeNotifier.notifyChanged());
+      },
     );
 
     blocTest<SyncBloc, SyncState>(

@@ -274,9 +274,72 @@ void main() {
       await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
 
       remoteChangeNotifier.notifyChanged();
-      await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
+      // Waits for the work, not for a state: the refresh keeps the folder on
+      // screen, and a reload returning the same listing produces an equal
+      // FileBrowserLoaded, which Equatable-backed bloc dedupes away. Awaiting
+      // another Loaded here hung until the test timed out.
+      await pumpEventQueue();
 
       verify(() => mockListFiles(null, page: 1, pageSize: 50)).called(2);
+    });
+
+    // A background refresh must not swap the list for a spinner: that rebuild
+    // drops the ListView and its ScrollPosition, so a user reading item 40 of
+    // 200 gets thrown back to the top by a sync they did not trigger. Now
+    // that a change signal fires this automatically (2s after a watch event,
+    // or on the 30s poll), the reload has to be invisible.
+    test('reloading the folder already on screen never emits FileBrowserLoading',
+        () async {
+      when(() => mockListFiles(null, page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(const LoadFolder());
+      await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
+
+      final statesAfterFirstLoad = <FileBrowserState>[];
+      final sub = bloc.stream.listen(statesAfterFirstLoad.add);
+      addTearDown(sub.cancel);
+
+      remoteChangeNotifier.notifyChanged();
+      await pumpEventQueue();
+
+      // The reload definitely happened...
+      verify(() => mockListFiles(null, page: 1, pageSize: 50)).called(2);
+      // ...and it was invisible: no spinner in between, so the ListView and
+      // its ScrollPosition were never dropped.
+      expect(
+        statesAfterFirstLoad.whereType<FileBrowserLoading>(),
+        isEmpty,
+        reason: 'a refresh of the same folder must not pass through Loading, '
+            'or the list and its scroll position are rebuilt from scratch',
+      );
+    });
+
+    test('moving to a DIFFERENT folder still shows the spinner — there is '
+        'nothing on screen worth keeping once the folder changes', () async {
+      when(() => mockListFiles(null, page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      when(() => mockListFiles('folder-1', page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      when(() => mockRepository.getFile('folder-1'))
+          .thenAnswer((_) async => testFolder);
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(const LoadFolder());
+      await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
+
+      final states = <FileBrowserState>[];
+      final sub = bloc.stream.listen(states.add);
+      addTearDown(sub.cancel);
+
+      bloc.add(const LoadFolder(folderId: 'folder-1'));
+      await bloc.stream.firstWhere(
+          (s) => s is FileBrowserLoaded && s.currentFolderId == 'folder-1');
+
+      expect(states.whereType<FileBrowserLoading>(), isNotEmpty);
     });
 
     test('a change signal while nothing is loaded yet does nothing', () async {

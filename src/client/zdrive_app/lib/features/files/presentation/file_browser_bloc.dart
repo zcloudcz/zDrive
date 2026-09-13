@@ -194,7 +194,19 @@ class FileBrowserBloc extends Bloc<FileBrowserEvent, FileBrowserState> {
     LoadFolder event,
     Emitter<FileBrowserState> emit,
   ) async {
-    emit(const FileBrowserLoading());
+    // Only blank the list when there is nothing useful on screen to keep, or
+    // when the folder actually changes. Reloading the folder already shown —
+    // which a remote change signal now does on its own, every time sync pulls
+    // something (2s after a watch event, or on the 30s poll) — must not swap
+    // the list for a spinner: that rebuild drops the ListView and its
+    // ScrollPosition with it, so a user reading item 40 of 200 would get
+    // yanked back to the top by a background refresh they did not ask for.
+    final current = state;
+    final reloadingSameFolder =
+        current is FileBrowserLoaded && current.currentFolderId == event.folderId;
+    if (!reloadingSameFolder) {
+      emit(const FileBrowserLoading());
+    }
     try {
       _currentFolderId = event.folderId;
 

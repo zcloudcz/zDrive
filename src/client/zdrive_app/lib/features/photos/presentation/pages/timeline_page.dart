@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:zdrive_app/core/network/error_message.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../domain/photo.dart';
@@ -16,7 +17,9 @@ class TimelinePage extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         if (state is PhotosError) {
-          return Center(child: Text(state.message));
+          return Center(
+            child: Text(describeError(state.error, AppLocalizations.of(context)!)),
+          );
         }
         if (state is TimelineLoaded) {
           if (state.photos.isEmpty) {

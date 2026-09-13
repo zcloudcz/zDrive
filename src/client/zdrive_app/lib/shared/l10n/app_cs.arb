@@ -78,11 +78,16 @@
   "versionLabel": "Verze {number}",
   "@versionLabel": {
     "placeholders": {
-      "number": { "type": "int" }
+      "number": {
+        "type": "int"
+      }
     }
   },
   "confirmRestoreVersion": "Obnovit tuto verzi?",
   "versionRestored": "Verze obnovena",
   "latestVersion": "Aktuální",
-  "close": "Zavřít"
+  "close": "Zavřít",
+  "errorNoConnection": "Server je nedostupný. Zkontroluj připojení a zkus to znovu.",
+  "errorServiceUnavailable": "Tato funkce je teď nedostupná. Zkus to prosím později.",
+  "errorRequestFailed": "Požadavek se nepodařilo dokončit."
 }

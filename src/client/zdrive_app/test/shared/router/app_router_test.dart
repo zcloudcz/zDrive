@@ -8,6 +8,8 @@ import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_bloc.dart';
+import 'package:zdrive_app/features/home/presentation/home_page.dart';
+import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
 import 'package:zdrive_app/shared/router/app_router.dart';
 
 class MockSyncRemoteDataSource extends Mock implements SyncRemoteDataSource {}
@@ -132,6 +134,27 @@ void main() {
           .whereType<GoRoute>()
           .map((r) => r.path);
       expect(paths, contains('/home/photos'));
+    });
+
+    // StatefulNavigationShell matches branches to destinations POSITIONALLY:
+    // it calls goBranch(index) with the index of the tapped destination. The
+    // two lists are built in separate files under the same flag, so if one
+    // ever gains or drops an entry without the other, tapping a tab silently
+    // opens the wrong page — or throws on an index that has no branch. The
+    // doc comments on both builders say so; this asserts it, for both values
+    // of the flag, which the separate tests above cannot (each only checks
+    // its own list).
+    test('branches and destinations stay the same length under both flag '
+        'values — the shell maps them by position', () {
+      final l10n = AppLocalizationsEn();
+
+      for (final photosEnabled in [false, true]) {
+        expect(
+          buildHomeBranches(photosEnabled: photosEnabled).length,
+          buildHomeDestinations(l10n, photosEnabled: photosEnabled).length,
+          reason: 'photosEnabled: $photosEnabled',
+        );
+      }
     });
   });
 }

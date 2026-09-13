@@ -254,4 +254,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get close => 'Close';
+
+  @override
+  String get errorNoConnection =>
+      'Could not reach the server. Check your connection and try again.';
+
+  @override
+  String get errorServiceUnavailable =>
+      'This feature is temporarily unavailable. Please try again later.';
+
+  @override
+  String get errorRequestFailed => 'The request could not be completed.';
 }

@@ -1,6 +1,5 @@
-
-import 'package:flutter/material.dart';
 import 'package:bloc_test/bloc_test.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -207,12 +206,23 @@ void main() {
       await tester.pump();
 
       expect(find.text('Syncing…'), findsOneWidget);
-      // None of the other _FolderStatusTile states, and not the removed
-      // static tile either — only the pulling line is on screen.
+
+      // The load-bearing assertion. Checking that specific strings are absent
+      // is nearly free: 'Everything is synced' can no longer be produced by
+      // any code path (its ARB key is gone, so re-adding the tile would not
+      // compile), and the other _FolderStatusTile branches are unreachable
+      // for this state anyway. Counting tiles is what actually fails if
+      // somebody reintroduces a second status line — whatever text it uses.
+      // Exactly two: the folder status tile, and the one device below it.
+      expect(
+        find.byType(ListTile),
+        findsNWidgets(2),
+        reason: 'one status tile + one device; a third means a second status '
+            'line is back',
+      );
       expect(find.text('This device is up to date.'), findsNothing);
       expect(find.text('Choose sync folder'), findsNothing);
       expect(find.text('Some items could not be synced'), findsNothing);
-      expect(find.text('Everything is synced'), findsNothing);
     });
   });
 }

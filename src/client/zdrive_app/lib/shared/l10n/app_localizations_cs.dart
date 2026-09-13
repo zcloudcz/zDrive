@@ -254,4 +254,15 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get close => 'Zavřít';
+
+  @override
+  String get errorNoConnection =>
+      'Server je nedostupný. Zkontroluj připojení a zkus to znovu.';
+
+  @override
+  String get errorServiceUnavailable =>
+      'Tato funkce je teď nedostupná. Zkus to prosím později.';
+
+  @override
+  String get errorRequestFailed => 'Požadavek se nepodařilo dokončit.';
 }
