@@ -73,10 +73,14 @@ void main() {
     // syncOnce(syncPath) needs the two to agree by default, unless a test
     // is specifically exercising that mismatch.
     when(() => mockPreferences.syncFolderPath).thenReturn(syncPath);
-    // Default: no device registered yet — every test that doesn't care
-    // about the heartbeat gets the "nothing to send" no-op path instead of
-    // an unstubbed-mock failure.
-    when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => null);
+    // Default: a registered device whose heartbeat succeeds. Deliberately
+    // NOT the "no device yet" path — defaulting to null would send every
+    // test that doesn't care about the heartbeat down the early-return
+    // branch, so a regression that moved the heartbeat above a guard, or
+    // fired it on a failed run, would keep the whole file green. The
+    // first-run case is stubbed explicitly by the one test that wants it.
+    when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'device-default');
+    when(() => mockRemote.heartbeat(any())).thenAnswer((_) async {});
   });
 
   tearDown(() {
@@ -403,6 +407,37 @@ void main() {
       await coordinator.syncOnce(syncPath);
 
       verify(() => mockRemote.heartbeat('device-1')).called(1);
+    });
+
+    // The reason the heartbeat is fire-and-forget rather than awaited: the
+    // whole run body holds the coordinator's mutex, and Dio retries a
+    // 429/5xx heartbeat honouring `Retry-After` capped at 120s. Awaiting it
+    // anywhere inside the run would keep that lock for minutes, hanging
+    // endSession() on logout and swallowing the 30s poll ticks. Asserted
+    // without a timeout on purpose: a regression makes `runFinished` false
+    // at the assert, which fails on the claim rather than by hanging (a
+    // test that only "catches" a bug by timing out is not a real check).
+    test('the run does not wait for the heartbeat — a heartbeat still in '
+        'flight must not hold the coordinator lock', () async {
+      final heartbeatGate = Completer<void>();
+      when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'device-1');
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 1);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 0);
+      when(() => mockRemote.heartbeat('device-1')).thenAnswer((_) => heartbeatGate.future);
+
+      var runFinished = false;
+      final run = coordinator.syncOnce(syncPath).then((_) => runFinished = true);
+      await pumpEventQueue(times: 50);
+
+      expect(
+        runFinished,
+        isTrue,
+        reason: 'syncOnce must complete (and release the mutex) while the '
+            'heartbeat is still pending',
+      );
+
+      heartbeatGate.complete();
+      await run;
     });
 
     test('not sent when pull throws', () async {

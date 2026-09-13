@@ -413,6 +413,12 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
         var device = (await registerResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
         device.LastSyncAt.Should().BeNull();
 
+        // Captured before the call so the assertion below pins the timestamp
+        // to *this* request: asserting only non-null would also pass if the
+        // handler regressed into copying CreatedAt, or if registration had
+        // set LastSyncAt in the first place.
+        var beforeHeartbeat = DateTime.UtcNow;
+
         var heartbeatResp = await _client.PostAsync($"/api/v1/sync/devices/{device.Id}/heartbeat", null);
         heartbeatResp.StatusCode.Should().Be(HttpStatusCode.OK);
         var heartbeatResult = await heartbeatResp.Content.ReadFromJsonAsync<ApiResponse<bool>>();
@@ -420,7 +426,9 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
 
         var listResp = await _client.GetAsync("/api/v1/sync/devices");
         var devices = (await listResp.Content.ReadFromJsonAsync<ApiResponse<List<DeviceDto>>>())!.Data!;
-        devices.Should().Contain(d => d.Id == device.Id && d.LastSyncAt != null);
+        var synced = devices.Should().ContainSingle(d => d.Id == device.Id).Subject;
+        synced.LastSyncAt.Should().NotBeNull();
+        synced.LastSyncAt!.Value.Should().BeOnOrAfter(beforeHeartbeat);
     }
 
     [Fact]

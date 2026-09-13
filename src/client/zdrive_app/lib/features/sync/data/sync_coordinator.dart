@@ -149,23 +149,25 @@ class SyncCoordinator {
       throw SyncFolderMissingException(syncFolderPath);
     }
     final pulled = await _pull.pullOnce(syncFolderPath);
-    // Rule: "last synced" means "we successfully reconciled with the
-    // server" — so a pull that completed without throwing counts, even if
-    // it applied zero events (nothing changed remotely, nothing local
-    // either): that is still a successful reconciliation, not a no-op that
-    // should be hidden from the user. Only a pull that throws skips the
-    // heartbeat.
+    // Rule: the timestamp means "this device last contacted the server
+    // successfully" — so a pull that completed without throwing counts,
+    // even if it applied zero events. Only a pull that throws skips the
+    // heartbeat. It deliberately does not wait for the scan below, so it
+    // does not claim the local half of the reconciliation happened; the
+    // account-wide device list is the only thing that reads it, and this
+    // installation's own push state has its own tile on the sync page.
     //
-    // Started right after pull, but not awaited here — awaited only after
-    // scanOnce below — so it runs concurrently with the scan instead of
-    // blocking it: the shared Dio client retries a 429/5xx heartbeat
-    // response (including honouring a `Retry-After` up to 120s), and
-    // serialising that ahead of the scan could delay pushing local changes
-    // by minutes for something that is explicitly best-effort (Codex
-    // review).
-    final heartbeat = _sendHeartbeat();
+    // Fire and forget, and NOT awaited anywhere in this run: the whole
+    // method body holds _mutex, and the shared Dio client retries a
+    // 429/5xx heartbeat up to three times, honouring `Retry-After` capped
+    // at 120s. Awaiting it — even after the scan — keeps the lock for
+    // minutes, which would hang `endSession()` on logout (auth_bloc waits
+    // on the same mutex, so the tokens never get cleared) and drop the 30s
+    // poll ticks that arrive meanwhile. Nothing in the run needs the
+    // result, and _sendHeartbeat catches everything internally, so the
+    // dangling future can never surface as an unhandled async error.
+    unawaited(_sendHeartbeat());
     final pushed = await _scanner.scanOnce(syncFolderPath);
-    await heartbeat;
     return SyncRunResult(pulled: pulled, pushed: pushed);
   }
 
