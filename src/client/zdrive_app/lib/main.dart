@@ -17,7 +17,7 @@ import 'core/storage/app_preferences.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
-  configureDependencies();
+  await configureDependencies();
   await getIt.allReady();
   runApp(const ZDriveApp());
 }

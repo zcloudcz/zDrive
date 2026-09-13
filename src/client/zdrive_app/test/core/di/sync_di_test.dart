@@ -52,4 +52,31 @@ void main() {
     expect(container<LocalChangeScanner>(), isA<LocalChangeScanner>());
     expect(container<SyncCoordinator>(), isA<SyncCoordinator>());
   });
+
+  // Regression test for a second real incident: `configureDependencies()`
+  // discarded the future returned by the generated init(), so main() called
+  // runApp() while the container was still half-built. init() suspends at
+  // AppPreferences (registered with `preResolve: true`, which opens a Hive
+  // box), and every registration declared after that one is missing until the
+  // future completes — the app died on web with "Object/factory with type ...
+  // is not registered inside GetIt". `getIt.allReady()` does not save you: it
+  // only waits for registrations that already exist.
+  test('registrations after the pre-resolved one appear only once init() completes',
+      () async {
+    final pending = GetIt.asNewInstance();
+    final initialized = pending.init();
+
+    expect(
+      pending.isRegistered<SyncCoordinator>(),
+      isFalse,
+      reason: 'init() has suspended at the pre-resolved AppPreferences, so '
+          'anything registered after it cannot exist yet — this is exactly the '
+          'window runApp() used to start in',
+    );
+
+    await initialized;
+
+    expect(pending.isRegistered<SyncCoordinator>(), isTrue);
+    await pending.reset();
+  });
 }
