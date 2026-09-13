@@ -428,6 +428,21 @@ void main() {
       verify(() => mockScanner.scanOnce(syncPath)).called(1);
     });
 
+    test('a device-id lookup that throws (e.g. secure storage failure) does '
+        'not abort the run either — the same best-effort guarantee as a '
+        'heartbeat network failure', () async {
+      when(() => mockDeviceRegistration.localDeviceId())
+          .thenThrow(Exception('secure storage unavailable'));
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 3);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 1);
+
+      final result = await coordinator.syncOnce(syncPath);
+
+      expect(result.pulled, 3);
+      expect(result.pushed, 1);
+      verifyNever(() => mockRemote.heartbeat(any()));
+    });
+
     test('not sent when no device is registered yet (first-run edge case)', () async {
       when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => null);
       when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
@@ -436,6 +451,40 @@ void main() {
       await coordinator.syncOnce(syncPath);
 
       verifyNever(() => mockRemote.heartbeat(any()));
+    });
+
+    test('does not block the scan behind it — the scan runs and finishes '
+        'while the heartbeat call is still pending, not only after it '
+        'resolves (Codex review: a retried 429/5xx heartbeat, honouring '
+        'Retry-After up to 120s, must not delay pushing local changes by '
+        'minutes)', () async {
+      final heartbeatGate = Completer<void>();
+      var scanCalled = false;
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
+      when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'device-1');
+      when(() => mockRemote.heartbeat('device-1')).thenAnswer((_) => heartbeatGate.future);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async {
+        scanCalled = true;
+        return 0;
+      });
+
+      // syncOnce itself still awaits the heartbeat before returning (so
+      // callers/tests can rely on it having happened) — it just does not
+      // let it block the scan that runs alongside it.
+      final future = coordinator.syncOnce(syncPath);
+
+      // Give the event loop several turns to run everything eager, with the
+      // heartbeat call still held open by heartbeatGate — a single
+      // Duration.zero tick is not always enough here, unlike elsewhere in
+      // this file: syncOnce's folder-exists check ahead of this is a real
+      // Directory.exists() call against the temp dir, not a mocked one, so
+      // pumpEventQueue (several delayed(Duration.zero) turns) rather than
+      // just one.
+      await pumpEventQueue();
+      expect(scanCalled, isTrue);
+
+      heartbeatGate.complete();
+      await future;
     });
   });
 }

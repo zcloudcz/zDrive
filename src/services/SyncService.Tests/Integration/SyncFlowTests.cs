@@ -441,6 +441,12 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
 
         var heartbeatResp = await otherClient.PostAsync($"/api/v1/sync/devices/{device.Id}/heartbeat", null);
         heartbeatResp.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        // The rejected attempt must not have touched the device at all —
+        // re-query as its actual owner and confirm LastSyncAt is still null.
+        var listResp = await _client.GetAsync("/api/v1/sync/devices");
+        var devices = (await listResp.Content.ReadFromJsonAsync<ApiResponse<List<DeviceDto>>>())!.Data!;
+        devices.Should().Contain(d => d.Id == device.Id && d.LastSyncAt == null);
     }
 
     /// <summary>

@@ -154,21 +154,31 @@ class SyncCoordinator {
     // it applied zero events (nothing changed remotely, nothing local
     // either): that is still a successful reconciliation, not a no-op that
     // should be hidden from the user. Only a pull that throws skips the
-    // heartbeat. Sent right after pull, not gated on the scan below —
-    // pullOnce having thrown is the only "failed run" this cares about.
-    await _sendHeartbeat();
+    // heartbeat.
+    //
+    // Started right after pull, but not awaited here — awaited only after
+    // scanOnce below — so it runs concurrently with the scan instead of
+    // blocking it: the shared Dio client retries a 429/5xx heartbeat
+    // response (including honouring a `Retry-After` up to 120s), and
+    // serialising that ahead of the scan could delay pushing local changes
+    // by minutes for something that is explicitly best-effort (Codex
+    // review).
+    final heartbeat = _sendHeartbeat();
     final pushed = await _scanner.scanOnce(syncFolderPath);
+    await heartbeat;
     return SyncRunResult(pulled: pulled, pushed: pushed);
   }
 
   /// Best-effort: pull's results are already applied and persisted by the
   /// time this runs, so a heartbeat failure (network blip, server error)
-  /// must not undo that or abort the scan that follows — it is logged and
-  /// swallowed instead.
+  /// must not undo that or abort the scan that runs alongside it — it is
+  /// logged and swallowed instead. [DeviceRegistrationService.localDeviceId]
+  /// is inside the try too — it reads platform secure storage, which can
+  /// throw just as easily as the network call (Codex review).
   Future<void> _sendHeartbeat() async {
-    final deviceId = await _deviceRegistration.localDeviceId();
-    if (deviceId == null) return; // First-run edge case — nothing registered yet.
     try {
+      final deviceId = await _deviceRegistration.localDeviceId();
+      if (deviceId == null) return; // First-run edge case — nothing registered yet.
       await _remote.heartbeat(deviceId);
     } catch (e, st) {
       log('heartbeat failed', error: e, stackTrace: st, name: 'SyncCoordinator');
