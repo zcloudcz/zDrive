@@ -107,6 +107,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get search => 'Search';
 
   @override
+  String get refresh => 'Refresh';
+
+  @override
   String get noFiles => 'No files';
 
   @override
@@ -186,12 +189,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get syncStatus => 'Sync status';
-
-  @override
-  String get allSynced => 'Everything is synced';
-
-  @override
-  String get syncDescription => 'Your files are up to date across all devices.';
 
   @override
   String get syncDevices => 'Devices';

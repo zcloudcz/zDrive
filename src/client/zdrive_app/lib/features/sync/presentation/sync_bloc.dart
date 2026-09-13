@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/events/remote_file_change_notifier.dart';
 import '../../../core/storage/app_preferences.dart';
 import '../data/pull_sync_service.dart';
 import '../data/sync_coordinator.dart';
@@ -117,6 +118,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   final SyncCoordinator _syncCoordinator;
   final PullSyncService _pullService;
   final AppPreferences _preferences;
+  final RemoteFileChangeNotifier _remoteChangeNotifier;
   final String _userId;
   final Stream<FileSystemEvent> Function(String path) _watchFolder;
 
@@ -157,12 +159,14 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     required SyncCoordinator syncCoordinator,
     required PullSyncService pullService,
     required AppPreferences preferences,
+    required RemoteFileChangeNotifier remoteChangeNotifier,
     required String userId,
     Stream<FileSystemEvent> Function(String path)? watch,
   })  : _dataSource = dataSource,
         _syncCoordinator = syncCoordinator,
         _pullService = pullService,
         _preferences = preferences,
+        _remoteChangeNotifier = remoteChangeNotifier,
         _userId = userId,
         // Defaults to a real recursive folder watch; tests inject a fake so
         // they can drive events without touching the filesystem.
@@ -324,7 +328,16 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
 
     emit(current.copyWith(isPulling: true, pullError: () => null));
     try {
-      await _syncCoordinator.syncOnce(path);
+      final result = await _syncCoordinator.syncOnce(path);
+      // The Files tab (FileBrowserBloc) mirrors server state and otherwise
+      // never refreshes after its initial load (see RemoteFileChangeNotifier's
+      // doc comment) — a run that actually pulled or pushed something means
+      // the server-side file list this run's own UI state might go on to
+      // discard as stale (see the generation checks below) is still worth a
+      // ping, since the change landed on the server either way.
+      if (result.pulled > 0 || result.pushed > 0) {
+        _remoteChangeNotifier.notifyChanged();
+      }
       if (generation != _syncGeneration) {
         // The folder changed via SyncFolderChosen, or this bloc closed,
         // while this run was pulling — a newer run already owns the sync UI

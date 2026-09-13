@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/network/error_message.dart';
 import '../domain/photo.dart';
 import '../domain/photo_repository.dart';
 
@@ -120,7 +121,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
         hasMore: _timelinePhotos.length < result.totalCount,
       ));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(describeError(e)));
     }
   }
 
@@ -137,7 +138,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
         hasMore: _timelinePhotos.length < result.totalCount,
       ));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(describeError(e)));
     }
   }
 
@@ -147,7 +148,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       final albums = await _repository.getAlbums();
       emit(AlbumsLoaded(albums));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(describeError(e)));
     }
   }
 
@@ -156,7 +157,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       await _repository.createAlbum(event.name);
       add(const LoadAlbums());
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(describeError(e)));
     }
   }
 
@@ -165,7 +166,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       await _repository.deleteAlbum(event.id);
       add(const LoadAlbums());
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(describeError(e)));
     }
   }
 
@@ -177,7 +178,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       final album = albums.firstWhere((a) => a.id == event.albumId);
       emit(AlbumPhotosLoaded(albumId: event.albumId, albumName: album.name, photos: photos));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(describeError(e)));
     }
   }
 }

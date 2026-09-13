@@ -127,11 +127,6 @@ class _SyncLoadedBody extends StatelessWidget {
     return ListView(
       children: [
         _FolderStatusTile(state: state),
-        ListTile(
-          leading: Icon(Icons.sync, color: Theme.of(context).colorScheme.primary),
-          title: Text(l10n.allSynced),
-          subtitle: Text(l10n.syncDescription),
-        ),
         if (state.failedEvents.isNotEmpty) ...[
           _SectionHeader(title: l10n.syncSkippedItems),
           for (final failed in state.failedEvents) _FailedEventTile(failed: failed),

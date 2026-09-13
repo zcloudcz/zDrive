@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/events/remote_file_change_notifier.dart';
 import '../domain/file_item.dart';
 import '../domain/use_cases/create_folder_use_case.dart';
 import '../domain/use_cases/delete_file_use_case.dart';
@@ -153,6 +156,7 @@ class FileBrowserBloc extends Bloc<FileBrowserEvent, FileBrowserState> {
   final DeleteFileUseCase _deleteFile;
   final SearchFilesUseCase _searchFiles;
   final FileRepository _fileRepository;
+  StreamSubscription<void>? _remoteChangeSubscription;
 
   FileViewMode _viewMode = FileViewMode.list;
   String? _currentFolderId;
@@ -164,6 +168,7 @@ class FileBrowserBloc extends Bloc<FileBrowserEvent, FileBrowserState> {
     required DeleteFileUseCase deleteFile,
     required SearchFilesUseCase searchFiles,
     required FileRepository fileRepository,
+    required RemoteFileChangeNotifier remoteChangeNotifier,
   })  : _listFiles = listFiles,
         _createFolder = createFolder,
         _deleteFile = deleteFile,
@@ -177,6 +182,12 @@ class FileBrowserBloc extends Bloc<FileBrowserEvent, FileBrowserState> {
     on<ToggleViewMode>(_onToggleViewMode);
     on<RefreshFiles>(_onRefreshFiles);
     on<SearchFiles>(_onSearchFiles);
+    // Only while a folder is actually loaded (not mid-load/error) — a change
+    // signal arriving during an in-flight load would otherwise pile a second,
+    // overlapping LoadFolder on top of it.
+    _remoteChangeSubscription = remoteChangeNotifier.changes.listen((_) {
+      if (state is FileBrowserLoaded) add(const RefreshFiles());
+    });
   }
 
   Future<void> _onLoadFolder(
@@ -279,6 +290,12 @@ class FileBrowserBloc extends Bloc<FileBrowserEvent, FileBrowserState> {
     } catch (e) {
       emit(FileBrowserError(e.toString()));
     }
+  }
+
+  @override
+  Future<void> close() {
+    _remoteChangeSubscription?.cancel();
+    return super.close();
   }
 
   void _updateBreadcrumbs(FileItem folder) {

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/core/events/remote_file_change_notifier.dart';
 import 'package:zdrive_app/core/storage/app_preferences.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
@@ -19,17 +20,21 @@ class MockPullSyncService extends Mock implements PullSyncService {}
 
 class MockAppPreferences extends Mock implements AppPreferences {}
 
+class MockRemoteFileChangeNotifier extends Mock implements RemoteFileChangeNotifier {}
+
 void main() {
   late MockSyncRemoteDataSource mockDataSource;
   late MockSyncCoordinator mockSyncCoordinator;
   late MockPullSyncService mockPullService;
   late MockAppPreferences mockPreferences;
+  late MockRemoteFileChangeNotifier mockRemoteChangeNotifier;
 
   setUp(() {
     mockDataSource = MockSyncRemoteDataSource();
     mockSyncCoordinator = MockSyncCoordinator();
     mockPullService = MockPullSyncService();
     mockPreferences = MockAppPreferences();
+    mockRemoteChangeNotifier = MockRemoteFileChangeNotifier();
     // Unstubbed: syncFolderPath returns null (mocktail's default for a
     // nullable getter), matching "no folder chosen yet" — the baseline every
     // existing test below assumes, since none of them are about pulling.
@@ -44,6 +49,7 @@ void main() {
         syncCoordinator: mockSyncCoordinator,
         pullService: mockPullService,
         preferences: mockPreferences,
+        remoteChangeNotifier: mockRemoteChangeNotifier,
         userId: userId,
         watch: watch,
       );
@@ -254,6 +260,22 @@ void main() {
           syncFolderPath: '/local/sync',
         ),
       ],
+      verify: (_) => verify(() => mockRemoteChangeNotifier.notifyChanged()).called(1),
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'does not ping the remote-change notifier when the run applied '
+      'nothing — the Files tab has no reason to reload for a no-op pull',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/local/sync'),
+      setUp: () {
+        when(() => mockSyncCoordinator.syncOnce('/local/sync'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+      },
+      act: (bloc) => bloc.add(const PullRequested()),
+      verify: (_) => verifyNever(() => mockRemoteChangeNotifier.notifyChanged()),
     );
 
     blocTest<SyncBloc, SyncState>(
