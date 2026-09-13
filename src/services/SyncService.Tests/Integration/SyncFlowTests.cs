@@ -17,11 +17,13 @@ namespace ZDrive.SyncService.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
 {
+    private readonly SyncServiceFactory _factory;
     private readonly HttpClient _client;
     private readonly Guid _userId = Guid.NewGuid();
 
     public SyncFlowTests(SyncServiceFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
         _client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", GenerateTestJwt(factory.Rsa, _userId));
@@ -398,6 +400,47 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
         var listResp2 = await _client.GetAsync("/api/v1/sync/devices");
         var devices2 = (await listResp2.Content.ReadFromJsonAsync<ApiResponse<List<DeviceDto>>>())!.Data!;
         devices2.Should().NotContain(d => d.Id == device.Id);
+    }
+
+    [Fact]
+    public async Task HeartbeatDevice_SetsLastSyncAt_VisibleInDevicesList()
+    {
+        var registerResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "Heartbeat device",
+            platform = (int)DevicePlatform.Windows
+        });
+        var device = (await registerResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+        device.LastSyncAt.Should().BeNull();
+
+        var heartbeatResp = await _client.PostAsync($"/api/v1/sync/devices/{device.Id}/heartbeat", null);
+        heartbeatResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var heartbeatResult = await heartbeatResp.Content.ReadFromJsonAsync<ApiResponse<bool>>();
+        heartbeatResult!.Data.Should().BeTrue();
+
+        var listResp = await _client.GetAsync("/api/v1/sync/devices");
+        var devices = (await listResp.Content.ReadFromJsonAsync<ApiResponse<List<DeviceDto>>>())!.Data!;
+        devices.Should().Contain(d => d.Id == device.Id && d.LastSyncAt != null);
+    }
+
+    [Fact]
+    public async Task HeartbeatDevice_ForeignDeviceId_NotFound()
+    {
+        // Device is registered by _client's user.
+        var registerResp = await _client.PostAsJsonAsync("/api/v1/sync/devices", new
+        {
+            name = "Someone else's device",
+            platform = (int)DevicePlatform.Windows
+        });
+        var device = (await registerResp.Content.ReadFromJsonAsync<ApiResponse<DeviceDto>>())!.Data!;
+
+        // A different user tries to send a heartbeat for that device id.
+        using var otherClient = _factory.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", GenerateTestJwt(_factory.Rsa, Guid.NewGuid()));
+
+        var heartbeatResp = await otherClient.PostAsync($"/api/v1/sync/devices/{device.Id}/heartbeat", null);
+        heartbeatResp.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     /// <summary>

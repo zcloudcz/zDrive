@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ZDrive.SyncService.Application.Commands.HeartbeatDevice;
 using ZDrive.SyncService.Application.Commands.PushChanges;
 using ZDrive.SyncService.Application.Commands.RegisterDevice;
 using ZDrive.SyncService.Application.Commands.ResolveConflict;
@@ -42,6 +43,16 @@ public sealed class SyncController : ControllerBase
     {
         var userId = User.GetUserId();
         var result = await _mediator.Send(new UnregisterDeviceCommand(userId, id), ct);
+        return Ok(ApiResponse<bool>.Ok(result));
+    }
+
+    [HttpPost("devices/{id:guid}/heartbeat")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> HeartbeatDevice(Guid id, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var result = await _mediator.Send(new HeartbeatDeviceCommand(userId, id), ct);
         return Ok(ApiResponse<bool>.Ok(result));
     }
 

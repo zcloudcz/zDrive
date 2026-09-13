@@ -6,9 +6,11 @@ import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
 import 'package:zdrive_app/core/storage/app_preferences.dart';
 import 'package:zdrive_app/features/sync/data/device_id_storage.dart';
+import 'package:zdrive_app/features/sync/data/device_registration_service.dart';
 import 'package:zdrive_app/features/sync/data/local_change_scanner.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
+import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart';
 
 class MockPullSyncService extends Mock implements PullSyncService {}
@@ -21,12 +23,18 @@ class MockDeviceIdStorage extends Mock implements DeviceIdStorage {}
 
 class MockAppPreferences extends Mock implements AppPreferences {}
 
+class MockDeviceRegistrationService extends Mock implements DeviceRegistrationService {}
+
+class MockSyncRemoteDataSource extends Mock implements SyncRemoteDataSource {}
+
 void main() {
   late MockPullSyncService mockPull;
   late MockLocalChangeScanner mockScanner;
   late MockSyncMirrorRepository mockMirror;
   late MockDeviceIdStorage mockDeviceIdStorage;
   late MockAppPreferences mockPreferences;
+  late MockDeviceRegistrationService mockDeviceRegistration;
+  late MockSyncRemoteDataSource mockRemote;
   late SyncCoordinator coordinator;
   late Directory tempDir;
   late String syncPath;
@@ -37,7 +45,17 @@ void main() {
     mockMirror = MockSyncMirrorRepository();
     mockDeviceIdStorage = MockDeviceIdStorage();
     mockPreferences = MockAppPreferences();
-    coordinator = SyncCoordinator(mockPull, mockScanner, mockMirror, mockDeviceIdStorage, mockPreferences);
+    mockDeviceRegistration = MockDeviceRegistrationService();
+    mockRemote = MockSyncRemoteDataSource();
+    coordinator = SyncCoordinator(
+      mockPull,
+      mockScanner,
+      mockMirror,
+      mockDeviceIdStorage,
+      mockPreferences,
+      mockDeviceRegistration,
+      mockRemote,
+    );
     // A real, existing directory — syncOnce checks for that before doing
     // anything else (F3), so a bare string like '/local/sync' that does
     // not exist on the test runner's filesystem would fail every test in
@@ -55,6 +73,10 @@ void main() {
     // syncOnce(syncPath) needs the two to agree by default, unless a test
     // is specifically exercising that mismatch.
     when(() => mockPreferences.syncFolderPath).thenReturn(syncPath);
+    // Default: no device registered yet — every test that doesn't care
+    // about the heartbeat gets the "nothing to send" no-op path instead of
+    // an unstubbed-mock failure.
+    when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => null);
   });
 
   tearDown(() {
@@ -366,6 +388,54 @@ void main() {
       final afterEndSession = await coordinator.syncOnce(syncPath);
       expect(afterEndSession.pulled, 0);
       expect(afterEndSession.pushed, 0);
+    });
+  });
+
+  group('heartbeat', () {
+    test('sent after a successful pull, even when it applied zero events — '
+        '"last synced" means "successfully reconciled", not "changed '
+        'something"', () async {
+      when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'device-1');
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 0);
+      when(() => mockRemote.heartbeat('device-1')).thenAnswer((_) async {});
+
+      await coordinator.syncOnce(syncPath);
+
+      verify(() => mockRemote.heartbeat('device-1')).called(1);
+    });
+
+    test('not sent when pull throws', () async {
+      when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'device-1');
+      when(() => mockPull.pullOnce(syncPath)).thenThrow(Exception('network error'));
+
+      await expectLater(coordinator.syncOnce(syncPath), throwsA(isA<Exception>()));
+
+      verifyNever(() => mockRemote.heartbeat(any()));
+    });
+
+    test('a heartbeat that throws does not abort the run — the scan still '
+        'runs and the pull result already applied is not lost', () async {
+      when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => 'device-1');
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 3);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 1);
+      when(() => mockRemote.heartbeat('device-1')).thenThrow(Exception('server error'));
+
+      final result = await coordinator.syncOnce(syncPath);
+
+      expect(result.pulled, 3);
+      expect(result.pushed, 1);
+      verify(() => mockScanner.scanOnce(syncPath)).called(1);
+    });
+
+    test('not sent when no device is registered yet (first-run edge case)', () async {
+      when(() => mockDeviceRegistration.localDeviceId()).thenAnswer((_) async => null);
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) async => 0);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 0);
+
+      await coordinator.syncOnce(syncPath);
+
+      verifyNever(() => mockRemote.heartbeat(any()));
     });
   });
 }

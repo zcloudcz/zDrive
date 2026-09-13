@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:injectable/injectable.dart';
@@ -6,8 +7,10 @@ import 'package:injectable/injectable.dart';
 import '../../../core/storage/app_preferences.dart';
 import '../domain/sync_mirror_repository.dart';
 import 'device_id_storage.dart';
+import 'device_registration_service.dart';
 import 'local_change_scanner.dart';
 import 'pull_sync_service.dart';
+import 'sync_remote_data_source.dart';
 
 /// Thrown when the designated sync folder no longer exists on disk (the
 /// user renamed or deleted it since it was chosen — the watcher and poll
@@ -48,8 +51,18 @@ class SyncCoordinator {
   final SyncMirrorRepository _mirror;
   final DeviceIdStorage _deviceIdStorage;
   final AppPreferences _preferences;
+  final DeviceRegistrationService _deviceRegistration;
+  final SyncRemoteDataSource _remote;
 
-  SyncCoordinator(this._pull, this._scanner, this._mirror, this._deviceIdStorage, this._preferences);
+  SyncCoordinator(
+    this._pull,
+    this._scanner,
+    this._mirror,
+    this._deviceIdStorage,
+    this._preferences,
+    this._deviceRegistration,
+    this._remote,
+  );
 
   // Dedupe is scoped to the path it was started for — not "whatever run is
   // currently in flight" — because the mutex below can queue a stale
@@ -136,8 +149,30 @@ class SyncCoordinator {
       throw SyncFolderMissingException(syncFolderPath);
     }
     final pulled = await _pull.pullOnce(syncFolderPath);
+    // Rule: "last synced" means "we successfully reconciled with the
+    // server" — so a pull that completed without throwing counts, even if
+    // it applied zero events (nothing changed remotely, nothing local
+    // either): that is still a successful reconciliation, not a no-op that
+    // should be hidden from the user. Only a pull that throws skips the
+    // heartbeat. Sent right after pull, not gated on the scan below —
+    // pullOnce having thrown is the only "failed run" this cares about.
+    await _sendHeartbeat();
     final pushed = await _scanner.scanOnce(syncFolderPath);
     return SyncRunResult(pulled: pulled, pushed: pushed);
+  }
+
+  /// Best-effort: pull's results are already applied and persisted by the
+  /// time this runs, so a heartbeat failure (network blip, server error)
+  /// must not undo that or abort the scan that follows — it is logged and
+  /// swallowed instead.
+  Future<void> _sendHeartbeat() async {
+    final deviceId = await _deviceRegistration.localDeviceId();
+    if (deviceId == null) return; // First-run edge case — nothing registered yet.
+    try {
+      await _remote.heartbeat(deviceId);
+    } catch (e, st) {
+      log('heartbeat failed', error: e, stackTrace: st, name: 'SyncCoordinator');
+    }
   }
 
   /// Re-enables syncing after [endSession] — called by [SyncBloc] on
