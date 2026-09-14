@@ -107,6 +107,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get search => 'Search';
 
   @override
+  String get refresh => 'Refresh';
+
+  @override
   String get noFiles => 'No files';
 
   @override
@@ -188,12 +191,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncStatus => 'Sync status';
 
   @override
-  String get allSynced => 'Everything is synced';
-
-  @override
-  String get syncDescription => 'Your files are up to date across all devices.';
-
-  @override
   String get syncDevices => 'Devices';
 
   @override
@@ -257,4 +254,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get close => 'Close';
+
+  @override
+  String get errorNoConnection =>
+      'Could not reach the server. Check your connection and try again.';
+
+  @override
+  String get errorServiceUnavailable =>
+      'This feature is temporarily unavailable. Please try again later.';
+
+  @override
+  String get errorRequestFailed => 'The request could not be completed.';
 }

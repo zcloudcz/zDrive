@@ -87,10 +87,12 @@ final class AlbumPhotosLoaded extends PhotosState {
 }
 
 final class PhotosError extends PhotosState {
-  final String message;
-  const PhotosError(this.message);
+  /// The error itself, not a rendered sentence: turning it into text needs
+  /// AppLocalizations, which belongs to the widget layer (see describeError).
+  final Object error;
+  const PhotosError(this.error);
   @override
-  List<Object?> get props => [message];
+  List<Object?> get props => [error];
 }
 
 // Bloc
@@ -120,7 +122,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
         hasMore: _timelinePhotos.length < result.totalCount,
       ));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(e));
     }
   }
 
@@ -137,7 +139,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
         hasMore: _timelinePhotos.length < result.totalCount,
       ));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(e));
     }
   }
 
@@ -147,7 +149,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       final albums = await _repository.getAlbums();
       emit(AlbumsLoaded(albums));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(e));
     }
   }
 
@@ -156,7 +158,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       await _repository.createAlbum(event.name);
       add(const LoadAlbums());
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(e));
     }
   }
 
@@ -165,7 +167,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       await _repository.deleteAlbum(event.id);
       add(const LoadAlbums());
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(e));
     }
   }
 
@@ -177,7 +179,7 @@ class PhotosBloc extends Bloc<PhotosEvent, PhotosState> {
       final album = albums.firstWhere((a) => a.id == event.albumId);
       emit(AlbumPhotosLoaded(albumId: event.albumId, albumName: album.name, photos: photos));
     } catch (e) {
-      emit(PhotosError(e.toString()));
+      emit(PhotosError(e));
     }
   }
 }

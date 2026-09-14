@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/core/events/remote_file_change_notifier.dart';
 import 'package:zdrive_app/features/files/domain/file_item.dart';
 import 'package:zdrive_app/features/files/domain/file_repository.dart';
 import 'package:zdrive_app/features/files/domain/use_cases/create_folder_use_case.dart';
@@ -27,6 +28,7 @@ void main() {
   late MockCreateFolderUseCase mockCreateFolder;
   late MockDeleteFileUseCase mockDeleteFile;
   late MockSearchFilesUseCase mockSearchFiles;
+  late RemoteFileChangeNotifier remoteChangeNotifier;
 
   final now = DateTime(2024, 1, 15);
   final testFolder = FileItem(
@@ -69,6 +71,7 @@ void main() {
     mockCreateFolder = MockCreateFolderUseCase();
     mockDeleteFile = MockDeleteFileUseCase();
     mockSearchFiles = MockSearchFilesUseCase();
+    remoteChangeNotifier = RemoteFileChangeNotifier();
   });
 
   FileBrowserBloc buildBloc() => FileBrowserBloc(
@@ -77,6 +80,7 @@ void main() {
         deleteFile: mockDeleteFile,
         searchFiles: mockSearchFiles,
         fileRepository: mockRepository,
+        remoteChangeNotifier: remoteChangeNotifier,
       );
 
   group('LoadFolder', () {
@@ -254,5 +258,119 @@ void main() {
         isA<FileBrowserError>(),
       ],
     );
+  });
+
+  group('RemoteFileChangeNotifier', () {
+    // The Files tab (app_router.dart's StatefulShellRoute.indexedStack keeps
+    // it alive) otherwise never refreshes after its initial LoadFolder — a
+    // sync pull/push landing files on the server must be able to wake it up.
+    test('a change signal while a folder is loaded reloads it', () async {
+      when(() => mockListFiles(null, page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(const LoadFolder());
+      await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
+
+      remoteChangeNotifier.notifyChanged();
+      // Waits for the work, not for a state: the refresh keeps the folder on
+      // screen, and a reload returning the same listing produces an equal
+      // FileBrowserLoaded, which Equatable-backed bloc dedupes away. Awaiting
+      // another Loaded here hung until the test timed out.
+      await pumpEventQueue();
+
+      verify(() => mockListFiles(null, page: 1, pageSize: 50)).called(2);
+    });
+
+    // A background refresh must not swap the list for a spinner: that rebuild
+    // drops the ListView and its ScrollPosition, so a user reading item 40 of
+    // 200 gets thrown back to the top by a sync they did not trigger. Now
+    // that a change signal fires this automatically (2s after a watch event,
+    // or on the 30s poll), the reload has to be invisible.
+    test('reloading the folder already on screen never emits FileBrowserLoading',
+        () async {
+      when(() => mockListFiles(null, page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(const LoadFolder());
+      await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
+
+      final statesAfterFirstLoad = <FileBrowserState>[];
+      final sub = bloc.stream.listen(statesAfterFirstLoad.add);
+      addTearDown(sub.cancel);
+
+      remoteChangeNotifier.notifyChanged();
+      await pumpEventQueue();
+
+      // The reload definitely happened...
+      verify(() => mockListFiles(null, page: 1, pageSize: 50)).called(2);
+      // ...and it was invisible: no spinner in between, so the ListView and
+      // its ScrollPosition were never dropped.
+      expect(
+        statesAfterFirstLoad.whereType<FileBrowserLoading>(),
+        isEmpty,
+        reason: 'a refresh of the same folder must not pass through Loading, '
+            'or the list and its scroll position are rebuilt from scratch',
+      );
+    });
+
+    test('moving to a DIFFERENT folder still shows the spinner — there is '
+        'nothing on screen worth keeping once the folder changes', () async {
+      when(() => mockListFiles(null, page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      when(() => mockListFiles('folder-1', page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      when(() => mockRepository.getFile('folder-1'))
+          .thenAnswer((_) async => testFolder);
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(const LoadFolder());
+      await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
+
+      final states = <FileBrowserState>[];
+      final sub = bloc.stream.listen(states.add);
+      addTearDown(sub.cancel);
+
+      bloc.add(const LoadFolder(folderId: 'folder-1'));
+      await bloc.stream.firstWhere(
+          (s) => s is FileBrowserLoaded && s.currentFolderId == 'folder-1');
+
+      expect(states.whereType<FileBrowserLoading>(), isNotEmpty);
+    });
+
+    test('a change signal while nothing is loaded yet does nothing', () async {
+      when(() => mockListFiles(null, page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      // No LoadFolder dispatched — state is still FileBrowserInitial, so the
+      // guard in the notifier's listener (only refresh when
+      // FileBrowserLoaded) must skip this signal instead of piling a
+      // LoadFolder on top of whatever the initial load is doing.
+      remoteChangeNotifier.notifyChanged();
+      await pumpEventQueue();
+
+      verifyNever(() => mockListFiles(any(), page: any(named: 'page'), pageSize: any(named: 'pageSize')));
+    });
+
+    test('closing the bloc cancels the subscription — a later signal does not throw or reload', () async {
+      when(() => mockListFiles(null, page: 1, pageSize: 50))
+          .thenAnswer((_) async => pagedResult);
+      final bloc = buildBloc();
+
+      bloc.add(const LoadFolder());
+      await bloc.stream.firstWhere((s) => s is FileBrowserLoaded);
+      await bloc.close();
+
+      remoteChangeNotifier.notifyChanged();
+      await pumpEventQueue();
+
+      verify(() => mockListFiles(null, page: 1, pageSize: 50)).called(1);
+    });
   });
 }

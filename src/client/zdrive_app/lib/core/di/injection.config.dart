@@ -13,6 +13,8 @@ import 'package:dio/dio.dart' as _i361;
 import 'package:get_it/get_it.dart' as _i174;
 import 'package:injectable/injectable.dart' as _i526;
 import 'package:zdrive_app/core/auth/token_storage.dart' as _i323;
+import 'package:zdrive_app/core/events/remote_file_change_notifier.dart'
+    as _i965;
 import 'package:zdrive_app/core/network/auth_interceptor.dart' as _i248;
 import 'package:zdrive_app/core/network/dio_client.dart' as _i904;
 import 'package:zdrive_app/core/storage/app_preferences.dart' as _i736;
@@ -72,6 +74,9 @@ extension GetItInjectableX on _i174.GetIt {
     final gh = _i526.GetItHelper(this, environment, environmentFilter);
     final networkModule = _$NetworkModule();
     gh.lazySingleton<_i323.TokenStorage>(() => _i323.TokenStorage());
+    gh.lazySingleton<_i965.RemoteFileChangeNotifier>(
+      () => _i965.RemoteFileChangeNotifier(),
+    );
     await gh.lazySingletonAsync<_i736.AppPreferences>(() {
       final i = _i736.AppPreferences();
       return i.init().then((_) => i);

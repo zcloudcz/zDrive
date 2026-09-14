@@ -290,6 +290,12 @@ abstract class AppLocalizations {
   /// **'Search'**
   String get search;
 
+  /// No description provided for @refresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get refresh;
+
   /// No description provided for @noFiles.
   ///
   /// In en, this message translates to:
@@ -452,18 +458,6 @@ abstract class AppLocalizations {
   /// **'Sync status'**
   String get syncStatus;
 
-  /// No description provided for @allSynced.
-  ///
-  /// In en, this message translates to:
-  /// **'Everything is synced'**
-  String get allSynced;
-
-  /// No description provided for @syncDescription.
-  ///
-  /// In en, this message translates to:
-  /// **'Your files are up to date across all devices.'**
-  String get syncDescription;
-
   /// No description provided for @syncDevices.
   ///
   /// In en, this message translates to:
@@ -583,6 +577,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Close'**
   String get close;
+
+  /// No description provided for @errorNoConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not reach the server. Check your connection and try again.'**
+  String get errorNoConnection;
+
+  /// No description provided for @errorServiceUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This feature is temporarily unavailable. Please try again later.'**
+  String get errorServiceUnavailable;
+
+  /// No description provided for @errorRequestFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The request could not be completed.'**
+  String get errorRequestFailed;
 }
 
 class _AppLocalizationsDelegate

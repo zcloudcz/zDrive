@@ -88,6 +88,25 @@ flutter build apk
 flutter build ipa
 ```
 
+#### Build-time defines
+
+Both are `const` in the client (`String.fromEnvironment` /
+`bool.fromEnvironment`), so they are baked in at compile time and cannot be
+changed at runtime. Their defaults describe the **deployed** setup, not the
+docker-compose one:
+
+| Define | Default | Pass it when |
+|--------|---------|--------------|
+| `API_BASE_URL` | `http://localhost:5100/api/v1` | Building for a deployed gateway — CI does this for the Pages build (`.github/workflows/deploy-web.yml`) |
+| `PHOTOS_ENABLED` | `false` | Running PhotoService locally. PhotoService and NotificationService are **not deployed** (MVP scope) and the gateway proxies their routes to localhost, so a deployed build answers 502 for them; the Photos tab and its route are therefore hidden by default |
+
+`docker-compose up` **does** start PhotoService, so local work on photos needs
+the flag or the tab will not be there:
+
+```bash
+flutter run -d windows --dart-define=PHOTOS_ENABLED=true
+```
+
 ## Conventions
 
 ### .NET services

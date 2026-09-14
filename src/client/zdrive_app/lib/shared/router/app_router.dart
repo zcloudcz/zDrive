@@ -4,12 +4,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/auth/auth_bloc.dart';
 import '../../core/di/injection.dart';
+import '../../core/events/remote_file_change_notifier.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
 import '../../features/files/presentation/pages/file_browser_page.dart';
 import '../../features/files/presentation/pages/search_page.dart';
 import '../../features/files/presentation/pages/trash_page.dart';
 import '../../features/home/presentation/home_page.dart';
+import '../../features/photos/photos_support.dart';
 import '../../features/photos/presentation/pages/albums_page.dart';
 import '../../features/photos/presentation/pages/photos_tab.dart';
 import '../../features/sync/data/pull_sync_service.dart';
@@ -57,59 +59,13 @@ GoRouter createRouter(AuthBloc authBloc) {
               syncCoordinator: getIt<SyncCoordinator>(),
               pullService: getIt<PullSyncService>(),
               preferences: getIt<AppPreferences>(),
+              remoteChangeNotifier: getIt<RemoteFileChangeNotifier>(),
               userId: userId,
             ),
             child: HomePage(navigationShell: navigationShell),
           );
         },
-        branches: [
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/home/files',
-                builder: (_, _) => const FileBrowserPage(),
-                routes: [
-                  GoRoute(
-                    path: 'folder/:folderId',
-                    builder: (_, state) => FileBrowserPage(
-                      folderId: state.pathParameters['folderId'],
-                    ),
-                  ),
-                  GoRoute(
-                    path: 'trash',
-                    builder: (_, _) => const TrashPage(),
-                  ),
-                  GoRoute(
-                    path: 'search',
-                    builder: (_, _) => const SearchPage(),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/home/photos',
-                builder: (_, _) => const PhotosTab(),
-                routes: [
-                  GoRoute(
-                    path: 'albums',
-                    builder: (_, _) => const AlbumsPage(),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: '/home/settings',
-                builder: (_, _) => const SyncPage(),
-              ),
-            ],
-          ),
-        ],
+        branches: buildHomeBranches(),
       ),
     ],
   );
@@ -141,6 +97,63 @@ Widget buildSyncShellProvider({
     create: (_) => createBloc()..add(const LoadSyncStatus()),
     child: child,
   );
+}
+
+/// The shell's branches, one per bottom-nav tab — factored out so a test can
+/// check the Photos branch (and its `/home/photos` route) is gated by
+/// [photosEnabled] without building a real [GoRouter]. Order matches
+/// [buildHomeDestinations] in `home_page.dart`: [StatefulNavigationShell]
+/// indexes branches positionally, so the two lists must stay in lockstep.
+List<StatefulShellBranch> buildHomeBranches({bool photosEnabled = kPhotosEnabled}) {
+  return [
+    StatefulShellBranch(
+      routes: [
+        GoRoute(
+          path: '/home/files',
+          builder: (_, _) => const FileBrowserPage(),
+          routes: [
+            GoRoute(
+              path: 'folder/:folderId',
+              builder: (_, state) => FileBrowserPage(
+                folderId: state.pathParameters['folderId'],
+              ),
+            ),
+            GoRoute(
+              path: 'trash',
+              builder: (_, _) => const TrashPage(),
+            ),
+            GoRoute(
+              path: 'search',
+              builder: (_, _) => const SearchPage(),
+            ),
+          ],
+        ),
+      ],
+    ),
+    if (photosEnabled)
+      StatefulShellBranch(
+        routes: [
+          GoRoute(
+            path: '/home/photos',
+            builder: (_, _) => const PhotosTab(),
+            routes: [
+              GoRoute(
+                path: 'albums',
+                builder: (_, _) => const AlbumsPage(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    StatefulShellBranch(
+      routes: [
+        GoRoute(
+          path: '/home/settings',
+          builder: (_, _) => const SyncPage(),
+        ),
+      ],
+    ),
+  ];
 }
 
 class _AuthRefreshListenable extends ChangeNotifier {

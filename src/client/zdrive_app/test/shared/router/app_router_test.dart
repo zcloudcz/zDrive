@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/core/events/remote_file_change_notifier.dart';
 import 'package:zdrive_app/core/storage/app_preferences.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_bloc.dart';
+import 'package:zdrive_app/features/home/presentation/home_page.dart';
+import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
 import 'package:zdrive_app/shared/router/app_router.dart';
 
 class MockSyncRemoteDataSource extends Mock implements SyncRemoteDataSource {}
@@ -15,6 +19,8 @@ class MockSyncCoordinator extends Mock implements SyncCoordinator {}
 class MockPullSyncService extends Mock implements PullSyncService {}
 
 class MockAppPreferences extends Mock implements AppPreferences {}
+
+class MockRemoteFileChangeNotifier extends Mock implements RemoteFileChangeNotifier {}
 
 void main() {
   // Router-level regression test for PR #16 review round 1, F1: the shell's
@@ -29,12 +35,14 @@ void main() {
   late MockSyncCoordinator mockSyncCoordinator;
   late MockPullSyncService mockPullService;
   late MockAppPreferences mockPreferences;
+  late MockRemoteFileChangeNotifier mockRemoteChangeNotifier;
 
   setUp(() {
     mockDataSource = MockSyncRemoteDataSource();
     mockSyncCoordinator = MockSyncCoordinator();
     mockPullService = MockPullSyncService();
     mockPreferences = MockAppPreferences();
+    mockRemoteChangeNotifier = MockRemoteFileChangeNotifier();
     when(() => mockSyncCoordinator.startSession(any())).thenAnswer((_) async {});
     when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
   });
@@ -53,6 +61,7 @@ void main() {
           syncCoordinator: mockSyncCoordinator,
           pullService: mockPullService,
           preferences: mockPreferences,
+          remoteChangeNotifier: mockRemoteChangeNotifier,
           userId: 'user-1',
         ),
         // Deliberately a plain widget that never reads SyncBloc from
@@ -87,6 +96,7 @@ void main() {
             syncCoordinator: mockSyncCoordinator,
             pullService: mockPullService,
             preferences: mockPreferences,
+            remoteChangeNotifier: mockRemoteChangeNotifier,
             userId: 'user-1',
           );
         },
@@ -98,5 +108,53 @@ void main() {
     expect(createBlocCalled, isFalse);
     verifyZeroInteractions(mockSyncCoordinator);
     verifyZeroInteractions(mockDataSource);
+  });
+
+  group('buildHomeBranches', () {
+    // photosEnabled is threaded in as a parameter (default: kPhotosEnabled,
+    // a compile-time bool.fromEnvironment) rather than read directly, so this
+    // can drive both branches without a `--dart-define` per test run.
+    test('photosEnabled: false omits the Photos branch and its route entirely', () {
+      final branches = buildHomeBranches(photosEnabled: false);
+
+      expect(branches, hasLength(2));
+      final paths = branches
+          .expand((b) => b.routes)
+          .whereType<GoRoute>()
+          .map((r) => r.path);
+      expect(paths, isNot(contains('/home/photos')));
+    });
+
+    test('photosEnabled: true includes the Photos branch and its route', () {
+      final branches = buildHomeBranches(photosEnabled: true);
+
+      expect(branches, hasLength(3));
+      final paths = branches
+          .expand((b) => b.routes)
+          .whereType<GoRoute>()
+          .map((r) => r.path);
+      expect(paths, contains('/home/photos'));
+    });
+
+    // StatefulNavigationShell matches branches to destinations POSITIONALLY:
+    // it calls goBranch(index) with the index of the tapped destination. The
+    // two lists are built in separate files under the same flag, so if one
+    // ever gains or drops an entry without the other, tapping a tab silently
+    // opens the wrong page — or throws on an index that has no branch. The
+    // doc comments on both builders say so; this asserts it, for both values
+    // of the flag, which the separate tests above cannot (each only checks
+    // its own list).
+    test('branches and destinations stay the same length under both flag '
+        'values — the shell maps them by position', () {
+      final l10n = AppLocalizationsEn();
+
+      for (final photosEnabled in [false, true]) {
+        expect(
+          buildHomeBranches(photosEnabled: photosEnabled).length,
+          buildHomeDestinations(l10n, photosEnabled: photosEnabled).length,
+          reason: 'photosEnabled: $photosEnabled',
+        );
+      }
+    });
   });
 }

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/events/remote_file_change_notifier.dart';
 import '../../data/file_saver.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
@@ -36,6 +37,7 @@ class FileBrowserPage extends StatelessWidget {
         deleteFile: getIt<DeleteFileUseCase>(),
         searchFiles: getIt<SearchFilesUseCase>(),
         fileRepository: getIt<FileRepository>(),
+        remoteChangeNotifier: getIt<RemoteFileChangeNotifier>(),
       )..add(LoadFolder(folderId: folderId)),
       child: const _FileBrowserView(),
     );
@@ -113,6 +115,14 @@ class _FileBrowserView extends StatelessWidget {
             )
           : Text(l10n.files),
       actions: [
+        // Pull-to-refresh (RefreshIndicator, below) is not discoverable with
+        // a mouse — this gives desktop users an equally-obvious manual
+        // refresh, reusing the same RefreshFiles event.
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          tooltip: l10n.refresh,
+          onPressed: () => context.read<FileBrowserBloc>().add(const RefreshFiles()),
+        ),
         IconButton(
           icon: const Icon(Icons.search),
           tooltip: l10n.search,

@@ -1,4 +1,5 @@
 import 'package:bloc_test/bloc_test.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/features/photos/domain/photo.dart';
@@ -69,6 +70,38 @@ void main() {
       expect: () => [
         const PhotosLoading(),
         isA<PhotosError>(),
+      ],
+    );
+
+    blocTest<PhotosBloc, PhotosState>(
+      'a 502 from the (undeployed) PhotoService renders as a plain human '
+      'message, not DioException\'s internal dump (status code, '
+      'RequestOptions, validateStatus)',
+      build: buildBloc,
+      setUp: () {
+        when(() => mockRepository.getTimeline(limit: 50, offset: 0)).thenThrow(
+          DioException(
+            requestOptions: RequestOptions(path: '/photos/timeline'),
+            response: Response(
+              requestOptions: RequestOptions(path: '/photos/timeline'),
+              statusCode: 502,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+      },
+      act: (bloc) => bloc.add(const LoadTimeline()),
+      // The bloc carries the error itself now; turning it into text needs
+      // AppLocalizations and therefore happens in the widget layer, so the
+      // "no DioException dump reaches the user" guarantee is asserted in
+      // test/core/network/error_message_test.dart instead of here.
+      expect: () => [
+        const PhotosLoading(),
+        isA<PhotosError>().having(
+          (s) => s.error,
+          'error',
+          isA<DioException>(),
+        ),
       ],
     );
   });

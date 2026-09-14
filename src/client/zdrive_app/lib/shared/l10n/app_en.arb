@@ -39,6 +39,7 @@
   "emptyTrash": "Empty trash",
   "trash": "Trash",
   "search": "Search",
+  "refresh": "Refresh",
   "noFiles": "No files",
   "createFolder": "Create folder",
   "folderName": "Folder name",
@@ -66,8 +67,6 @@
   "newAlbum": "New album",
   "albumName": "Album name",
   "syncStatus": "Sync status",
-  "allSynced": "Everything is synced",
-  "syncDescription": "Your files are up to date across all devices.",
   "syncDevices": "Devices",
   "syncNoDevices": "No devices registered",
   "syncNeverSynced": "Never synced",
@@ -86,11 +85,16 @@
   "versionLabel": "Version {number}",
   "@versionLabel": {
     "placeholders": {
-      "number": { "type": "int" }
+      "number": {
+        "type": "int"
+      }
     }
   },
   "confirmRestoreVersion": "Restore this version?",
   "versionRestored": "Version restored",
   "latestVersion": "Latest",
-  "close": "Close"
+  "close": "Close",
+  "errorNoConnection": "Could not reach the server. Check your connection and try again.",
+  "errorServiceUnavailable": "This feature is temporarily unavailable. Please try again later.",
+  "errorRequestFailed": "The request could not be completed."
 }
