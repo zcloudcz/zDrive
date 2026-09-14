@@ -154,6 +154,13 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   // round 3, finding 1).
   int _syncGeneration = 0;
 
+  // Set when a sync is requested while one is already running (a watch event
+  // mid-run, a poll tick, the initial load racing a folder pick) and cleared
+  // by the trailing run that services it. Cleared on every _syncGeneration
+  // bump too: a request made for a folder nobody is looking at any more must
+  // not start a run for the folder that replaced it.
+  bool _syncRequestedWhileRunning = false;
+
   SyncBloc({
     required SyncRemoteDataSource dataSource,
     required SyncCoordinator syncCoordinator,
@@ -219,6 +226,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     // old folder is stale the moment its tail next checks — see
     // _syncGeneration's doc comment.
     _syncGeneration++;
+    _syncRequestedWhileRunning = false;
     try {
       final current = state;
       final previousPath = current is SyncLoaded ? current.syncFolderPath : _preferences.syncFolderPath;
@@ -284,6 +292,16 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       // ever syncing the new folder. Calling the guard-and-run logic
       // synchronously from here, right after the isPulling override above,
       // sidesteps that race instead of relying on it resolving in time.
+      //
+      // The flag is cleared again here, not only at the _syncGeneration bump
+      // at the top of this handler: the awaits in between (resetForNewFolder
+      // waits on the coordinator's mutex, i.e. on the very run being
+      // replaced) leave a window where a poll tick or watch event sets it
+      // again — for the OLD folder. The old run's tail then hits the
+      // generation mismatch and returns WITHOUT clearing it, so it would
+      // survive into the new folder's run and earn it a pointless second scan
+      // and pull.
+      _syncRequestedWhileRunning = false;
       await _runSync(emit);
     } catch (e) {
       // Mirrors _onLoadSyncStatus's try/catch (PR #16 review round 4, R1): an
@@ -309,13 +327,26 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   /// [PullRequested]'s event queue.
   Future<void> _runSync(Emitter<SyncState> emit) async {
     final current = state;
+    if (current is! SyncLoaded || current.syncFolderPath == null) {
+      return;
+    }
     // The isPulling check makes this re-entrancy-safe against the periodic
     // timer, the initial load, and a folder pick all firing around the same
     // time: it is read and then set synchronously (no `await` in between),
     // so a second call arriving while the first is still in flight always
-    // sees it already true and returns immediately instead of running a
-    // second pullOnce concurrently.
-    if (current is! SyncLoaded || current.syncFolderPath == null || current.isPulling) {
+    // sees it already true and never runs a second syncOnce concurrently.
+    //
+    // It must not DROP that request, though, which is what it used to do. A
+    // run scans the disk once, at its start; SyncCoordinator's single flight
+    // also hands a caller for the same path the already-running future. So a
+    // file dropped into the sync folder while a run was in flight was neither
+    // uploaded by that run (it scanned before the file existed) nor by a new
+    // one (this returned early) — it sat there until the next 30s poll tick,
+    // and the Files tab showed nothing because no run reported having pushed
+    // anything. Remember the request instead and service it with exactly one
+    // trailing run, however many arrive while this one is busy.
+    if (current.isPulling) {
+      _syncRequestedWhileRunning = true;
       return;
     }
 
@@ -381,7 +412,29 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       if (latest is SyncLoaded) {
         emit(latest.copyWith(isPulling: false, pullError: () => e.toString()));
       }
+    } finally {
+      // In `finally` so it also covers the stale-generation returns above and
+      // the error path: whatever ended this run, a request that arrived while
+      // it was busy still has to be serviced.
+      _dispatchTrailingSyncIfRequested(generation);
     }
+  }
+
+  /// Runs once more if anything asked to sync while the last run was in
+  /// flight — a single trailing run no matter how many requests arrived, so a
+  /// burst of watch events cannot queue a run per event.
+  ///
+  /// Dispatched as an event rather than calling [_runSync] directly: that
+  /// keeps it behind the bloc's own event queue (no recursion, and the
+  /// isPulling flag is already back to false by the time it is handled).
+  void _dispatchTrailingSyncIfRequested(int generation) {
+    if (!_syncRequestedWhileRunning) return;
+    // A folder switch or a close bumps the generation and clears the flag
+    // itself, so a mismatch here means this run is stale and the flag now
+    // belongs to whoever bumped it — leave it alone.
+    if (generation != _syncGeneration || isClosed) return;
+    _syncRequestedWhileRunning = false;
+    add(const PullRequested());
   }
 
   Future<SyncLoaded> _fetchLoadedState() async {
@@ -434,6 +487,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     // run still in flight at this point must not try to emit into a bloc
     // that is closing.
     _syncGeneration++;
+    _syncRequestedWhileRunning = false;
     _pollTimer?.cancel();
     _stopWatching();
     return super.close();
