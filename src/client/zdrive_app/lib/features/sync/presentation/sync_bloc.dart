@@ -292,6 +292,16 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       // ever syncing the new folder. Calling the guard-and-run logic
       // synchronously from here, right after the isPulling override above,
       // sidesteps that race instead of relying on it resolving in time.
+      //
+      // The flag is cleared again here, not only at the _syncGeneration bump
+      // at the top of this handler: the awaits in between (resetForNewFolder
+      // waits on the coordinator's mutex, i.e. on the very run being
+      // replaced) leave a window where a poll tick or watch event sets it
+      // again — for the OLD folder. The old run's tail then hits the
+      // generation mismatch and returns WITHOUT clearing it, so it would
+      // survive into the new folder's run and earn it a pointless second scan
+      // and pull.
+      _syncRequestedWhileRunning = false;
       await _runSync(emit);
     } catch (e) {
       // Mirrors _onLoadSyncStatus's try/catch (PR #16 review round 4, R1): an

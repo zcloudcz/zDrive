@@ -28,6 +28,10 @@ void main() {
   late MockPullSyncService mockPullService;
   late MockAppPreferences mockPreferences;
   late MockRemoteFileChangeNotifier mockRemoteChangeNotifier;
+  // Set from inside a syncOnce stub when two runs are in flight at once, and
+  // asserted in that test's verify: an expect() inside the stub is swallowed
+  // by _runSync's catch (see the coalescing test below).
+  var overlapObserved = false;
 
   setUp(() {
     mockDataSource = MockSyncRemoteDataSource();
@@ -317,15 +321,21 @@ void main() {
       seed: () => const SyncLoaded(devices: [], syncFolderPath: '/local/sync'),
       setUp: () {
         var inFlight = 0;
+        overlapObserved = false;
         final firstRun = Completer<SyncRunResult>();
         when(() => mockSyncCoordinator.syncOnce('/local/sync')).thenAnswer((_) {
           inFlight++;
-          // Asserted inside the stub, not afterwards: a count taken at the
-          // end cannot tell a trailing run apart from a concurrent one, which
-          // is the whole property being protected here (SyncCoordinator's own
-          // single flight would hand a concurrent caller the same future, so
-          // pull and scan could interleave).
-          expect(inFlight, 1, reason: 'two syncOnce calls overlapped');
+          // RECORDED here, ASSERTED in verify: overlap is only observable
+          // from inside the stub (a call count taken at the end cannot tell a
+          // trailing run from a concurrent one — SyncCoordinator's own single
+          // flight would hand a concurrent caller the same future, letting
+          // pull and scan interleave). But an `expect` here runs synchronously
+          // inside syncOnce, i.e. inside _runSync's try, whose `catch (e)`
+          // swallows TestFailure like any other error and files it in
+          // SyncLoaded.pullError — the test then passes while reporting
+          // nothing. Verified by probe: an always-failing expect in this stub
+          // left the suite green.
+          if (inFlight > 1) overlapObserved = true;
           final run = inFlight == 1 ? firstRun.future : Future.value(const SyncRunResult(pulled: 0, pushed: 0));
           return run.whenComplete(() => inFlight--);
         });
@@ -347,7 +357,15 @@ void main() {
         bloc.add(const PullRequested());
       },
       wait: const Duration(milliseconds: 80),
-      verify: (_) => verify(() => mockSyncCoordinator.syncOnce('/local/sync')).called(2),
+      verify: (_) {
+        expect(
+          overlapObserved,
+          isFalse,
+          reason: 'two syncOnce calls were in flight at the same time — the '
+              'trailing run must start only after the previous one finished',
+        );
+        verify(() => mockSyncCoordinator.syncOnce('/local/sync')).called(2);
+      },
     );
 
     blocTest<SyncBloc, SyncState>(
@@ -401,6 +419,52 @@ void main() {
         // the remembered request.
         verify(() => mockSyncCoordinator.syncOnce('/new')).called(1);
       },
+    );
+
+    blocTest<SyncBloc, SyncState>(
+      'the same holds in the opposite order — a request arriving DURING the '
+      'switch (while resetForNewFolder waits on the coordinator mutex for the '
+      'old run) is about the old folder and must not earn the new one an '
+      'extra run',
+      build: buildBloc,
+      seed: () => const SyncLoaded(devices: [], syncFolderPath: '/old'),
+      setUp: () {
+        // A run for /old genuinely in flight, so the request in step 3 below
+        // hits the isPulling guard and arms the flag. Without this the
+        // request would just start its own run and never exercise the window.
+        final oldRun = Completer<SyncRunResult>();
+        when(() => mockSyncCoordinator.syncOnce('/old'))
+            .thenAnswer((_) => oldRun.future);
+        // resetForNewFolder awaits the coordinator's mutex in production,
+        // i.e. the old run; held open here to stand in for that wait, which
+        // is the window the generation bump alone does not cover.
+        final resetGate = Completer<void>();
+        when(() => mockSyncCoordinator.resetForNewFolder('/new'))
+            .thenAnswer((_) => resetGate.future);
+        when(() => mockSyncCoordinator.syncOnce('/new'))
+            .thenAnswer((_) async => const SyncRunResult(pulled: 0, pushed: 0));
+        when(() => mockPreferences.setSyncFolderPath('/new')).thenAnswer((_) async {});
+        when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+        when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+        Future.delayed(const Duration(milliseconds: 40), () {
+          oldRun.complete(const SyncRunResult(pulled: 0, pushed: 0));
+          resetGate.complete();
+        });
+      },
+      act: (bloc) async {
+        // 1. a run for /old starts and stays in flight
+        bloc.add(const PullRequested());
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        // 2. the switch begins: bumps the generation (clearing the flag) and
+        //    then parks on resetForNewFolder
+        bloc.add(const SyncFolderChosen('/new'));
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        // 3. a poll tick lands in that window — about /old, since that is
+        //    what is still running
+        bloc.add(const PullRequested());
+      },
+      wait: const Duration(milliseconds: 150),
+      verify: (_) => verify(() => mockSyncCoordinator.syncOnce('/new')).called(1),
     );
 
     blocTest<SyncBloc, SyncState>(
