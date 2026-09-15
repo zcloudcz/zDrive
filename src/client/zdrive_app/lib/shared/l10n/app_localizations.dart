@@ -290,6 +290,12 @@ abstract class AppLocalizations {
   /// **'Search'**
   String get search;
 
+  /// No description provided for @clearSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear search'**
+  String get clearSearch;
+
   /// No description provided for @refresh.
   ///
   /// In en, this message translates to:

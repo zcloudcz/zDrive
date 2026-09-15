@@ -107,6 +107,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get search => 'Search';
 
   @override
+  String get clearSearch => 'Clear search';
+
+  @override
   String get refresh => 'Refresh';
 
   @override

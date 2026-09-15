@@ -39,6 +39,7 @@
   "emptyTrash": "Empty trash",
   "trash": "Trash",
   "search": "Search",
+  "clearSearch": "Clear search",
   "refresh": "Refresh",
   "noFiles": "No files",
   "createFolder": "Create folder",

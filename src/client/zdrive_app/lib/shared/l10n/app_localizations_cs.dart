@@ -107,6 +107,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get search => 'Hledat';
 
   @override
+  String get clearSearch => 'Vymazat hledání';
+
+  @override
   String get refresh => 'Obnovit';
 
   @override

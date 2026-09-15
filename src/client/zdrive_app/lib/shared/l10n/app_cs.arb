@@ -32,6 +32,7 @@
   "emptyTrash": "Vysypat koš",
   "trash": "Koš",
   "search": "Hledat",
+  "clearSearch": "Vymazat hledání",
   "refresh": "Obnovit",
   "noFiles": "Žádné soubory",
   "createFolder": "Vytvořit složku",
