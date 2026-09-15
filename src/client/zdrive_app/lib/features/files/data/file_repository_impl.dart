@@ -284,8 +284,22 @@ class FileRepositoryImpl implements FileRepository {
   }
 
   @override
-  Future<Uint8List> downloadFile(String fileId) {
-    return _uploadDataSource.downloadFile(fileId);
+  Future<Uint8List> downloadFile(String fileId) async {
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in downloadFileStream(fileId)) {
+      builder.add(chunk);
+    }
+    return builder.takeBytes();
+  }
+
+  @override
+  Stream<Uint8List> downloadFileStream(String fileId) async* {
+    final metadata = await _remoteDataSource.getFile(fileId);
+    final manifestHash = metadata.manifestHash;
+    if (manifestHash == null || !RegExp(r'^[0-9a-f]{64}$').hasMatch(manifestHash)) {
+      throw StateError('File has no committed content manifest');
+    }
+    yield* _uploadDataSource.downloadFileStream(fileId, manifestHash: manifestHash);
   }
 
   @override

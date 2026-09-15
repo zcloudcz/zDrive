@@ -53,6 +53,11 @@ abstract class FileRepository {
   /// there is no assembled whole-file blob on the server.
   Future<Uint8List> downloadFile(String fileId);
 
+  /// Streams verified chunks of the version committed in file metadata.
+  /// Consumers must wait for successful stream completion before installing
+  /// the content: total length is verified after the last chunk.
+  Stream<Uint8List> downloadFileStream(String fileId);
+
   /// Uploads [content] as a new version of the already-existing file
   /// [fileId] — the second half of [uploadFile] only (chunk upload +
   /// version record), with no node creation. For sync's "last write wins"

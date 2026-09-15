@@ -10,6 +10,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:path/path.dart' as p;
 import 'package:zdrive_app/features/files/domain/file_item.dart';
 import 'package:zdrive_app/features/files/domain/file_repository.dart';
+import 'package:zdrive_app/features/files/data/file_upload_data_source.dart';
 import 'package:zdrive_app/features/sync/data/device_registration_service.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_name_rules.dart';
@@ -123,7 +124,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('file-1')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('file-1')).thenAnswer((_) async => bytes);
+    when(() => mockFileRepository.downloadFileStream('file-1')).thenAnswer((_) => Stream.value(bytes));
 
     final applied = await service.pullOnce(tempDir.path);
 
@@ -174,7 +175,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('file-1')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('file-1')).thenAnswer((_) async => bytes1);
+    when(() => mockFileRepository.downloadFileStream('file-1')).thenAnswer((_) => Stream.value(bytes1));
     when(() => mockFileRepository.getFile('file-2')).thenAnswer((_) async => FileItem(
           id: 'file-2',
           name: 'two.txt',
@@ -185,7 +186,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('file-2')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('file-2')).thenAnswer((_) async => bytes2);
+    when(() => mockFileRepository.downloadFileStream('file-2')).thenAnswer((_) => Stream.value(bytes2));
 
     final applied = await service.pullOnce(tempDir.path);
 
@@ -265,7 +266,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('file-restored')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('file-restored')).thenAnswer((_) async => bytes);
+    when(() => mockFileRepository.downloadFileStream('file-restored')).thenAnswer((_) => Stream.value(bytes));
 
     final applied = await service.pullOnce(tempDir.path);
 
@@ -354,6 +355,164 @@ void main() {
         )).called(1);
   });
 
+  for (final failure in [
+    Exception('network failed'),
+    const ChunkHashMismatchException('expected', 'actual'),
+    const ManifestSizeMismatchException(100, 3),
+  ]) {
+    test('Download_PartialStreamFails($failure)_PreservesDestinationAndCleansStaging', () async {
+      final now = DateTime.utc(2026);
+      final original = File(p.join(tempDir.path, 'doc.txt'));
+      await original.writeAsString('original');
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+          .thenAnswer((_) async => page([{'id': 1, 'fileId': 'f1', 'type': 'Update'}], 1));
+      when(() => mockFileRepository.getFile('f1')).thenAnswer((_) async => FileItem(
+        id: 'f1', name: 'doc.txt', isFolder: false, sizeBytes: 100,
+        createdAt: now, updatedAt: now,
+      ));
+      when(() => mockMirror.getByServerId('f1')).thenAnswer((_) async => SyncMirrorEntry(
+        serverId: 'f1', localPath: original.path, isFolder: false,
+        contentHash: sha256.convert(utf8.encode('original')).toString(),
+        updatedAt: now, syncedAt: now,
+      ));
+      when(() => mockFileRepository.downloadFileStream('f1')).thenAnswer((_) async* {
+        yield Uint8List.fromList([1, 2, 3]);
+        // The consumer writes before asking for the next chunk; the full
+        // file never needs to be accumulated before disk I/O starts.
+        final staging = tempDir.listSync().whereType<Directory>().single;
+        expect(await File(p.join(staging.path, 'content')).length(), 3);
+        expect(await original.readAsString(), 'original');
+        throw failure;
+      });
+
+      await expectLater(service.pullOnce(tempDir.path), throwsA(same(failure)));
+      expect(await original.readAsString(), 'original');
+      expect(tempDir.listSync().map((e) => p.basename(e.path)), ['doc.txt']);
+      verifyNever(() => mockMirror.upsert(any()));
+      verifyNever(() => mockMirror.setCursor(any(), any()));
+      verifyNever(() => mockFileRepository.downloadFile(any()));
+    });
+  }
+
+  test('Download_LocalEditDuringTransfer_PreservesEdit', () async {
+    final now = DateTime.utc(2026);
+    final original = File(p.join(tempDir.path, 'doc.txt'));
+    await original.writeAsString('original');
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+        .thenAnswer((_) async => page([{'id': 1, 'fileId': 'f1', 'type': 'Update'}], 1));
+    when(() => mockFileRepository.getFile('f1')).thenAnswer((_) async => FileItem(
+      id: 'f1', name: 'doc.txt', isFolder: false, sizeBytes: 3,
+      createdAt: now, updatedAt: now,
+    ));
+    when(() => mockMirror.getByServerId('f1')).thenAnswer((_) async => SyncMirrorEntry(
+      serverId: 'f1', localPath: original.path, isFolder: false,
+      contentHash: sha256.convert(utf8.encode('original')).toString(),
+      updatedAt: now, syncedAt: now,
+    ));
+    when(() => mockFileRepository.downloadFileStream('f1')).thenAnswer((_) async* {
+      yield Uint8List.fromList([1, 2, 3]);
+      await original.writeAsString('edited during download');
+    });
+
+    await service.pullOnce(tempDir.path);
+    expect(await original.readAsString(), 'edited during download');
+    expect(tempDir.listSync(), hasLength(1));
+    verifyNever(() => mockMirror.upsert(any()));
+    verify(() => mockMirror.recordFailedEvent('f1', 1, any())).called(1);
+  });
+
+  for (final moved in [false, true]) {
+    test('Download_Success(moved=$moved)_InstallsAndUpdatesMirror', () async {
+      final now = DateTime.utc(2026);
+      final original = File(p.join(tempDir.path, 'old.txt'));
+      await original.writeAsString('original');
+      final destination = moved ? 'new.txt' : 'old.txt';
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+          .thenAnswer((_) async => page([{'id': 1, 'fileId': 'f1', 'type': 'Update'}], 1));
+      when(() => mockFileRepository.getFile('f1')).thenAnswer((_) async => FileItem(
+        id: 'f1', name: destination, isFolder: false, sizeBytes: 6,
+        createdAt: now, updatedAt: now,
+      ));
+      when(() => mockMirror.getByServerId('f1')).thenAnswer((_) async => SyncMirrorEntry(
+        serverId: 'f1', localPath: original.path, isFolder: false,
+        contentHash: sha256.convert(utf8.encode('original')).toString(),
+        updatedAt: now, syncedAt: now,
+      ));
+      when(() => mockFileRepository.downloadFileStream('f1')).thenAnswer((_) async* {
+        yield Uint8List.fromList([1, 2, 3]);
+        expect(await original.readAsString(), 'original');
+        yield Uint8List.fromList([4, 5, 6]);
+      });
+
+      await service.pullOnce(tempDir.path);
+      expect(await File(p.join(tempDir.path, destination)).readAsBytes(), [1, 2, 3, 4, 5, 6]);
+      expect(tempDir.listSync(), hasLength(1));
+      final saved = verify(() => mockMirror.upsert(captureAny())).captured.single as SyncMirrorEntry;
+      expect(saved.localPath, p.join(tempDir.path, destination));
+      expect(saved.contentHash, sha256.convert([1, 2, 3, 4, 5, 6]).toString());
+      verify(() => mockMirror.setCursor('dev-1', 1)).called(1);
+    });
+  }
+
+  test('Download_LinkedParent_QuarantinesWithoutWritingOutside', () async {
+    final outside = Directory.systemTemp.createTempSync('sync_outside_');
+    addTearDown(() => outside.deleteSync(recursive: true));
+    final link = Link(p.join(tempDir.path, 'linked'));
+    try {
+      await link.create(outside.path);
+    } on FileSystemException {
+      markTestSkipped('Host cannot create a directory link');
+      return;
+    }
+    addTearDown(() { if (link.existsSync()) link.deleteSync(); });
+    final now = DateTime.utc(2026);
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+        .thenAnswer((_) async => page([{'id': 1, 'fileId': 'f1', 'type': 'Create'}], 1));
+    when(() => mockFileRepository.getFile('f1')).thenAnswer((_) async => FileItem(
+      id: 'f1', name: 'doc.txt', parentId: 'parent', isFolder: false,
+      createdAt: now, updatedAt: now,
+    ));
+    when(() => mockMirror.getByServerId('f1')).thenAnswer((_) async => null);
+    when(() => mockMirror.getByServerId('parent')).thenAnswer((_) async => SyncMirrorEntry(
+      serverId: 'parent', localPath: link.path, isFolder: true,
+      updatedAt: now, syncedAt: now,
+    ));
+
+    await service.pullOnce(tempDir.path);
+    expect(outside.listSync(), isEmpty);
+    verifyNever(() => mockFileRepository.downloadFileStream(any()));
+    verify(() => mockMirror.recordFailedEvent('f1', 1, any())).called(1);
+  });
+
+  test('Move_FailedDownload_PreservesOriginalAndMirror', () async {
+    final now = DateTime.utc(2026);
+    final original = File(p.join(tempDir.path, 'old.txt'));
+    await original.writeAsString('original');
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+        .thenAnswer((_) async => page([{'id': 1, 'fileId': 'f1', 'type': 'Move'}], 1));
+    when(() => mockFileRepository.getFile('f1')).thenAnswer((_) async => FileItem(
+      id: 'f1', name: 'new.txt', isFolder: false, sizeBytes: 8,
+      createdAt: now, updatedAt: now,
+    ));
+    when(() => mockMirror.getByServerId('f1')).thenAnswer((_) async => SyncMirrorEntry(
+      serverId: 'f1', localPath: original.path, isFolder: false,
+      contentHash: sha256.convert(utf8.encode('original')).toString(),
+      updatedAt: now, syncedAt: now,
+    ));
+    when(() => mockFileRepository.downloadFileStream('f1')).thenThrow(Exception('network failed'));
+
+    await expectLater(service.pullOnce(tempDir.path), throwsException);
+    expect(await original.readAsString(), 'original');
+    expect(tempDir.listSync().map((e) => p.basename(e.path)), ['old.txt']);
+    verifyNever(() => mockMirror.upsert(any()));
+    verifyNever(() => mockMirror.setCursor(any(), any()));
+  });
+
   test('does not advance the cursor past an event whose apply failed', () async {
     final bytes = Uint8List.fromList(utf8.encode('ok'));
     final now = DateTime.utc(2026, 1, 1);
@@ -373,7 +532,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('file-1')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('file-1')).thenAnswer((_) async => bytes);
+    when(() => mockFileRepository.downloadFileStream('file-1')).thenAnswer((_) => Stream.value(bytes));
     // The second event's lookup fails outright (e.g. a dropped connection —
     // not a 404, which pullOnce treats as "already deleted, reconcile" and
     // is exercised by the Create/Delete tests above).
@@ -415,7 +574,7 @@ void main() {
     expect(applied, 1);
     // The name was rejected before any filesystem call — nothing was ever
     // downloaded or written, inside the sync folder or outside it.
-    verifyNever(() => mockFileRepository.downloadFile(any()));
+    verifyNever(() => mockFileRepository.downloadFileStream(any()));
 
     verify(() => mockMirror.recordFailedEvent(
           'evil-1',
@@ -547,7 +706,7 @@ void main() {
     final applied = await service.pullOnce(tempDir.path);
 
     expect(applied, 1);
-    verifyNever(() => mockFileRepository.downloadFile('file-5'));
+    verifyNever(() => mockFileRepository.downloadFileStream('file-5'));
     expect(untrackedFile.readAsStringSync(), 'the user already had this');
 
     verify(() => mockMirror.recordFailedEvent(
@@ -586,7 +745,7 @@ void main() {
           updatedAt: now,
           syncedAt: now,
         ));
-    when(() => mockFileRepository.downloadFile('file-1')).thenAnswer((_) async => bytes);
+    when(() => mockFileRepository.downloadFileStream('file-1')).thenAnswer((_) => Stream.value(bytes));
     // Simulates a crash between the disk write and the mirror commit.
     when(() => mockMirror.upsert(any())).thenThrow(Exception('simulated crash'));
 
@@ -625,7 +784,7 @@ void main() {
     when(() => mockMirror.getByServerId('bad-1')).thenAnswer((_) async => null);
     // Simulates a name-independent OS-level failure — a path past MAX_PATH,
     // a disk hiccup — not a network error.
-    when(() => mockFileRepository.downloadFile('bad-1'))
+    when(() => mockFileRepository.downloadFileStream('bad-1'))
         .thenThrow(const FileSystemException('The operation could not be completed', 'stuck-file.bin'));
 
     when(() => mockFileRepository.getFile('good-1')).thenAnswer((_) async => FileItem(
@@ -638,7 +797,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('good-1')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('good-1')).thenAnswer((_) async => goodBytes);
+    when(() => mockFileRepository.downloadFileStream('good-1')).thenAnswer((_) => Stream.value(goodBytes));
 
     final applied = await service.pullOnce(tempDir.path);
 
@@ -690,7 +849,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('locked-1')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('locked-1')).thenAnswer((_) async {
+    when(() => mockFileRepository.downloadFileStream('locked-1')).thenAnswer((_) async* {
       downloadAttempts++;
       if (downloadAttempts == 1) {
         // Simulates the file being open elsewhere (e.g. in Word) on the
@@ -698,7 +857,7 @@ void main() {
         // one like F5's reserved name.
         throw const FileSystemException('sharing violation', 'busy.txt');
       }
-      return bytes;
+      yield bytes;
     });
 
     final firstApplied = await service.pullOnce(tempDir.path);
@@ -745,7 +904,7 @@ void main() {
           updatedAt: now,
         ));
     when(() => mockMirror.getByServerId('file-1')).thenAnswer((_) async => null);
-    when(() => mockFileRepository.downloadFile('file-1')).thenAnswer((_) async => bytes);
+    when(() => mockFileRepository.downloadFileStream('file-1')).thenAnswer((_) => Stream.value(bytes));
 
     final first = service.pullOnce(tempDir.path);
     final second = service.pullOnce(tempDir.path);
@@ -789,7 +948,7 @@ void main() {
             pageSize: 50,
           ));
       when(() => mockMirror.getByServerId('legacy-1')).thenAnswer((_) async => null);
-      when(() => mockFileRepository.downloadFile('legacy-1')).thenAnswer((_) async => bytes);
+      when(() => mockFileRepository.downloadFileStream('legacy-1')).thenAnswer((_) => Stream.value(bytes));
 
       await service.pullOnce(tempDir.path);
 
@@ -854,7 +1013,7 @@ void main() {
 
       // The pre-existing file was left alone, not overwritten...
       expect(untrackedFile.readAsStringSync(), 'the user already had this');
-      verifyNever(() => mockFileRepository.downloadFile('legacy-2'));
+      verifyNever(() => mockFileRepository.downloadFileStream('legacy-2'));
       // ...but unlike a plain silent skip, it is recorded and surfaced
       // through the same list the delta path (F1/F3/F5) uses — closing the
       // gap where the non-empty-folder dialog promised "listed as skipped
@@ -937,7 +1096,7 @@ void main() {
       final applied = await serviceWith(isWindows: true).pullOnce(tempDir.path);
 
       expect(applied, 1);
-      verifyNever(() => mockFileRepository.downloadFile(any()));
+      verifyNever(() => mockFileRepository.downloadFileStream(any()));
       verify(() => mockMirror.recordFailedEvent(
             'bad-name-1',
             1,
@@ -965,7 +1124,7 @@ void main() {
 
       await serviceWith(isWindows: true).pullOnce(tempDir.path);
 
-      verifyNever(() => mockFileRepository.downloadFile(any()));
+      verifyNever(() => mockFileRepository.downloadFileStream(any()));
       verify(() => mockMirror.recordFailedEvent(
             'bad-name-2',
             1,
@@ -1074,7 +1233,7 @@ void main() {
             updatedAt: now,
           ));
       when(() => mockMirror.getByServerId('ok-on-non-windows')).thenAnswer((_) async => null);
-      when(() => mockFileRepository.downloadFile('ok-on-non-windows')).thenAnswer((_) async => bytes);
+      when(() => mockFileRepository.downloadFileStream('ok-on-non-windows')).thenAnswer((_) => Stream.value(bytes));
 
       final applied = await serviceWith(isWindows: false).pullOnce(tempDir.path);
 
@@ -1117,7 +1276,7 @@ void main() {
             updatedAt: now,
           ));
       when(() => mockMirror.getByServerId('stale-1')).thenAnswer((_) async => null);
-      when(() => mockFileRepository.downloadFile('stale-1')).thenAnswer((_) async => bytes);
+      when(() => mockFileRepository.downloadFileStream('stale-1')).thenAnswer((_) => Stream.value(bytes));
 
       await service.pullOnce(tempDir.path);
 
@@ -1195,7 +1354,7 @@ void main() {
             updatedAt: now,
           ));
       when(() => mockMirror.getByServerId('fresh-1')).thenAnswer((_) async => null);
-      when(() => mockFileRepository.downloadFile('fresh-1')).thenAnswer((_) async => bytes);
+      when(() => mockFileRepository.downloadFileStream('fresh-1')).thenAnswer((_) => Stream.value(bytes));
 
       final applied = await service.pullOnce(tempDir.path);
 

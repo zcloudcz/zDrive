@@ -175,8 +175,9 @@ class UploadCompleteDto {
 class ManifestDto {
   final int totalSize;
   final List<ManifestChunkDto> chunks;
+  final String? manifestHash;
 
-  const ManifestDto({required this.totalSize, required this.chunks});
+  const ManifestDto({required this.totalSize, required this.chunks, this.manifestHash});
 
   factory ManifestDto.fromJson(Map<String, dynamic> json) =>
       _$ManifestDtoFromJson(json);

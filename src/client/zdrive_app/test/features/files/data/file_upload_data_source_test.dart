@@ -25,6 +25,21 @@ void main() {
     ds = FileUploadDataSource(dio);
   });
 
+  for (final echo in <String?>[null, 'b' * 64]) {
+    test('DownloadStream_MissingOrWrongSnapshotEcho($echo)_RejectsBeforeChunks', () async {
+      final hash = 'a' * 64;
+      when(() => dio.get('/storage/download/f1/manifest',
+        queryParameters: {'manifestHash': hash},
+      )).thenAnswer((_) async => ok({
+        'manifestHash': echo, 'totalSize': 3,
+        'chunks': [{'index': 0, 'hash': 'chunk-hash'}],
+      }, 'manifest'));
+
+      await expectLater(ds.downloadFileStream('f1', manifestHash: hash), emitsError(isStateError));
+      verifyNever(() => dio.get<List<int>>(any(), options: any(named: 'options')));
+    });
+  }
+
   test('initUpload posts fileId/fileName/totalChunks to /storage/upload/init', () async {
     when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer((_) async =>
         ok({'sessionId': 's1', 'sasUploadUrl': 'http://blob/upload'}, apiInit));
