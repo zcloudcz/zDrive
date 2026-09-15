@@ -457,6 +457,42 @@ void main() {
     });
   }
 
+  for (final changedContent in [false, true]) {
+    test('Move_CaseOnlyRename(changedContent=$changedContent)_KeepsDestinationAndMirror', () async {
+      final now = DateTime.utc(2026);
+      final original = File(p.join(tempDir.path, 'doc.txt'));
+      await original.writeAsString('original');
+      final destination = File(p.join(tempDir.path, 'DOC.txt'));
+      final bytes = utf8.encode(changedContent ? 'updated remotely' : 'original');
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+          .thenAnswer((_) async => page([{'id': 1, 'fileId': 'f1', 'type': 'Move'}], 1));
+      when(() => mockFileRepository.getFile('f1')).thenAnswer((_) async => FileItem(
+        id: 'f1', name: 'DOC.txt', isFolder: false, sizeBytes: bytes.length,
+        createdAt: now, updatedAt: now,
+      ));
+      when(() => mockMirror.getByServerId('f1')).thenAnswer((_) async => SyncMirrorEntry(
+        serverId: 'f1', localPath: original.path, isFolder: false,
+        contentHash: sha256.convert(utf8.encode('original')).toString(),
+        updatedAt: now, syncedAt: now,
+      ));
+      when(() => mockFileRepository.downloadFileStream('f1')).thenAnswer((_) async* {
+        yield Uint8List.fromList(bytes);
+        expect(await original.readAsString(), 'original');
+      });
+
+      await service.pullOnce(tempDir.path);
+
+      expect(await destination.readAsBytes(), bytes);
+      expect(tempDir.listSync().map((e) => p.basename(e.path)), ['DOC.txt']);
+      final saved = verify(() => mockMirror.upsert(captureAny())).captured.single as SyncMirrorEntry;
+      expect(saved.localPath, destination.path);
+      expect(saved.contentHash, sha256.convert(bytes).toString());
+      verifyNever(() => mockMirror.recordFailedEvent(any(), any(), any()));
+      verify(() => mockMirror.setCursor('dev-1', 1)).called(1);
+    });
+  }
+
   test('Download_LinkedParent_QuarantinesWithoutWritingOutside', () async {
     final outside = Directory.systemTemp.createTempSync('sync_outside_');
     addTearDown(() => outside.deleteSync(recursive: true));

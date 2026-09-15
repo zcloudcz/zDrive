@@ -359,10 +359,16 @@ class PullSyncService {
       contentHash = await _downloadToFile(fileId, localPath, syncFolderPath, previous);
       if (moved) {
         await _assertNoLinks(syncFolderPath, previous.localPath);
-        if (await _wouldOverwriteLocalChange(previous.localPath, previous)) {
-          throw LocalConflictException('moved file has local changes: ${previous.localPath}');
+        // Case-only renames can still resolve the old path to the installed
+        // destination. Compare actual filesystem entries before checking or
+        // deleting it; path casing alone cannot tell on every volume.
+        if (await File(previous.localPath).exists() &&
+            !await FileSystemEntity.identical(previous.localPath, localPath)) {
+          if (await _wouldOverwriteLocalChange(previous.localPath, previous)) {
+            throw LocalConflictException('moved file has local changes: ${previous.localPath}');
+          }
+          await _deleteLocal(syncFolderPath, previous.localPath);
         }
-        await _deleteLocal(syncFolderPath, previous.localPath);
       }
     }
 
