@@ -173,6 +173,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get retry => 'Zkusit znovu';
 
   @override
+  String get loadMore => 'Načíst další';
+
+  @override
   String get noPhotos => 'Zatím žádné fotky';
 
   @override

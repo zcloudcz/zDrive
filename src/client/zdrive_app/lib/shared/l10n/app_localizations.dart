@@ -422,6 +422,12 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get retry;
 
+  /// No description provided for @loadMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get loadMore;
+
   /// No description provided for @noPhotos.
   ///
   /// In en, this message translates to:
