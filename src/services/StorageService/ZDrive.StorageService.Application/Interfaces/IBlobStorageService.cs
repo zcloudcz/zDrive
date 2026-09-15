@@ -29,6 +29,8 @@ public interface IBlobStorageService
     /// </summary>
     Task<ChunkManifest?> DownloadManifestAsync(Guid tenantId, Guid userId, Guid fileId, CancellationToken ct = default);
 
+    Task<ChunkManifest?> DownloadManifestSnapshotAsync(Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default);
+
     /// <summary>
     /// Generates a SAS URL for downloading the complete file (manifest path).
     /// </summary>

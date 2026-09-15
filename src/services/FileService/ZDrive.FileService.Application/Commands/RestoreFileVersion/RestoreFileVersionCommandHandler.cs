@@ -1,7 +1,9 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Application.Interfaces;
+using ZDrive.FileService.Application.Options;
 using ZDrive.FileService.Domain.Entities;
 using ZDrive.Shared.Exceptions;
 
@@ -10,8 +12,13 @@ namespace ZDrive.FileService.Application.Commands.RestoreFileVersion;
 public sealed class RestoreFileVersionCommandHandler : IRequestHandler<RestoreFileVersionCommand, FileVersionDto>
 {
     private readonly IFileDbContext _db;
+    private readonly VersioningOptions _options;
 
-    public RestoreFileVersionCommandHandler(IFileDbContext db) => _db = db;
+    public RestoreFileVersionCommandHandler(IFileDbContext db, IOptions<VersioningOptions> options)
+    {
+        _db = db;
+        _options = options.Value;
+    }
 
     public async Task<FileVersionDto> Handle(RestoreFileVersionCommand request, CancellationToken cancellationToken)
     {
@@ -53,6 +60,17 @@ public sealed class RestoreFileVersionCommandHandler : IRequestHandler<RestoreFi
         file.UpdatedAt = DateTime.UtcNow;
 
         _db.FileVersions.Add(restored);
+        if (_options.MaxVersionsPerFile > 0)
+        {
+            // The restored version is still only tracked; reserve one slot
+            // for it, just as CreateFileVersion does for a new upload.
+            var excess = await _db.FileVersions
+                .Where(v => v.FileId == request.FileId)
+                .OrderByDescending(v => v.VersionNumber)
+                .Skip(_options.MaxVersionsPerFile - 1)
+                .ToListAsync(cancellationToken);
+            _db.FileVersions.RemoveRange(excess);
+        }
         await _db.SaveChangesAsync(cancellationToken);
 
         return restored.ToDto();

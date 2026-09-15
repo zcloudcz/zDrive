@@ -139,6 +139,52 @@ public sealed class BackupCliFlowTests : IAsyncLifetime
             .Should().BeEquivalentTo(content);
     }
 
+    [Fact]
+    public async Task Restore_MetadataCommittedBeforeBlobFlip_SecondClientDownloadsRestoredSnapshot()
+    {
+        var original = "original restored content"u8.ToArray();
+        var replacement = "newer replacement content"u8.ToArray();
+        var path = Path.Combine(_root, "restore.txt");
+        await File.WriteAllBytesAsync(path, original);
+        var (writer, writerHttp, writerBlob) = BuildClients();
+        using var writerApiLifetime = writerHttp;
+        using var writerBlobLifetime = writerBlob;
+        var runner = new BackupRunner(writer, TextWriter.Null, TextWriter.Null);
+        (await runner.RunAsync(_root, null, CancellationToken.None)).Should().Be(0);
+        var fileId = (await writer.ListChildrenAsync(null, CancellationToken.None))["restore.txt"].Id;
+        var versions = (await writerHttp.GetFromJsonAsync<ApiEnvelope<JsonElement>>(
+            $"files/{fileId}/versions", Json))!.Data;
+        var originalVersionId = versions[0].GetProperty("id").GetGuid();
+        var originalHash = versions[0].GetProperty("manifestHash").GetString();
+
+        await File.WriteAllBytesAsync(path, replacement);
+        (await runner.RunAsync(_root, null, CancellationToken.None)).Should().Be(0);
+        using var restore = await writerHttp.PostAsync($"files/{fileId}/versions/{originalVersionId}/restore", null);
+        restore.EnsureSuccessStatusCode();
+        // Deliberately omit the legacy StorageService flip, reproducing a
+        // disconnected restoring client after the metadata transaction.
+        var (_, readerHttp, readerBlob) = BuildClients();
+        using var readerApiLifetime = readerHttp;
+        using var readerBlobLifetime = readerBlob;
+        var metadata = (await readerHttp.GetFromJsonAsync<ApiEnvelope<JsonElement>>($"files/{fileId}", Json))!.Data;
+        var committedHash = metadata.GetProperty("manifestHash").GetString();
+        committedHash.Should().Be(originalHash);
+        var snapshot = (await readerHttp.GetFromJsonAsync<ApiEnvelope<JsonElement>>(
+            $"storage/download/{fileId}/manifest?manifestHash={committedHash}", Json))!.Data;
+        snapshot.GetProperty("manifestHash").GetString().Should().Be(committedHash);
+        using var downloaded = new MemoryStream();
+        foreach (var chunk in snapshot.GetProperty("chunks").EnumerateArray().OrderBy(c => c.GetProperty("index").GetInt32()))
+        {
+            var hash = chunk.GetProperty("hash").GetString();
+            var bytes = await readerHttp.GetByteArrayAsync($"storage/download/{fileId}/chunk/{hash}/bytes");
+            downloaded.Write(bytes);
+        }
+        downloaded.ToArray().Should().Equal(original);
+        // Latest still points at the newer upload: the test cannot pass by
+        // accidentally reading manifest.json instead of the pinned snapshot.
+        (await DownloadFileContentAsync(readerHttp, readerBlob, fileId)).Should().Equal(replacement);
+    }
+
     private (IZdriveApiClient Api, HttpClient ApiHttp, HttpClient BlobHttp) BuildClients()
     {
         var loginHttp = new HttpClient(new BackupCliGatewayHandler(_env))

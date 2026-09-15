@@ -6,6 +6,6 @@ namespace ZDrive.StorageService.Application.DTOs;
 /// without a cross-origin fetch straight to blob storage. See
 /// GetManifestQueryHandler.
 /// </summary>
-public sealed record ManifestDto(long TotalSize, List<ManifestChunkDto> Chunks);
+public sealed record ManifestDto(long TotalSize, List<ManifestChunkDto> Chunks, string? ManifestHash = null);
 
 public sealed record ManifestChunkDto(string Hash, int Index);
