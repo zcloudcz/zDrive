@@ -3,6 +3,15 @@ import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
+/// Browser Blob downloads require the complete content in memory.
+Future<void> saveFileStream(String fileName, Stream<Uint8List> content) async {
+  final builder = BytesBuilder(copy: false);
+  await for (final chunk in content) {
+    builder.add(chunk);
+  }
+  await saveFile(fileName, builder.takeBytes());
+}
+
 /// Saves [bytes] as [fileName] by triggering a browser download.
 ///
 /// file_picker has no web implementation of `saveFile()` — `FilePickerWeb`

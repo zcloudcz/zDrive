@@ -426,10 +426,9 @@ class _FileBrowserView extends StatelessWidget {
   }
 }
 
-/// Downloads [file]'s complete content (reassembled from its chunks by
-/// [repository]) and saves it via the platform-appropriate mechanism in
-/// [save] — file_picker + dart:io on native platforms, a Blob download on
-/// web (see `file_saver.dart`).
+/// Hands [file]'s lazy verified stream to the platform saver. Desktop can
+/// cancel its save dialog without subscribing or starting network requests;
+/// mobile and web savers collect bytes as required by their platform APIs.
 ///
 /// A top-level function (rather than inlined in [_FileBrowserView]) so it
 /// can be unit tested without a full widget/DI/router harness; [save]
@@ -438,8 +437,7 @@ class _FileBrowserView extends StatelessWidget {
 Future<void> downloadFile(
   FileItem file,
   FileRepository repository, {
-  Future<void> Function(String fileName, Uint8List bytes) save = saveFile,
+  Future<void> Function(String fileName, Stream<Uint8List> content) save = saveFileStream,
 }) async {
-  final bytes = await repository.downloadFile(file.id);
-  await save(file.name, bytes);
+  await save(file.name, repository.downloadFileStream(file.id));
 }
