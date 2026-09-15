@@ -70,7 +70,7 @@ cursor-paged feed (`GET /api/v1/files/changes?cursor=&limit=`).
   as the mutation, so a partial write is impossible — either both commit or
   neither does.
 
-### Known limitation: the 5-second commit-order hold-back
+### Commit-order safety and the 5-second hold-back
 
 Identity values (`id`) are assigned at row-insert time inside a transaction,
 not at commit time. A transaction that inserted `FileChange` id `N+1` can
@@ -79,10 +79,27 @@ transaction's SaveChanges call simply took longer. A reader that saw `N+2`
 and advanced its cursor past it would then skip `N+1` forever — it already
 moved on.
 
+Before reading a page, FileService starts a **READ COMMITTED transaction**
+and acquires `LOCK TABLE files.file_changes IN SHARE MODE`. Inserts hold a
+conflicting `ROW EXCLUSIVE` table lock until commit or rollback, so the read
+waits for existing inserts and blocks new inserts from allocating identities.
+The page query then takes a fresh snapshot and materializes the rows while
+the lock is held. Disposing the read scope releases the transaction on both
+success and failure; cancellation also rolls back and disposes a transaction
+whose lock acquisition was still waiting.
+
+This prevents skipping a late-committing lower id regardless of transaction
+duration. It relies on the existing database-generated identities with the
+default sequence cache of one; writers must not reserve ids ahead of inserts.
+The tradeoff is table-wide contention: a long FileService writer delays all
+feed readers, including other tenants, and a reader briefly delays writers.
+Transactions in other services do not block this lock unless they also write
+`files.file_changes`. Revisit this approach if that contention becomes material.
+
 `occurred_at` is stamped by the database's own `clock_timestamp()` (a column
 default, not application code), so every FileService instance's rows are
 timestamped by the same clock — clock skew between instances cannot affect
-which rows are held back. The feed closes the skip window by treating the
+which rows are held back. The existing delay remains for compatibility, with the
 hold-back as a **prefix of the id order**, not a per-row filter: it reads
 rows in id order and stops at the first one younger than `now() - 5s`,
 returning nothing (by id) past that point, even if a later row happens to
@@ -91,19 +108,9 @@ would not close this window — it can let a later id with an older stamp
 through while still holding back an earlier id that hasn't aged yet,
 advancing the cursor past it forever.
 
-**Guarantee:** no change is skipped for any transaction that commits within
-5 seconds of inserting its `FileChange` row. This is a real limit, not just a
-defensive margin: a transaction that takes longer than 5 seconds to commit
-can still be skipped. Ordinary requests commit in milliseconds, but a
-delete or restore of a folder with a very large subtree (tens of thousands
-of descendants in one `SaveChanges`) can hold the insert-to-commit window
-open for seconds, and so can any synchronous work added to that transaction
-later. If that becomes realistic, the fix is to stop relying on time: read
-only up to a watermark derived from the database snapshot
-(`pg_snapshot_xmin(pg_current_snapshot())` against each row's `xmin`), which
-holds back exactly the rows of still-open transactions. Not done now because
-the snapshot is database-wide — every service's schema shares one Postgres
-server here, so one long transaction anywhere would stall every feed.
+The hold-back alone only protected transactions that committed within five
+seconds. The table lock now provides commit-order safety; the prefix rule
+still prevents the compatibility delay itself from skipping a younger row.
 
 If a client omits `X-Device-Id` (or a different device made the change), the
 device just re-applies a change it may already have — redundant work, not
