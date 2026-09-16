@@ -56,6 +56,7 @@
   "expiresAt": "Expires at",
   "never": "Never",
   "uploadProgress": "Uploading...",
+  "downloadProgress": "Downloading...",
   "uploadComplete": "Upload complete",
   "confirmDelete": "Confirm delete",
   "confirmEmptyTrash": "Permanently delete all items in trash?",

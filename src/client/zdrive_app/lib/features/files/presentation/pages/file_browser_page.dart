@@ -7,6 +7,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/events/remote_file_change_notifier.dart';
+import '../../../../core/network/error_message.dart';
 import '../../data/file_saver.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
@@ -281,10 +282,39 @@ class _FileBrowserView extends StatelessWidget {
 
   Future<void> _downloadFile(BuildContext context, FileItem file) async {
     final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final l10n = AppLocalizations.of(context)!;
+    final progressRoute = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: Text(l10n.downloadProgress),
+          content: Row(
+            children: [
+              CircularProgressIndicator(semanticsLabel: l10n.downloadProgress),
+              const SizedBox(width: 24),
+              Expanded(child: Text(file.name)),
+            ],
+          ),
+        ),
+      ),
+    );
+    navigator.push(progressRoute);
     try {
+      // Paint feedback before opening the native save dialog or starting I/O.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!context.mounted || !progressRoute.isActive) return;
       await downloadFile(file, getIt<FileRepository>());
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+      if (context.mounted && messenger.mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(describeError(e, l10n))));
+      }
+    } finally {
+      if (navigator.mounted && progressRoute.isActive) {
+        navigator.removeRoute(progressRoute);
+      }
     }
   }
 

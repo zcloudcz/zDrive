@@ -158,6 +158,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get uploadProgress => 'Nahrávání...';
 
   @override
+  String get downloadProgress => 'Stahování...';
+
+  @override
   String get uploadComplete => 'Nahrávání dokončeno';
 
   @override

@@ -392,6 +392,12 @@ abstract class AppLocalizations {
   /// **'Uploading...'**
   String get uploadProgress;
 
+  /// No description provided for @downloadProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading...'**
+  String get downloadProgress;
+
   /// No description provided for @uploadComplete.
   ///
   /// In en, this message translates to:

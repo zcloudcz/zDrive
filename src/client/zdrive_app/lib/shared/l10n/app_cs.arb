@@ -49,6 +49,7 @@
   "expiresAt": "Platnost do",
   "never": "Neomezeně",
   "uploadProgress": "Nahrávání...",
+  "downloadProgress": "Stahování...",
   "uploadComplete": "Nahrávání dokončeno",
   "confirmDelete": "Potvrdit smazání",
   "confirmEmptyTrash": "Trvale smazat vše v koši?",

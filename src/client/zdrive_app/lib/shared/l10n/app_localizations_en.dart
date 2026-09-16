@@ -158,6 +158,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get uploadProgress => 'Uploading...';
 
   @override
+  String get downloadProgress => 'Downloading...';
+
+  @override
   String get uploadComplete => 'Upload complete';
 
   @override
