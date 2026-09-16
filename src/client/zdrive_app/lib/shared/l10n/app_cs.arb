@@ -93,5 +93,62 @@
   "close": "Zavřít",
   "errorNoConnection": "Server je nedostupný. Zkontroluj připojení a zkus to znovu.",
   "errorServiceUnavailable": "Tato funkce je teď nedostupná. Zkus to prosím později.",
-  "errorRequestFailed": "Požadavek se nepodařilo dokončit."
+  "errorRequestFailed": "Požadavek se nepodařilo dokončit.",
+  "syncConnecting": "Připojování…",
+  "syncDownloading": "Stahování",
+  "syncScanning": "Procházení složky",
+  "syncHashing": "Porovnávání obsahu souborů",
+  "syncUploading": "Nahrávání",
+  "syncDeleting": "Zpracování smazání",
+  "syncDiscovering": "Hledání položek — celkový počet zatím není znám",
+  "syncProgressCounts": "Dokončeno {completed} / {total} položek · zbývá {remaining}",
+  "@syncProgressCounts": {
+    "placeholders": {
+      "completed": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "remaining": {
+        "type": "int"
+      }
+    }
+  },
+  "syncProgressFailures": "Selhalo {count} položek",
+  "@syncProgressFailures": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "syncTransferredBytes": "{transferred} / {total} · zbývá {remaining}",
+  "@syncTransferredBytes": {
+    "placeholders": {
+      "transferred": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      },
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "syncKnownProgressCounts": "Známé položky: dokončeno {completed} / {total} · zbývá {remaining}",
+  "@syncKnownProgressCounts": {
+    "placeholders": {
+      "completed": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "remaining": {
+        "type": "int"
+      }
+    }
+  }
 }

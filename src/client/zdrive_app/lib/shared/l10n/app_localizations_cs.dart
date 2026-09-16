@@ -277,4 +277,50 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get errorRequestFailed => 'Požadavek se nepodařilo dokončit.';
+
+  @override
+  String get syncConnecting => 'Připojování…';
+
+  @override
+  String get syncDownloading => 'Stahování';
+
+  @override
+  String get syncScanning => 'Procházení složky';
+
+  @override
+  String get syncHashing => 'Porovnávání obsahu souborů';
+
+  @override
+  String get syncUploading => 'Nahrávání';
+
+  @override
+  String get syncDeleting => 'Zpracování smazání';
+
+  @override
+  String get syncDiscovering =>
+      'Hledání položek — celkový počet zatím není znám';
+
+  @override
+  String syncProgressCounts(int completed, int total, int remaining) {
+    return 'Dokončeno $completed / $total položek · zbývá $remaining';
+  }
+
+  @override
+  String syncProgressFailures(int count) {
+    return 'Selhalo $count položek';
+  }
+
+  @override
+  String syncTransferredBytes(
+    String transferred,
+    String total,
+    String remaining,
+  ) {
+    return '$transferred / $total · zbývá $remaining';
+  }
+
+  @override
+  String syncKnownProgressCounts(int completed, int total, int remaining) {
+    return 'Známé položky: dokončeno $completed / $total · zbývá $remaining';
+  }
 }

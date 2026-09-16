@@ -255,6 +255,31 @@ void main() {
   });
 
   group('uploadNewVersion', () {
+    test('UploadNewVersion_Progress_ForwardsBeforeVersionRecorded', () async {
+      final progress = <double>[];
+      when(() => upload.uploadFile('existing-id', 'doc.txt', any(), 10,
+              onProgress: any(named: 'onProgress')))
+          .thenAnswer((invocation) async {
+        final callback = invocation.namedArguments[#onProgress]
+            as void Function(double);
+        callback(0.5);
+        return const UploadCompleteDto(
+            blobPath: 'p', manifestHash: 'hash-3', totalSize: 10);
+      });
+      when(() => remote.createFileVersion('existing-id',
+          blobVersionId: 'hash-3', sizeBytes: 10, manifestHash: 'hash-3'))
+          .thenAnswer((_) async {
+        expect(progress, [0.5]);
+        return <String, dynamic>{};
+      });
+
+      await repository.uploadNewVersion(
+          'existing-id', 'doc.txt', const Stream.empty(), 10,
+          onProgress: progress.add);
+
+      expect(progress, [0.5]);
+    });
+
     test('uploads into the given id and records a version, without creating '
         'a node', () async {
       when(() => upload.uploadFile('existing-id', 'doc.txt', any(), 10,

@@ -174,11 +174,12 @@ class FileRepositoryImpl implements FileRepository {
     Stream<List<int>> content,
     int sizeBytes, {
     String? originDeviceId,
+    void Function(double progress)? onProgress,
   }) {
     // The second half of uploadFile only: no node creation, so this never
     // touches _createOrReuseNode or _failedUploadNodeIds — fileId is already
     // an existing node.
-    return _uploadIntoNode(fileId, fileName, content, sizeBytes, null, originDeviceId);
+    return _uploadIntoNode(fileId, fileName, content, sizeBytes, onProgress, originDeviceId);
   }
 
   /// Chunk-uploads [content] into the already-existing node [nodeId] and

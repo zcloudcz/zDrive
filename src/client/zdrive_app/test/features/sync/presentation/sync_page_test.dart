@@ -11,6 +11,7 @@ import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_entry.dart';
 import 'package:zdrive_app/features/sync/domain/sync_models.dart';
+import 'package:zdrive_app/features/sync/domain/sync_progress.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_bloc.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
@@ -75,6 +76,52 @@ void main() {
       ),
     );
   }
+
+  testWidgets('shows active file and remaining counts before device registration', (tester) async {
+    final bloc = MockSyncBloc();
+    when(() => bloc.state).thenReturn(SyncLoaded(devices: const [], syncFolderPath: '/sync', isPulling: true,
+      progress: SyncProgress(phase: SyncPhase.uploading, totalFiles: 4, completedFiles: 1,
+        activeFiles: const [SyncFileProgress(key: 'a', path: 'photos/cat.jpg', transferredBytes: 1024, totalBytes: 4096)])));
+    await tester.pumpWidget(MaterialApp(localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales, locale: const Locale('en'),
+      home: BlocProvider<SyncBloc>.value(value: bloc, child: const SyncPage())));
+    expect(find.text('Uploading'), findsOneWidget);
+    expect(find.text('photos/cat.jpg'), findsOneWidget);
+    expect(find.text('1 / 4 items completed · 3 remaining'), findsOneWidget);
+    expect(find.text('1.0 KiB / 4.0 KiB · 3.0 KiB remaining'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unknown discovery total stays indeterminate', (tester) async {
+    final bloc = MockSyncBloc();
+    when(() => bloc.state).thenReturn(SyncLoaded(devices: const [], syncFolderPath: '/sync', isPulling: true,
+      progress: SyncProgress(phase: SyncPhase.scanning, totalFiles: 4, discovering: true)));
+    await tester.pumpWidget(MaterialApp(localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales, locale: const Locale('en'),
+      home: BlocProvider<SyncBloc>.value(value: bloc, child: const SyncPage())));
+    expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, isNull);
+    expect(find.text('Discovering items — total is not known yet'), findsOneWidget);
+    expect(find.text('Known items: 0 / 4 completed · 4 remaining'), findsOneWidget);
+  });
+
+  testWidgets('large failed list is lazy while active progress remains visible', (tester) async {
+    final bloc = MockSyncBloc();
+    final failures = List.generate(5000, (index) => SyncFailedEvent(
+      fileId: 'failed-$index', eventId: index, reason: 'conflict', failedAt: DateTime.utc(2026)));
+    when(() => bloc.state).thenReturn(SyncLoaded(devices: const [], syncFolderPath: '/sync', isPulling: true,
+      failedEvents: failures, progress: SyncProgress(phase: SyncPhase.uploading, totalFiles: 10,
+        activeFiles: const [SyncFileProgress(key: 'a', path: 'photo.jpg', transferredBytes: 100, totalBytes: 200)])));
+    await tester.pumpWidget(MaterialApp(localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales, locale: const Locale('en'),
+      home: BlocProvider<SyncBloc>.value(value: bloc, child: const SyncPage())));
+    expect(find.text('Uploading'), findsOneWidget);
+    expect(find.text('photo.jpg'), findsOneWidget);
+    final list = tester.widget<ListView>(find.byType(ListView));
+    expect(list.childrenDelegate, isA<SliverChildBuilderDelegate>());
+    expect(find.text('failed-4999'), findsNothing);
+    expect(find.byType(ListTile).evaluate().length, lessThan(30));
+    expect(tester.takeException(), isNull);
+  });
 
   group('SyncPage', () {
     testWidgets('shows the registered devices', (tester) async {
@@ -152,7 +199,7 @@ void main() {
       when(() => mockDataSource.getDevices()).thenAnswer((_) async => [
             {'id': 'dev-1', 'name': 'Laptop', 'platform': 'windows'},
           ]);
-      when(() => mockCoordinator.syncOnce('/local/sync'))
+      when(() => mockCoordinator.syncOnce('/local/sync', onProgress: any(named: 'onProgress')))
           .thenAnswer((_) async => const SyncRunResult(pulled: 1, pushed: 0));
       when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => [
             SyncFailedEvent(

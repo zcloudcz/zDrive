@@ -18,6 +18,7 @@ import 'package:zdrive_app/features/files/data/file_dtos.dart';
 import 'package:zdrive_app/features/files/data/file_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_entry.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart';
+import 'package:zdrive_app/features/sync/domain/sync_progress.dart';
 
 class MockFileRemoteDataSource extends Mock implements FileRemoteDataSource {}
 
@@ -104,6 +105,205 @@ void main() {
         response: Response(requestOptions: RequestOptions(path: '/files/$fileId'), statusCode: 404),
         type: DioExceptionType.badResponse,
       );
+
+  test(
+    'new files download concurrently with a three-file bound and live progress',
+    () async {
+      final now = DateTime.utc(2026);
+      final gate = Completer<void>();
+      final threeStarted = Completer<void>();
+      var active = 0;
+      var peak = 0;
+      final snapshots = <SyncProgress>[];
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(
+        () => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'),
+      ).thenAnswer(
+        (_) async => page([
+          for (var i = 1; i <= 4; i++)
+            {'id': i, 'fileId': 'f$i', 'type': 'Create'},
+        ], 4),
+      );
+      for (var i = 1; i <= 4; i++) {
+        final id = 'f$i';
+        when(() => mockFileRepository.getFile(id)).thenAnswer(
+          (_) async => FileItem(
+            id: id,
+            name: '$id.txt',
+            isFolder: false,
+            sizeBytes: 2,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+        when(() => mockMirror.getByServerId(id)).thenAnswer((_) async => null);
+        when(() => mockFileRepository.downloadFileStream(id)).thenAnswer((
+          _,
+        ) async* {
+          active++;
+          if (active > peak) peak = active;
+          if (active == 3 && !threeStarted.isCompleted) threeStarted.complete();
+          try {
+            yield Uint8List.fromList([1]);
+            await gate.future;
+            yield Uint8List.fromList([2]);
+          } finally {
+            active--;
+          }
+        });
+      }
+      final run = service.pullOnce(
+        tempDir.path,
+        progress: SyncProgressTracker(snapshots.add),
+      );
+      try {
+        await threeStarted.future.timeout(const Duration(seconds: 5));
+        expect(peak, 3);
+        expect(snapshots.any((s) => s.activeFiles.length == 3), isTrue);
+        verifyNever(() => mockMirror.setCursor(any(), any()));
+      } finally {
+        gate.complete();
+      }
+      expect(await run, 4);
+      expect(peak, 3);
+      expect(snapshots.last.completedFiles, 4);
+      expect(snapshots.last.remainingFiles, 0);
+      expect(snapshots.last.activeFiles, isEmpty);
+      for (var i = 1; i <= 4; i++) {
+        expect(await File(p.join(tempDir.path, 'f$i.txt')).readAsBytes(), [
+          1,
+          2,
+        ]);
+      }
+    },
+  );
+
+  test(
+    'parallel download failure drains workers and never advances cursor past failure',
+    () async {
+      final now = DateTime.utc(2026);
+      final gate = Completer<void>();
+      final thirdStarted = Completer<void>();
+      var finished = false;
+      final snapshots = <SyncProgress>[];
+      when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+      when(
+        () => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'),
+      ).thenAnswer(
+        (_) async => page([
+          for (var i = 1; i <= 3; i++)
+            {'id': i, 'fileId': 'f$i', 'type': 'Create'},
+        ], 3),
+      );
+      for (var i = 1; i <= 3; i++) {
+        final id = 'f$i';
+        when(() => mockFileRepository.getFile(id)).thenAnswer(
+          (_) async => FileItem(
+            id: id,
+            name: '$id.txt',
+            isFolder: false,
+            sizeBytes: 1,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+        when(() => mockMirror.getByServerId(id)).thenAnswer((_) async => null);
+        when(() => mockFileRepository.downloadFileStream(id)).thenAnswer((
+          _,
+        ) async* {
+          if (id == 'f2') throw StateError('network failed');
+          if (id == 'f3') {
+            thirdStarted.complete();
+            await gate.future;
+          }
+          yield Uint8List.fromList([1]);
+        });
+      }
+      final run = service.pullOnce(
+        tempDir.path,
+        progress: SyncProgressTracker(snapshots.add),
+      );
+      final observed = run.then<Object?>(
+        (_) {
+          finished = true;
+          return null;
+        },
+        onError: (Object error) {
+          finished = true;
+          return error;
+        },
+      );
+      try {
+        await thirdStarted.future.timeout(const Duration(seconds: 5));
+        expect(finished, isFalse);
+      } finally {
+        gate.complete();
+      }
+      expect(await observed, isA<StateError>());
+      verify(() => mockMirror.setCursor('dev-1', 1)).called(1);
+      verifyNever(() => mockMirror.setCursor('dev-1', 2));
+      verifyNever(() => mockMirror.setCursor('dev-1', 3));
+      expect(snapshots.last.failedFiles, 1);
+      expect(snapshots.last.activeFiles, isEmpty);
+      expect(await File(p.join(tempDir.path, 'f3.txt')).exists(), isTrue);
+    },
+  );
+
+  test('bootstrap limits downloads to three and drains before a folder barrier', () async {
+    final now = DateTime.utc(2026);
+    final gate = Completer<void>();
+    final started = Completer<void>();
+    var active = 0;
+    var peak = 0;
+    final snapshots = <SyncProgress>[];
+    when(() => mockMirror.isBootstrapped('dev-1')).thenAnswer((_) async => false);
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1'))
+        .thenAnswer((_) async => page([], 0));
+    final items = [
+      for (var i = 1; i <= 4; i++)
+        FileItem(id: 'f$i', name: 'f$i.txt', isFolder: false, sizeBytes: 1,
+            createdAt: now, updatedAt: now),
+      FileItem(id: 'folder', name: 'folder', isFolder: true,
+          createdAt: now, updatedAt: now),
+    ];
+    when(() => mockFileRepository.listChildren(null, page: 1)).thenAnswer(
+      (_) async => PagedResult(items: items, totalCount: 5, page: 1, pageSize: 50),
+    );
+    when(() => mockFileRepository.listChildren('folder', page: 1)).thenAnswer((_) async {
+      expect(active, 0);
+      expect(await File(p.join(tempDir.path, 'f4.txt')).exists(), isTrue);
+      return PagedResult(items: [], totalCount: 0, page: 1, pageSize: 50);
+    });
+    when(() => mockMirror.getByServerId(any())).thenAnswer((_) async => null);
+    for (var i = 1; i <= 4; i++) {
+      when(() => mockFileRepository.downloadFileStream('f$i')).thenAnswer((_) async* {
+        active++;
+        if (active > peak) peak = active;
+        if (active == 3 && !started.isCompleted) started.complete();
+        try {
+          await gate.future;
+          yield Uint8List.fromList([1]);
+        } finally {
+          active--;
+        }
+      });
+    }
+    final run = service.pullOnce(tempDir.path, progress: SyncProgressTracker(snapshots.add));
+    try {
+      await started.future.timeout(const Duration(seconds: 5));
+      expect(peak, 3);
+      verifyNever(() => mockFileRepository.listChildren('folder', page: 1));
+      verifyNever(() => mockMirror.markBootstrapped('dev-1'));
+    } finally {
+      gate.complete();
+    }
+    await run;
+    expect(peak, 3);
+    expect(snapshots.last.completedFiles, 4);
+    expect(snapshots.last.remainingFiles, 0);
+    verify(() => mockMirror.markBootstrapped('dev-1')).called(1);
+  });
 
   test('applies a Create event: downloads the file, writes it under the sync folder, '
       'and advances the cursor', () async {

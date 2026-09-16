@@ -6,6 +6,7 @@ import 'package:injectable/injectable.dart';
 
 import '../../../core/storage/app_preferences.dart';
 import '../domain/sync_mirror_repository.dart';
+import '../domain/sync_progress.dart';
 import 'device_id_storage.dart';
 import 'device_registration_service.dart';
 import 'local_change_scanner.dart';
@@ -93,7 +94,9 @@ class SyncCoordinator {
     // queues behind this one's completer, regardless of how long `body`
     // itself takes to actually start running.
     _mutex = completer.future;
-    return previous.then((_) => body()).whenComplete(() => completer.complete());
+    return previous
+        .then((_) => body())
+        .whenComplete(() => completer.complete());
   }
 
   // Set by [endSession], cleared by [startSession] — see endSession's doc
@@ -102,12 +105,18 @@ class SyncCoordinator {
   // session back into the just-cleared state.
   bool _sessionEnded = false;
 
-  Future<SyncRunResult> syncOnce(String syncFolderPath) {
+  Future<SyncRunResult> syncOnce(
+    String syncFolderPath, {
+    void Function(SyncProgress)? onProgress,
+  }) {
     final current = _inFlight;
     if (current != null && current.path == syncFolderPath) {
       return current.future;
     }
-    final future = _withLock(() => _syncOnce(syncFolderPath));
+    final progress = onProgress == null
+        ? null
+        : SyncProgressTracker(onProgress);
+    final future = _withLock(() => _syncOnce(syncFolderPath, progress));
     final entry = (path: syncFolderPath, future: future);
     _inFlight = entry;
     // Only clear the slot if it still holds THIS entry — a call for a
@@ -120,7 +129,10 @@ class SyncCoordinator {
     });
   }
 
-  Future<SyncRunResult> _syncOnce(String syncFolderPath) async {
+  Future<SyncRunResult> _syncOnce(
+    String syncFolderPath,
+    SyncProgressTracker? progress,
+  ) async {
     if (_sessionEnded) {
       // A poll tick or watcher event firing after endSession has already
       // cleared the mirror, but before the app shell that owns the bloc
@@ -148,7 +160,10 @@ class SyncCoordinator {
     if (!await Directory(syncFolderPath).exists()) {
       throw SyncFolderMissingException(syncFolderPath);
     }
-    final pulled = await _pull.pullOnce(syncFolderPath);
+    progress?.beginPhase(SyncPhase.connecting, discovering: true);
+    final pulled = progress == null
+        ? await _pull.pullOnce(syncFolderPath)
+        : await _pull.pullOnce(syncFolderPath, progress: progress);
     // Rule: the timestamp means "this device last contacted the server
     // successfully" — so a pull that completed without throwing counts,
     // even if it applied zero events. Only a pull that throws skips the
@@ -167,7 +182,9 @@ class SyncCoordinator {
     // result, and _sendHeartbeat catches everything internally, so the
     // dangling future can never surface as an unhandled async error.
     unawaited(_sendHeartbeat());
-    final pushed = await _scanner.scanOnce(syncFolderPath);
+    final pushed = progress == null
+        ? await _scanner.scanOnce(syncFolderPath)
+        : await _scanner.scanOnce(syncFolderPath, progress: progress);
     return SyncRunResult(pulled: pulled, pushed: pushed);
   }
 
@@ -180,10 +197,17 @@ class SyncCoordinator {
   Future<void> _sendHeartbeat() async {
     try {
       final deviceId = await _deviceRegistration.localDeviceId();
-      if (deviceId == null) return; // First-run edge case — nothing registered yet.
+      if (deviceId == null) {
+        return; // First-run edge case — nothing registered yet.
+      }
       await _remote.heartbeat(deviceId);
     } catch (e, st) {
-      log('heartbeat failed', error: e, stackTrace: st, name: 'SyncCoordinator');
+      log(
+        'heartbeat failed',
+        error: e,
+        stackTrace: st,
+        name: 'SyncCoordinator',
+      );
     }
   }
 

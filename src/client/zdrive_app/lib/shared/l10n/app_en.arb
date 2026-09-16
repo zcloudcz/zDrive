@@ -100,5 +100,62 @@
   "close": "Close",
   "errorNoConnection": "Could not reach the server. Check your connection and try again.",
   "errorServiceUnavailable": "This feature is temporarily unavailable. Please try again later.",
-  "errorRequestFailed": "The request could not be completed."
+  "errorRequestFailed": "The request could not be completed.",
+  "syncConnecting": "Connecting…",
+  "syncDownloading": "Downloading",
+  "syncScanning": "Scanning folder",
+  "syncHashing": "Comparing file contents",
+  "syncUploading": "Uploading",
+  "syncDeleting": "Applying deletions",
+  "syncDiscovering": "Discovering items — total is not known yet",
+  "syncProgressCounts": "{completed} / {total} items completed · {remaining} remaining",
+  "@syncProgressCounts": {
+    "placeholders": {
+      "completed": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "remaining": {
+        "type": "int"
+      }
+    }
+  },
+  "syncProgressFailures": "{count} items failed",
+  "@syncProgressFailures": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "syncTransferredBytes": "{transferred} / {total} · {remaining} remaining",
+  "@syncTransferredBytes": {
+    "placeholders": {
+      "transferred": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      },
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "syncKnownProgressCounts": "Known items: {completed} / {total} completed · {remaining} remaining",
+  "@syncKnownProgressCounts": {
+    "placeholders": {
+      "completed": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "remaining": {
+        "type": "int"
+      }
+    }
+  }
 }

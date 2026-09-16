@@ -277,4 +277,49 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorRequestFailed => 'The request could not be completed.';
+
+  @override
+  String get syncConnecting => 'Connecting…';
+
+  @override
+  String get syncDownloading => 'Downloading';
+
+  @override
+  String get syncScanning => 'Scanning folder';
+
+  @override
+  String get syncHashing => 'Comparing file contents';
+
+  @override
+  String get syncUploading => 'Uploading';
+
+  @override
+  String get syncDeleting => 'Applying deletions';
+
+  @override
+  String get syncDiscovering => 'Discovering items — total is not known yet';
+
+  @override
+  String syncProgressCounts(int completed, int total, int remaining) {
+    return '$completed / $total items completed · $remaining remaining';
+  }
+
+  @override
+  String syncProgressFailures(int count) {
+    return '$count items failed';
+  }
+
+  @override
+  String syncTransferredBytes(
+    String transferred,
+    String total,
+    String remaining,
+  ) {
+    return '$transferred / $total · $remaining remaining';
+  }
+
+  @override
+  String syncKnownProgressCounts(int completed, int total, int remaining) {
+    return 'Known items: $completed / $total completed · $remaining remaining';
+  }
 }
