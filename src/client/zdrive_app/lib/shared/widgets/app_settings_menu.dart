@@ -62,6 +62,7 @@ class _AppSettingsMenuState extends State<AppSettingsMenu> {
         } else {
           Diagnostics.event('app.exit.requested');
           try {
+            await Diagnostics.flush();
             await const MethodChannel(
               'zdrive/windows_lifecycle',
             ).invokeMethod<void>('quit');

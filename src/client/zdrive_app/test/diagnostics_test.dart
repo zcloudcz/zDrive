@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,6 +24,135 @@ void main() {
       }
     }
   });
+
+  test('flush persists queued events without stopping the writer', () async {
+    await Diagnostics.initialize(directory: directory.path);
+    for (var i = 0; i < 100; i++) {
+      Diagnostics.event('flush.before_exit', {'sequence': i});
+    }
+    await Diagnostics.flush();
+    final file = File('${directory.path}/diagnostic-0.jsonl');
+    expect(await file.readAsString(), contains('"sequence":99'));
+    Diagnostics.event('flush.still_running');
+    await Diagnostics.flush();
+    expect(await file.readAsString(), contains('flush.still_running'));
+  });
+
+  test(
+    'concurrent writers retain independent sessions and can both export',
+    () async {
+      await Diagnostics.initialize(directory: directory.path);
+      final path = directory.path;
+      final rendezvous = ReceivePort();
+      final signal = rendezvous.sendPort;
+      final second = Isolate.run(() async {
+        await Diagnostics.initialize(directory: path);
+        for (var i = 0; i < 80; i++) {
+          Diagnostics.event('second.writer', {'sequence': i});
+        }
+        await Diagnostics.flush();
+        final resume = ReceivePort();
+        signal.send(resume.sendPort);
+        await resume.first;
+        resume.close();
+        Diagnostics.event('second.recovered');
+        final exported = await Diagnostics.exportLogs();
+        await Diagnostics.shutdown();
+        return exported;
+      });
+      for (var i = 0; i < 80; i++) {
+        Diagnostics.event('first.writer', {'sequence': i});
+      }
+      await Diagnostics.flush();
+      (await rendezvous.first as SendPort).send(null);
+      rendezvous.close();
+      expect(await second, endsWith('diagnostic-export.log'));
+      Diagnostics.event('first.recovered');
+      final exported = await Diagnostics.exportLogs();
+      expect(exported, isNotNull);
+      final records = const LineSplitter()
+          .convert(await File(exported!).readAsString())
+          .map((line) => jsonDecode(line) as Map)
+          .toList();
+      expect(
+        records.where((record) => record['event'] == 'first.writer').length,
+        greaterThan(0),
+      );
+      expect(
+        records.where((record) => record['event'] == 'second.writer').length,
+        greaterThan(0),
+      );
+      expect(records.map((record) => record['session']).toSet().length, 2);
+      expect(
+        records.any((record) => record['event'] == 'first.recovered'),
+        isTrue,
+      );
+      expect(
+        records.any((record) => record['event'] == 'second.recovered'),
+        isTrue,
+      );
+      final events = records
+          .where(
+            (record) =>
+                record['event'] == 'first.writer' ||
+                record['event'] == 'second.writer',
+          )
+          .length;
+      if (events < 160) {
+        expect(
+          records.any(
+            (record) => (record['writerDroppedEvents'] as int? ?? 0) > 0,
+          ),
+          isTrue,
+        );
+      }
+    },
+  );
+
+  test(
+    'temporary failed append does not prevent export or later writes',
+    () async {
+      await Diagnostics.initialize(directory: directory.path);
+      await Diagnostics.flush();
+      final file = File('${directory.path}/diagnostic-0.jsonl');
+      final saved = await file.rename('${directory.path}/saved.jsonl');
+      final obstruction = await Directory(file.path).create();
+      Diagnostics.event('append.unavailable');
+      await Diagnostics.flush();
+      await obstruction.delete();
+      await saved.rename(file.path);
+      expect(await Diagnostics.exportLogs(), isNotNull);
+      Diagnostics.event('append.recovered');
+      await Diagnostics.flush();
+      final text = await file.readAsString();
+      expect(text, contains('append.recovered'));
+      expect(text, contains('writerDroppedEvents'));
+    },
+  );
+
+  test(
+    'startup lock contention recovers after the other writer releases',
+    () async {
+      final lease = await File(
+        '${directory.path}/diagnostic.lock',
+      ).open(mode: FileMode.append);
+      await lease.lock(FileLock.exclusive);
+      try {
+        await Diagnostics.initialize(directory: directory.path);
+      } finally {
+        await lease.unlock();
+        await lease.close();
+      }
+      Diagnostics.event('startup.recovered');
+      await Diagnostics.flush();
+      final exported = await Diagnostics.exportLogs();
+      expect(exported, isNotNull);
+      expect(
+        await File(exported!).readAsString(),
+        contains('startup.recovered'),
+      );
+    },
+  );
 
   test(
     'export flushes real files and excludes private error and field text',

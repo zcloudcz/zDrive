@@ -105,6 +105,21 @@ class Diagnostics {
     }
   }
 
+  /// Wait for earlier events to reach the disk writer before an explicit exit.
+  /// A broken or busy filesystem must never indefinitely hold up the app.
+  static Future<void> flush() async {
+    if (_writer == null) return;
+    final reply = ReceivePort();
+    try {
+      _writer!.send(['flush', reply.sendPort]);
+      await reply.first.timeout(const Duration(seconds: 2));
+    } catch (_) {
+      // Logging is best effort if the writer cannot make progress.
+    } finally {
+      reply.close();
+    }
+  }
+
   /// Also releases resources for isolated filesystem tests.
   static Future<void> shutdown() async {
     _heartbeat?.cancel();
@@ -138,71 +153,84 @@ void _writeLogs(List<Object> args) {
   final threshold = args[4] as int;
   final session = '${DateTime.now().toUtc().microsecondsSinceEpoch}-$pid';
   final inbox = ReceivePort();
-  RandomAccessFile? lease;
-  RandomAccessFile? output;
-  var length = 0;
   File log(int index) => File(p.join(directory, 'diagnostic-$index.jsonl'));
-  void append(Map<String, Object?> record) {
-    final bytes = utf8.encode(
-      '${jsonEncode({...record, 'session': session})}\n',
-    );
-    if (length + bytes.length > maxBytes) {
-      output?.closeSync();
-      output = null;
-      if (log(2).existsSync()) log(2).deleteSync();
-      for (var i = 1; i >= 0; i--) {
-        if (log(i).existsSync()) log(i).renameSync(log(i + 1).path);
+
+  T locked<T>(T Function() operation) {
+    Directory(directory).createSync(recursive: true);
+    RandomAccessFile? lease;
+    try {
+      // Retry briefly on this worker only, never block the UI isolate. Releasing
+      // the lease after each operation allows every running app to write/export.
+      for (var attempt = 0; ; attempt++) {
+        try {
+          lease = File(
+            p.join(directory, 'diagnostic.lock'),
+          ).openSync(mode: FileMode.append);
+          lease.lockSync(FileLock.exclusive);
+          break;
+        } on FileSystemException {
+          lease?.closeSync();
+          lease = null;
+          if (attempt == 4) rethrow;
+          sleep(const Duration(milliseconds: 10));
+        }
       }
-      length = 0;
+      try {
+        return operation();
+      } finally {
+        lease.unlockSync();
+      }
+    } finally {
+      lease?.closeSync();
     }
-    output ??= log(0).openSync(mode: FileMode.append);
-    output!.writeFromSync(bytes);
-    output!.flushSync();
-    length += bytes.length;
   }
 
-  try {
-    Directory(directory).createSync(recursive: true);
-    // A second process must not rotate files underneath the active writer.
-    // This lock is non-blocking and the OS releases it after a forced exit.
-    lease = File(
-      p.join(directory, 'diagnostic.lock'),
-    ).openSync(mode: FileMode.append);
-    lease.lockSync(FileLock.exclusive);
-    length = log(0).existsSync() ? log(0).lengthSync() : 0;
-    final version = args[5] as String;
-    append({
-      ...diagnosticRecord('app.started', {'pid': pid}),
-      'version': RegExp(r'^[a-zA-Z0-9.+_-]{1,60}$').hasMatch(version)
-          ? version
-          : 'unknown',
-      'os': Platform.operatingSystem,
-    });
-  } catch (_) {
-    output?.closeSync();
-    lease?.closeSync();
-    ready.send(null);
-    inbox.close();
-    return;
+  var failedEvents = 0;
+  void append(Map<String, Object?> record) {
+    try {
+      locked(() {
+        final bytes = utf8.encode(
+          '${jsonEncode({...record, 'session': session, if (failedEvents > 0) 'writerDroppedEvents': failedEvents})}\n',
+        );
+        // Another process may have appended or rotated since our last event.
+        final length = log(0).existsSync() ? log(0).lengthSync() : 0;
+        if (length + bytes.length > maxBytes) {
+          if (log(2).existsSync()) log(2).deleteSync();
+          for (var i = 1; i >= 0; i--) {
+            if (log(i).existsSync()) log(i).renameSync(log(i + 1).path);
+          }
+        }
+        final output = log(0).openSync(mode: FileMode.append);
+        try {
+          output.writeFromSync(bytes);
+          output.flushSync();
+        } finally {
+          output.closeSync();
+        }
+      });
+      failedEvents = 0;
+    } catch (_) {
+      failedEvents++;
+    }
   }
+
+  final version = args[5] as String;
+  append({
+    ...diagnosticRecord('app.started', {'pid': pid}),
+    'version': RegExp(r'^[a-zA-Z0-9.+_-]{1,60}$').hasMatch(version)
+        ? version
+        : 'unknown',
+    'os': Platform.operatingSystem,
+  });
   final clock = Stopwatch()..start();
   var lastHeartbeat = 0;
   var stalled = false;
-  var failed = false;
-  void safeAppend(Map<String, Object?> record) {
-    try {
-      append(record);
-    } catch (_) {
-      failed = true;
-    }
-  }
-
   final watchdog = Timer.periodic(
     Duration(milliseconds: threshold.clamp(50, 2000)),
     (_) {
       if (!stalled && clock.elapsedMilliseconds - lastHeartbeat > threshold) {
         stalled = true;
-        safeAppend(
+        append(
           diagnosticRecord('ui.heartbeat_stalled', {
             'gapMs': clock.elapsedMilliseconds - lastHeartbeat,
           }),
@@ -210,34 +238,34 @@ void _writeLogs(List<Object> args) {
       }
     },
   );
-  inbox.listen(
-    (message) {
-      if (message is List && message.first == 'shutdown') {
-        watchdog.cancel();
-        output?.closeSync();
-        output = null;
-        lease?.closeSync();
-        lease = null;
-        inbox.close();
-        (message[1] as SendPort).send(null);
-      } else if (message == 'heartbeat') {
-        if (stalled) {
-          safeAppend(
-            diagnosticRecord('ui.heartbeat_recovered', {
-              'gapMs': clock.elapsedMilliseconds - lastHeartbeat,
-            }),
-          );
-        }
-        stalled = false;
-        lastHeartbeat = clock.elapsedMilliseconds;
-      } else if (message is Map<String, Object?>) {
-        safeAppend(message);
-        ack.send(null);
-      } else if (message is SendPort) {
-        try {
-          if (failed) throw StateError('Diagnostic write failed');
-          final exported = File(p.join(directory, 'diagnostic-export.log'));
-          final snapshot = exported.openSync(mode: FileMode.write);
+  inbox.listen((message) {
+    if (message is List && message.first == 'shutdown') {
+      watchdog.cancel();
+      inbox.close();
+      (message[1] as SendPort).send(null);
+    } else if (message is List && message.first == 'flush') {
+      if (failedEvents > 0) append(diagnosticRecord('writer.drop_summary', {}));
+      // ReceivePort preserves sender order, and each earlier append flushed.
+      (message[1] as SendPort).send(null);
+    } else if (message == 'heartbeat') {
+      if (stalled) {
+        append(
+          diagnosticRecord('ui.heartbeat_recovered', {
+            'gapMs': clock.elapsedMilliseconds - lastHeartbeat,
+          }),
+        );
+      }
+      stalled = false;
+      lastHeartbeat = clock.elapsedMilliseconds;
+    } else if (message is Map<String, Object?>) {
+      append(message);
+      ack.send(null);
+    } else if (message is SendPort) {
+      if (failedEvents > 0) append(diagnosticRecord('writer.drop_summary', {}));
+      try {
+        final exported = locked(() {
+          final file = File(p.join(directory, 'diagnostic-export.log'));
+          final snapshot = file.openSync(mode: FileMode.write);
           try {
             for (var i = 2; i >= 0; i--) {
               if (log(i).existsSync()) {
@@ -248,16 +276,13 @@ void _writeLogs(List<Object> args) {
           } finally {
             snapshot.closeSync();
           }
-          message.send(exported.path);
-        } catch (_) {
-          message.send(null);
-        }
+          return file.path;
+        });
+        message.send(exported);
+      } catch (_) {
+        message.send(null);
       }
-    },
-    onDone: () {
-      output?.closeSync();
-      lease?.closeSync();
-    },
-  );
+    }
+  });
   ready.send(inbox.sendPort);
 }
