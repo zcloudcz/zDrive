@@ -31,9 +31,8 @@ class _UpdateBannerState extends State<UpdateBanner> {
       child: widget.child,
       builder: (context, child) {
         final phase = controller.phase;
-        if (phase == UpdatePhase.idle || phase == UpdatePhase.checking) {
-          return child!;
-        }
+        final hidden =
+            phase == UpdatePhase.idle || phase == UpdatePhase.checking;
         final l10n = AppLocalizations.of(context)!;
         final downloading = phase == UpdatePhase.downloading;
         final restarting = phase == UpdatePhase.restarting;
@@ -51,56 +50,59 @@ class _UpdateBannerState extends State<UpdateBanner> {
             : l10n.updateFailed;
         return Column(
           children: [
-            Material(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.system_update_alt),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              message,
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                          ),
-                          if (!downloading && !restarting)
-                            TextButton(
-                              onPressed: () {
-                                if (controller.pending != null) {
-                                  controller.apply();
-                                } else {
-                                  controller.check();
-                                }
-                              },
+            if (hidden)
+              const SizedBox.shrink()
+            else
+              Material(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.system_update_alt),
+                            const SizedBox(width: 12),
+                            Expanded(
                               child: Text(
-                                controller.pending != null
-                                    ? l10n.updateRestart
-                                    : l10n.updateRetry,
+                                message,
+                                style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),
-                        ],
-                      ),
-                      if (downloading || restarting) ...[
-                        const SizedBox(height: 6),
-                        LinearProgressIndicator(
-                          value: downloading ? progress : null,
+                            if (!downloading && !restarting)
+                              TextButton(
+                                onPressed: () {
+                                  if (controller.pending != null) {
+                                    controller.apply();
+                                  } else {
+                                    controller.check();
+                                  }
+                                },
+                                child: Text(
+                                  controller.pending != null
+                                      ? l10n.updateRestart
+                                      : l10n.updateRetry,
+                                ),
+                              ),
+                          ],
                         ),
+                        if (downloading || restarting) ...[
+                          const SizedBox(height: 6),
+                          LinearProgressIndicator(
+                            value: downloading ? progress : null,
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
             Expanded(child: child!),
           ],
         );

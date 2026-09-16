@@ -32,6 +32,7 @@ class FakeBackend implements UpdateBackend {
   int quits = 0;
   bool closed = false;
   Completer<void>? gate;
+  Completer<void>? prepareGate;
   void Function(int)? progress;
   @override
   Future<UpdateManifest?> readPending() async => prepared;
@@ -49,6 +50,7 @@ class FakeBackend implements UpdateBackend {
   Future<void> prepare(UpdateManifest value, void Function(int) onBytes) async {
     progress = onBytes;
     onBytes(1);
+    await prepareGate?.future;
     prepared = value;
     onBytes(3);
   }
@@ -68,6 +70,38 @@ class FakeBackend implements UpdateBackend {
   void close() {
     closed = true;
   }
+}
+
+class StatefulPage extends StatefulWidget {
+  const StatefulPage({
+    super.key,
+    required this.onInitialize,
+    required this.onDispose,
+  });
+  final VoidCallback onInitialize;
+  final VoidCallback onDispose;
+  @override
+  State<StatefulPage> createState() => _StatefulPageState();
+}
+
+class _StatefulPageState extends State<StatefulPage> {
+  final controller = TextEditingController();
+  @override
+  void initState() {
+    super.initState();
+    widget.onInitialize();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    widget.onDispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Scaffold(body: TextField(controller: controller));
 }
 
 void main() {
@@ -257,6 +291,51 @@ void main() {
       await directory.delete(recursive: true);
     }
   });
+
+  testWidgets(
+    'Banner visibility changes preserve the mounted page and unfinished input',
+    (tester) async {
+      var initialized = 0;
+      var disposed = 0;
+      backend.prepareGate = Completer<void>();
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: UpdateBanner(
+            controller: controller,
+            child: StatefulPage(
+              onInitialize: () => initialized++,
+              onDispose: () => disposed++,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'unfinished folder name');
+      final operation = controller.check();
+      await tester.pump();
+      expect(controller.phase, UpdatePhase.downloading);
+      expect(find.text('unfinished folder name'), findsOneWidget);
+      expect(initialized, 1);
+      expect(disposed, 0);
+      backend.prepareGate!.complete();
+      await operation;
+      await tester.pump();
+      expect(controller.phase, UpdatePhase.ready);
+      expect(find.text('unfinished folder name'), findsOneWidget);
+      controller.pending = null;
+      backend.currentVersion = manifest.version;
+      await controller.check();
+      await tester.pump();
+      expect(controller.phase, UpdatePhase.idle);
+      expect(find.text('unfinished folder name'), findsOneWidget);
+      expect(initialized, 1);
+      expect(disposed, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(disposed, 1);
+    },
+  );
 
   testWidgets(
     'Ready banner shows version, restart action and preserves application',
