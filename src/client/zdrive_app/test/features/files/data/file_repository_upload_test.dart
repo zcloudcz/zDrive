@@ -58,6 +58,37 @@ void main() {
     repository = FileRepositoryImpl(remote, upload);
   });
 
+  test('UploadFile_CancelDuringCreate_PersistsNodeBeforeStopping', () async {
+    final created = Completer<FileDto>();
+    final persisted = Completer<void>();
+    final callbackStarted = Completer<void>();
+    final token = CancelToken();
+    when(() => remote.createFile(
+      name: 'big.bin', isFolder: false, parentId: null, sizeBytes: 10,
+    )).thenAnswer((_) => created.future);
+
+    final result = repository.uploadFile(null, 'big.bin', const Stream.empty(), 10, null,
+      cancelToken: token,
+      onNodeCreated: (id) async {
+        expect(id, 'new-id');
+        callbackStarted.complete();
+        await persisted.future;
+      },
+    );
+    final assertion = expectLater(result, throwsA(isA<DioException>()
+      .having((e) => e.type, 'type', DioExceptionType.cancel)));
+    token.cancel('local file removed');
+    created.complete(fileDto('new-id', 'big.bin'));
+    await callbackStarted.future;
+    verifyZeroInteractions(upload);
+    persisted.complete();
+    await assertion;
+    verifyZeroInteractions(upload);
+    verifyNever(() => remote.createFileVersion(any(),
+      blobVersionId: any(named: 'blobVersionId'),
+      sizeBytes: any(named: 'sizeBytes'),
+      manifestHash: any(named: 'manifestHash')));
+  });
   test('uploadFile creates a new node when no name conflict occurs', () async {
     when(() => remote.createFile(
           name: 'report.pdf',
