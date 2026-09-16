@@ -683,6 +683,12 @@ abstract class AppLocalizations {
     String total,
     String remaining,
   );
+
+  /// No description provided for @syncKnownProgressCounts.
+  ///
+  /// In en, this message translates to:
+  /// **'Known items: {completed} / {total} completed · {remaining} remaining'**
+  String syncKnownProgressCounts(int completed, int total, int remaining);
 }
 
 class _AppLocalizationsDelegate

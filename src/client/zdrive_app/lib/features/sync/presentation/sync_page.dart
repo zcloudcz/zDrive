@@ -320,10 +320,10 @@ class _SyncProgressView extends StatelessWidget {
           Text(phaseLabel, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           if (progress.discovering)
-            Text(l10n.syncDiscovering)
-          else if (progress.totalFiles > 0)
+            Text(l10n.syncDiscovering),
+          if (progress.totalFiles > 0)
             Text(
-              l10n.syncProgressCounts(
+              (progress.discovering ? l10n.syncKnownProgressCounts : l10n.syncProgressCounts)(
                 progress.completedFiles,
                 progress.totalFiles,
                 progress.remainingFiles,

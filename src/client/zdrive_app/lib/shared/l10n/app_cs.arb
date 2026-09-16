@@ -136,5 +136,19 @@
         "type": "String"
       }
     }
+  },
+  "syncKnownProgressCounts": "Známé položky: dokončeno {completed} / {total} · zbývá {remaining}",
+  "@syncKnownProgressCounts": {
+    "placeholders": {
+      "completed": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "remaining": {
+        "type": "int"
+      }
+    }
   }
 }

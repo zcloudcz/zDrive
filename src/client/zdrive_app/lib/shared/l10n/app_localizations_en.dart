@@ -317,4 +317,9 @@ class AppLocalizationsEn extends AppLocalizations {
   ) {
     return '$transferred / $total · $remaining remaining';
   }
+
+  @override
+  String syncKnownProgressCounts(int completed, int total, int remaining) {
+    return 'Known items: $completed / $total completed · $remaining remaining';
+  }
 }

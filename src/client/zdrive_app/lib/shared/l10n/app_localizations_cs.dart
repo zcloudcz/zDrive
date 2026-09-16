@@ -318,4 +318,9 @@ class AppLocalizationsCs extends AppLocalizations {
   ) {
     return '$transferred / $total · zbývá $remaining';
   }
+
+  @override
+  String syncKnownProgressCounts(int completed, int total, int remaining) {
+    return 'Známé položky: dokončeno $completed / $total · zbývá $remaining';
+  }
 }

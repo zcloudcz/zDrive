@@ -143,5 +143,19 @@
         "type": "String"
       }
     }
+  },
+  "syncKnownProgressCounts": "Known items: {completed} / {total} completed · {remaining} remaining",
+  "@syncKnownProgressCounts": {
+    "placeholders": {
+      "completed": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      },
+      "remaining": {
+        "type": "int"
+      }
+    }
   }
 }

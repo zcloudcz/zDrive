@@ -101,6 +101,7 @@ void main() {
       home: BlocProvider<SyncBloc>.value(value: bloc, child: const SyncPage())));
     expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, isNull);
     expect(find.text('Discovering items — total is not known yet'), findsOneWidget);
+    expect(find.text('Known items: 0 / 4 completed · 4 remaining'), findsOneWidget);
   });
 
   group('SyncPage', () {
