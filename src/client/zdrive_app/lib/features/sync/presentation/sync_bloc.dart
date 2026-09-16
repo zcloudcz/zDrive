@@ -390,7 +390,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         failedFiles: 0,
       ),
     );
-    final phaseFailures = <SyncPhase, int>{};
+    final phaseFailures = <(SyncPhase, int), int>{};
     try {
       final result = await _syncCoordinator.syncOnce(
         path,
@@ -398,7 +398,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
           if (generation != _syncGeneration || emit.isDone || isClosed) return;
           final latest = state;
           if (latest is! SyncLoaded || latest.syncFolderPath != path) return;
-          phaseFailures[progress.phase] = progress.failedFiles;
+          phaseFailures[(progress.phase, progress.phaseSequence)] = progress.failedFiles;
           emit(
             latest.copyWith(
               progress: () => progress,

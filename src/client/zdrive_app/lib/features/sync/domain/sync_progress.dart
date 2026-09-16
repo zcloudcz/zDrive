@@ -28,6 +28,7 @@ class SyncFileProgress extends Equatable {
 
 class SyncProgress extends Equatable {
   final SyncPhase phase;
+  final int phaseSequence;
   final int totalFiles;
   final int completedFiles;
   final int failedFiles;
@@ -36,6 +37,7 @@ class SyncProgress extends Equatable {
 
   SyncProgress({
     required this.phase,
+    this.phaseSequence = 0,
     this.totalFiles = 0,
     this.completedFiles = 0,
     this.failedFiles = 0,
@@ -49,6 +51,7 @@ class SyncProgress extends Equatable {
   @override
   List<Object?> get props => [
     phase,
+    phaseSequence,
     totalFiles,
     completedFiles,
     failedFiles,
@@ -63,6 +66,7 @@ class SyncProgressTracker {
   final Stopwatch _clock = Stopwatch()..start();
   int _lastEmission = -100;
   SyncPhase _phase = SyncPhase.connecting;
+  int _phaseSequence = 0;
   int _total = 0;
   int _completed = 0;
   int _failed = 0;
@@ -73,6 +77,7 @@ class SyncProgressTracker {
 
   SyncProgress get snapshot => SyncProgress(
     phase: _phase,
+    phaseSequence: _phaseSequence,
     totalFiles: _total,
     completedFiles: _completed,
     failedFiles: _failed,
@@ -86,6 +91,7 @@ class SyncProgressTracker {
     bool discovering = false,
   }) {
     _phase = phase;
+    _phaseSequence++;
     _total = totalFiles;
     _completed = 0;
     _failed = 0;

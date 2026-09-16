@@ -109,6 +109,24 @@ void main() {
     await bloc.close();
   });
 
+  test('repeated hashing phase does not erase earlier failures', () async {
+    when(() => mockPreferences.syncFolderPath).thenReturn('/sync');
+    when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
+    when(() => mockPullService.getFailedEvents()).thenAnswer((_) async => []);
+    when(() => mockSyncCoordinator.syncOnce(any(), onProgress: any(named: 'onProgress'))).thenAnswer((invocation) async {
+      final callback = invocation.namedArguments[#onProgress] as void Function(SyncProgress);
+      callback(SyncProgress(phase: SyncPhase.hashing, phaseSequence: 1, totalFiles: 2, failedFiles: 1));
+      callback(SyncProgress(phase: SyncPhase.hashing, phaseSequence: 2, totalFiles: 1, completedFiles: 1));
+      return const SyncRunResult(pulled: 0, pushed: 0);
+    });
+    final bloc = buildBloc(watch: (_) => const Stream.empty());
+    final done = bloc.stream.firstWhere((s) => s is SyncLoaded && !s.isPulling && s.failedFiles == 1);
+    bloc.add(const LoadSyncStatus());
+    final finalState = await done as SyncLoaded;
+    expect(finalState.progress, isNull);
+    await bloc.close();
+  });
+
   group('LoadSyncStatus', () {
     // Shared by the round-6 F2 test below only, like pullGate in the
     // 'PullRequested' group — reassigned fresh in that test's own setUp.

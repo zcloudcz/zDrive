@@ -16,7 +16,9 @@ void main() {
     tracker.finishFile('a'); tracker.finishFile('a');
     expect(tracker.snapshot.completedFiles, 1);
     expect(tracker.snapshot.remainingFiles, 0);
+    final sequence = tracker.snapshot.phaseSequence;
     tracker.beginPhase(SyncPhase.scanning, discovering: true);
+    expect(tracker.snapshot.phaseSequence, sequence + 1);
     tracker.setTotalFiles(4);
     expect(tracker.snapshot.discovering, isTrue);
     expect(tracker.snapshot.failedFiles, 0);
