@@ -45,7 +45,8 @@ try {
     try { $ownsMutex = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
     if (-not $ownsMutex) { return }
     New-Item -ItemType Directory -Path $updates -Force | Out-Null
-    @{ version = $Version; processId = $PID } | ConvertTo-Json | Set-Content -LiteralPath "$ready.tmp" -Encoding UTF8
+    $readyJson = @{ version = $Version; processId = $PID } | ConvertTo-Json
+    [IO.File]::WriteAllText("$ready.tmp", $readyJson, [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath "$ready.tmp" -Destination $ready -Force
     $parent = Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue
     if ($parent) {
@@ -92,7 +93,8 @@ try {
         New-Item -ItemType Directory -Path $updates -Force | Out-Null
         $message = $_.Exception.Message
         if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
-        @{ version = $Version; message = $message } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $updates 'last-error.json') -Encoding UTF8
+        $errorJson = @{ version = $Version; message = $message } | ConvertTo-Json
+        [IO.File]::WriteAllText((Join-Path $updates 'last-error.json'), $errorJson, [Text.UTF8Encoding]::new($false))
         Clear-MatchingPending
         if ($parentExited) { Start-InstalledApp $restartVersion }
     }

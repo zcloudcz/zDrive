@@ -17,6 +17,7 @@ function Get-Process {
     $process | Add-Member ScriptMethod WaitForExit {
         param($timeout)
         Assert (Test-Path (Join-Path $updates "handoff-$handoff.ready")) 'Parent waited before readiness signal'
+        Assert ([IO.File]::ReadAllBytes((Join-Path $updates "handoff-$handoff.ready"))[0] -eq 123) 'Readiness JSON has UTF-8 BOM'
         return $global:parentMode -ne 'running'
     }
     $process
@@ -101,7 +102,10 @@ public sealed class UpdateTestLock : IDisposable {
             Assert ($global:launched[0] -like "*releases*$expected*zdrive_app.exe") "$scenario restarted wrong version"
         }
         if ($scenario -eq 'success') { Assert (-not (Test-Path (Join-Path $updates 'last-error.json'))) 'Success left error' }
-        else { Assert (Test-Path (Join-Path $updates 'last-error.json')) "$scenario did not record error" }
+        else {
+            Assert (Test-Path (Join-Path $updates 'last-error.json')) "$scenario did not record error"
+            Assert ([IO.File]::ReadAllBytes((Join-Path $updates 'last-error.json'))[0] -eq 123) 'Error JSON has UTF-8 BOM'
+        }
     }
     # A valid checksum does not make path traversal safe to extract.
     Remove-Item -LiteralPath $zip -Force
