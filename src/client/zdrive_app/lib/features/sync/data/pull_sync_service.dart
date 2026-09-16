@@ -441,7 +441,13 @@ class PullSyncService {
       rethrow;
     }
 
+    // File nodes exist before their first upload commits. The later version
+    // event will deliver the content; do not download a missing manifest now.
+    if (!remote.isFolder && !remote.isContentReady) return;
     final previous = await _mirror.getByServerId(fileId);
+    // A provisional row belongs to this device's interrupted upload. Let
+    // the scanner retry it or propagate a local deletion before any download.
+    if (previous != null && !previous.isFolder && previous.contentHash == null) return;
     final dirPath = await _resolveLocalDirPath(remote.parentId, syncFolderPath);
     final localPath = _safeChildPath(
       syncFolderPath,
@@ -846,6 +852,7 @@ class PullSyncService {
     String dirPath,
     String syncFolderPath,
   ) async {
+    if (!item.isFolder && !item.isContentReady) return;
     final existing = await _mirror.getByServerId(item.id);
 
     if (item.isFolder) {

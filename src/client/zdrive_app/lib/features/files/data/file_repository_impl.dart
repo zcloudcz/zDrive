@@ -353,6 +353,7 @@ class FileRepositoryImpl implements FileRepository {
       createdAt: dto.createdAt,
       updatedAt: dto.updatedAt,
       isDeleted: dto.isDeleted,
+      isContentReady: dto.isFolder || dto.manifestHash != null,
     );
   }
 

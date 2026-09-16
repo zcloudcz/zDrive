@@ -158,6 +158,8 @@ void main() {
     registerFallbackValue(<SyncMirrorEntry>[]);
     registerFallbackValue(<String>[]);
     registerFallbackValue(const Stream<List<int>>.empty());
+    registerFallbackValue(CancelToken());
+    registerFallbackValue((String _) async {});
   });
 
   setUp(() {
@@ -173,6 +175,95 @@ void main() {
 
   tearDown(() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+  });
+
+  test('file deleted during upload is removed remotely in the same scan', () async {
+    final file = File(p.join(tempDir.path, 'deleted.mp4'))..writeAsStringSync('video');
+    final mirror = stateful([]);
+    when(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(),
+      originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated'))).thenAnswer((_) async {
+        await file.delete();
+        return 'deleted-upload';
+      });
+    when(() => mockFileRepository.deleteFile('deleted-upload',
+      originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async {});
+
+    await scanner.scanOnce(tempDir.path);
+
+    verify(() => mockFileRepository.deleteFile('deleted-upload',
+      originDeviceId: 'dev-1')).called(1);
+    expect(mirror.row('deleted-upload'), isNull);
+  });
+
+  test('deleting an active upload cancels transport and cleans its durable node', () async {
+    final file = File(p.join(tempDir.path, 'active.mp4'))..writeAsStringSync('video');
+    final mirror = stateful([]);
+    final started = Completer<void>();
+    when(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(),
+      originDeviceId: any(named: 'originDeviceId'),
+      cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
+      .thenAnswer((inv) async {
+        final created = inv.namedArguments[#onNodeCreated] as Future<void> Function(String);
+        await created('active');
+        expect(mirror.row('active')!.contentHash, isNull);
+        started.complete();
+        final token = inv.namedArguments[#cancelToken] as CancelToken;
+        throw await token.whenCancel;
+      });
+    when(() => mockFileRepository.deleteFile('active', originDeviceId: 'dev-1'))
+      .thenAnswer((_) async {});
+    final run = scanner.scanOnce(tempDir.path);
+    await started.future.timeout(const Duration(seconds: 5));
+    await file.delete();
+    await run.timeout(const Duration(seconds: 5));
+    verify(() => mockFileRepository.deleteFile('active', originDeviceId: 'dev-1')).called(1);
+    expect(mirror.rows, isEmpty);
+  });
+
+  test('failed cleanup remains durable and retries after scanner restart', () async {
+    final file = File(p.join(tempDir.path, 'retry-delete.mp4'))..writeAsStringSync('video');
+    final mirror = stateful([]);
+    when(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(),
+      originDeviceId: any(named: 'originDeviceId'),
+      cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
+      .thenAnswer((inv) async {
+        await (inv.namedArguments[#onNodeCreated] as Future<void> Function(String))('retry-delete');
+        await file.delete();
+        (inv.namedArguments[#cancelToken] as CancelToken).cancel();
+        throw (inv.namedArguments[#cancelToken] as CancelToken).cancelError!;
+      });
+    when(() => mockFileRepository.deleteFile('retry-delete', originDeviceId: 'dev-1'))
+      .thenThrow(DioException(requestOptions: RequestOptions(), type: DioExceptionType.connectionError));
+    await scanner.scanOnce(tempDir.path);
+    expect(mirror.row('retry-delete'), isNotNull);
+    when(() => mockFileRepository.deleteFile('retry-delete', originDeviceId: 'dev-1'))
+      .thenAnswer((_) async {});
+    await scannerWith(isWindows: false).scanOnce(tempDir.path);
+    expect(mirror.rows, isEmpty);
+  });
+
+  test('restart retries a persisted unfinished upload even with unchanged mtime', () async {
+    final file = File(p.join(tempDir.path, 'pending.mp4'))..writeAsStringSync('video');
+    final mirror = stateful([
+      SyncMirrorEntry(serverId: 'pending', localPath: file.path, isFolder: false,
+        sizeBytes: 5, updatedAt: past, syncedAt: future),
+    ]);
+    when(() => mockFileRepository.uploadNewVersion('pending', 'pending.mp4', any(), 5,
+      originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken'),
+      onProgress: any(named: 'onProgress'))).thenAnswer((_) async {});
+    expect(await scannerWith(isWindows: false).scanOnce(tempDir.path), 1);
+    expect(mirror.row('pending')!.contentHash, hashOf('video'));
+  });
+
+  test('restart deletes persisted unfinished upload when its local file is gone', () async {
+    final mirror = stateful([
+      SyncMirrorEntry(serverId: 'pending', localPath: p.join(tempDir.path, 'gone.mp4'),
+        isFolder: false, updatedAt: past, syncedAt: past),
+    ]);
+    when(() => mockFileRepository.deleteFile('pending', originDeviceId: 'dev-1'))
+      .thenAnswer((_) async {});
+    expect(await scannerWith(isWindows: false).scanOnce(tempDir.path), 1);
+    expect(mirror.rows, isEmpty);
   });
 
   test('unchanged content advances the check timestamp beyond the precision overlap', () async {
@@ -197,14 +288,14 @@ void main() {
         sizeBytes: 4, contentHash: hashOf('0000'), updatedAt: past, syncedAt: past),
     ]);
     when(() => mockFileRepository.uploadFile(any(), 'new.txt', any(), 3, any(),
-      originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async {
+      originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated'))).thenAnswer((_) async {
         // Existing-file prehash has finished, but its upload has not begun.
         await changed.writeAsString('2222');
         return 'new';
       });
     final uploaded = <String>[];
     when(() => mockFileRepository.uploadNewVersion('changed', 'changed.txt', any(), 4,
-      originDeviceId: any(named: 'originDeviceId'))).thenAnswer((inv) async {
+      originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'))).thenAnswer((inv) async {
         final stream = inv.positionalArguments[2] as Stream<List<int>>;
         if (uploaded.isEmpty) {
           // The transfer must keep reading its snapshot, including if the
@@ -235,7 +326,7 @@ void main() {
     expect(snapshots.any((s) => s.failedFiles > 0), isTrue);
     expect(snapshots.any((s) => s.activeFiles.any((f) => f.path == syncPathKey(file.path))), isTrue);
     verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(),
-      originDeviceId: any(named: 'originDeviceId')));
+      originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
   });
 
   test('folder creation failure is reported by this run tracker', () async {
@@ -266,7 +357,7 @@ void main() {
     var deleted = false;
     final snapshots = <SyncProgress>[];
     when(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(),
-      originDeviceId: any(named: 'originDeviceId'))).thenAnswer((inv) async {
+      originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated'))).thenAnswer((inv) async {
       active++;
       started++;
       if (active > peak) peak = active;
@@ -303,7 +394,7 @@ void main() {
       'the mirror', () async {
     final file = File(p.join(tempDir.path, 'new.txt'))..writeAsStringSync('hello');
     final mirror = stateful([]);
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'new.txt', any(), 5, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'new.txt', any(), 5, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenAnswer((_) async => 'file-1');
 
     final pushed = await scanner.scanOnce(tempDir.path);
@@ -321,7 +412,7 @@ void main() {
           5,
           any(),
           originDeviceId: 'dev-1',
-        )).called(1);
+         cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated'))).called(1);
   });
 
   test('new file inside a new subfolder: creates the folder first (also '
@@ -337,7 +428,7 @@ void main() {
           createdAt: now,
           updatedAt: now,
         ));
-    when(() => mockFileRepository.uploadFile('folder-1', 'new.txt', any(), 1, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile('folder-1', 'new.txt', any(), 1, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenAnswer((_) async => 'file-2');
 
     final pushed = await scanner.scanOnce(tempDir.path);
@@ -346,7 +437,7 @@ void main() {
     verifyInOrder([
       () => mockFileRepository.createFolder(null, 'sub', originDeviceId: 'dev-1'),
       () => mockFileRepository.uploadFile('folder-1', 'new.txt', any(), 1, any(),
-          originDeviceId: 'dev-1'),
+          originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')),
     ]);
     expect(mirror.row('folder-1'), isNotNull);
   });
@@ -366,16 +457,16 @@ void main() {
         syncedAt: past,
       ),
     ]);
-    when(() => mockFileRepository.uploadNewVersion('file-3', 'tracked.txt', any(), 17, originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadNewVersion('file-3', 'tracked.txt', any(), 17, originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')))
         .thenAnswer((_) async {});
 
     final pushed = await scanner.scanOnce(tempDir.path);
 
     expect(pushed, 1);
     verify(() => mockFileRepository.uploadNewVersion('file-3', 'tracked.txt', any(), 17,
-            originDeviceId: 'dev-1'))
+            originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken')))
         .called(1);
-    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
     verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
   });
 
@@ -397,8 +488,8 @@ void main() {
     final pushed = await scanner.scanOnce(tempDir.path);
 
     expect(pushed, 0);
-    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
-    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
+    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
     verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
     verifyNever(() => mockMirror.commit(
           upserts: any(named: 'upserts'),
@@ -471,7 +562,7 @@ void main() {
     verify(() => mockFileRepository.renameFile('file-6', 'new.txt', originDeviceId: 'dev-1'))
         .called(1);
     verifyNever(() => mockFileRepository.moveFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
-    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
     verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
     expect(mirror.row('file-6')!.localPath, newFile.path);
   });
@@ -608,7 +699,7 @@ void main() {
         syncedAt: past,
       ),
     ]);
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'newdupe.txt', any(), 14, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'newdupe.txt', any(), 14, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenAnswer((_) async => 'newdupe-id');
     when(() => mockFileRepository.deleteFile('dupeA-id', originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async {});
     when(() => mockFileRepository.deleteFile('dupeB-id', originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async {});
@@ -618,7 +709,7 @@ void main() {
     verifyNever(() => mockFileRepository.moveFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
     verifyNever(() => mockFileRepository.renameFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
     verify(() => mockFileRepository.uploadFile(any(that: isNull), 'newdupe.txt', any(), 14, any(),
-            originDeviceId: 'dev-1'))
+            originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .called(1);
     verify(() => mockFileRepository.deleteFile('dupeA-id', originDeviceId: 'dev-1')).called(1);
     verify(() => mockFileRepository.deleteFile('dupeB-id', originDeviceId: 'dev-1')).called(1);
@@ -639,7 +730,7 @@ void main() {
         syncedAt: past,
       ),
     ]);
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'emptyNew.txt', any(), 0, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'emptyNew.txt', any(), 0, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenAnswer((_) async => 'emptyNew-id');
     when(() => mockFileRepository.deleteFile('empty-id', originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async {});
 
@@ -648,7 +739,7 @@ void main() {
     verifyNever(() => mockFileRepository.moveFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
     verifyNever(() => mockFileRepository.renameFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
     verify(() => mockFileRepository.uploadFile(any(that: isNull), 'emptyNew.txt', any(), 0, any(),
-            originDeviceId: 'dev-1'))
+            originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .called(1);
     verify(() => mockFileRepository.deleteFile('empty-id', originDeviceId: 'dev-1')).called(1);
   });
@@ -714,7 +805,7 @@ void main() {
     final pushed = await scannerWith(isWindows: true).scanOnce(tempDir.path);
 
     expect(pushed, 0);
-    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
     verifyNever(() => mockFileRepository.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
   });
 
@@ -750,7 +841,7 @@ void main() {
           7,
           any(),
           originDeviceId: any(named: 'originDeviceId'),
-        )).thenAnswer((_) async => 'child-id');
+         cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated'))).thenAnswer((_) async => 'child-id');
 
     final pushed = await scanner.scanOnce(tempDir.path);
 
@@ -763,7 +854,7 @@ void main() {
           7,
           any(),
           originDeviceId: any(named: 'originDeviceId'),
-        )).called(1);
+         cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated'))).called(1);
   });
 
   test('createFolder 409 against a server folder name that differs only by '
@@ -828,7 +919,7 @@ void main() {
       () async {
     File(p.join(tempDir.path, 'shared.txt')).writeAsStringSync('local content');
     stateful([]);
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'shared.txt', any(), 13, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'shared.txt', any(), 13, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenThrow(dioError(409));
     when(() => mockFileRepository.listChildren(null, page: 1, pageSize: 200))
         .thenAnswer((_) async => PagedResult(
@@ -846,14 +937,14 @@ void main() {
               page: 1,
               pageSize: 200,
             ));
-    when(() => mockFileRepository.uploadNewVersion('existing-id', 'shared.txt', any(), 13, originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadNewVersion('existing-id', 'shared.txt', any(), 13, originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')))
         .thenAnswer((_) async {});
 
     final pushed = await scanner.scanOnce(tempDir.path);
 
     expect(pushed, 1);
     verify(() => mockFileRepository.uploadNewVersion('existing-id', 'shared.txt', any(), 13,
-            originDeviceId: 'dev-1'))
+            originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken')))
         .called(1);
   });
 
@@ -861,7 +952,7 @@ void main() {
       'finds it case-insensitively and uploads a new version into it', () async {
     File(p.join(tempDir.path, 'Shared.txt')).writeAsStringSync('local content');
     stateful([]);
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'Shared.txt', any(), 13, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'Shared.txt', any(), 13, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenThrow(dioError(409));
     when(() => mockFileRepository.listChildren(null, page: 1, pageSize: 200))
         .thenAnswer((_) async => PagedResult(
@@ -879,14 +970,14 @@ void main() {
               page: 1,
               pageSize: 200,
             ));
-    when(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')))
         .thenAnswer((_) async {});
 
     final pushed = await scanner.scanOnce(tempDir.path);
 
     expect(pushed, 1);
     verify(() => mockFileRepository.uploadNewVersion('existing-id', 'Shared.txt', any(), 13,
-            originDeviceId: 'dev-1'))
+            originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken')))
         .called(1);
   });
 
@@ -906,16 +997,16 @@ void main() {
         syncedAt: past,
       ),
     ]);
-    when(() => mockFileRepository.uploadNewVersion('stale-id', 'edited.txt', any(), 17, originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadNewVersion('stale-id', 'edited.txt', any(), 17, originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')))
         .thenThrow(dioError(404));
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'edited.txt', any(), 17, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'edited.txt', any(), 17, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenAnswer((_) async => 'fresh-id');
 
     final pushed = await scanner.scanOnce(tempDir.path);
 
     expect(pushed, 1);
     verify(() => mockFileRepository.uploadFile(any(that: isNull), 'edited.txt', any(), 17, any(),
-            originDeviceId: 'dev-1'))
+            originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .called(1);
     expect(mirror.row('stale-id'), isNull);
     expect(mirror.row('fresh-id')!.localPath, file.path);
@@ -926,15 +1017,15 @@ void main() {
     File(p.join(tempDir.path, 'bad.txt')).writeAsStringSync('will fail');
     File(p.join(tempDir.path, 'good.txt')).writeAsStringSync('will succeed');
     stateful([]);
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'bad.txt', any(), 9, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'bad.txt', any(), 9, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenThrow(Exception('network dropped'));
-    when(() => mockFileRepository.uploadFile(any(that: isNull), 'good.txt', any(), 12, any(), originDeviceId: any(named: 'originDeviceId')))
+    when(() => mockFileRepository.uploadFile(any(that: isNull), 'good.txt', any(), 12, any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .thenAnswer((_) async => 'good-id');
 
     final firstPushed = await scanner.scanOnce(tempDir.path);
     expect(firstPushed, 1); // only good.txt landed
     verify(() => mockFileRepository.uploadFile(any(that: isNull), 'good.txt', any(), 12, any(),
-            originDeviceId: 'dev-1'))
+            originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')))
         .called(1);
 
     // Second, immediate scan: bad.txt is still a "new file" from the
@@ -947,7 +1038,7 @@ void main() {
     final secondPushed = await scanner.scanOnce(tempDir.path);
 
     expect(secondPushed, 0);
-    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
   });
 
   test('tracked file touched (mtime bumped) but identical content: the hash '
@@ -972,7 +1063,7 @@ void main() {
     final pushed = await scanner.scanOnce(tempDir.path);
 
     expect(pushed, 0);
-    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
   });
 
   test('a tracked .DS_Store still present on disk is never deleted, even '
@@ -995,7 +1086,7 @@ void main() {
 
     expect(pushed, 0);
     verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
-    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
   });
 
   group('decision 2: case-insensitive path matching everywhere', () {
@@ -1027,7 +1118,7 @@ void main() {
 
       expect(pushed, 1);
       verify(() => mockFileRepository.renameFile('a-id', 'A.txt', originDeviceId: 'dev-1')).called(1);
-      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
       verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
       verifyNever(() => mockFileRepository.moveFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
       expect(mirror.row('a-id')!.localPath, newFile.path);
@@ -1060,14 +1151,14 @@ void main() {
             createdAt: now,
             updatedAt: now,
           ));
-      when(() => mockFileRepository.uploadNewVersion('a-id', 'A.txt', any(), 8, originDeviceId: any(named: 'originDeviceId')))
+      when(() => mockFileRepository.uploadNewVersion('a-id', 'A.txt', any(), 8, originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')))
           .thenAnswer((_) async {});
 
       // Scan 1: case-only rename only — no upload yet.
       final firstPushed = await scanner.scanOnce(tempDir.path);
       expect(firstPushed, 1);
       verify(() => mockFileRepository.renameFile('a-id', 'A.txt', originDeviceId: 'dev-1')).called(1);
-      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
       // The renamed row must keep the OLD hash/syncedAt (not stamped to
       // "now") — otherwise scan 2's change-detection pre-filter in
       // _uploadChangedFile reads sizeBytes-equal + not-modified-since-
@@ -1079,7 +1170,7 @@ void main() {
       final secondPushed = await scanner.scanOnce(tempDir.path);
       expect(secondPushed, 1);
       verify(() => mockFileRepository.uploadNewVersion('a-id', 'A.txt', any(), 8,
-              originDeviceId: 'dev-1'))
+              originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken')))
           .called(1);
       expect(mirror.row('a-id')!.localPath, newFile.path);
       expect(mirror.row('a-id')!.contentHash, hashOf('edited!!'));
@@ -1119,7 +1210,7 @@ void main() {
           .called(1);
       verifyNever(() => mockFileRepository.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
       verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
       // The child itself was never renamed — a directory rename moves it
       // along for free.
       verifyNever(() => mockFileRepository.renameFile('child-id', any(), originDeviceId: any(named: 'originDeviceId')));
@@ -1152,8 +1243,8 @@ void main() {
       final firstPushed = await scanner.scanOnce(tempDir.path);
       expect(firstPushed, 0);
       verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
       verifyNever(() => mockFileRepository.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
 
       scanner.debugClearBackoff();
@@ -1163,8 +1254,8 @@ void main() {
       final secondPushed = await scanner.scanOnce(tempDir.path);
       expect(secondPushed, 0);
       verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
       verifyNever(() => mockFileRepository.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
     });
   });
@@ -1202,7 +1293,7 @@ void main() {
       await scanner.scanOnce(tempDir.path);
 
       verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
       expect(mirror.row('file-a')!.localPath, oldPath);
     });
 
@@ -1333,7 +1424,7 @@ void main() {
     expect(pushed, 0);
     verifyNever(() => mockFileRepository.moveFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
     verifyNever(() => mockFileRepository.renameFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
-    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
     expect(mirror.row('file-g11'), isNull);
   });
 
@@ -1418,7 +1509,7 @@ void main() {
       when(() => mockDeviceRegistration.ensureRegistered())
           .thenThrow(Exception('SyncService unreachable'));
       when(() => mockFileRepository.uploadNewVersion('file-v2', 'tracked2.txt', any(), 17,
-              originDeviceId: 'dev-1'))
+              originDeviceId: 'dev-1', cancelToken: any(named: 'cancelToken')))
           .thenAnswer((_) async {});
 
       final firstScanPushed = await scanner.scanOnce(tempDir.path);
@@ -1471,7 +1562,7 @@ void main() {
       final pushed = await scanner.scanOnce(tempDir.path);
 
       expect(pushed, 0);
-      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
       verifyNever(() => mockFileRepository.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
       verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
       verifyNever(() => mockFileRepository.renameFile(any(), any(), originDeviceId: any(named: 'originDeviceId')));
@@ -1499,8 +1590,8 @@ void main() {
 
       expect(pushed, 0);
       verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
-      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
     });
 
     test(
@@ -1513,7 +1604,7 @@ void main() {
         final pushed = await scanner.scanOnce(tempDir.path);
 
         expect(pushed, 0);
-        verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId')));
+        verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
         verifyNever(() => mockFileRepository.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
       },
       // Only a case-sensitive filesystem can hold both spellings at once —
