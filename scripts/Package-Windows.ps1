@@ -55,7 +55,7 @@ DisplayLicense=
 FinishMessage=
 TargetName=$setup
 FriendlyName=zDrive Setup
-AppLaunched=powershell.exe -NoProfile -ExecutionPolicy Bypass -File Bootstrap.ps1
+AppLaunched=powershell.exe -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File Bootstrap.ps1
 PostInstallCmd=<None>
 AdminQuietInstCmd=
 UserQuietInstCmd=
@@ -87,5 +87,3 @@ finally {
         Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-
-

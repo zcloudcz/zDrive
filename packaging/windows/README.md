@@ -40,3 +40,16 @@ from the same invocation; the bootstrapper rejects any differently hashed ZIP.
 Test install, upgrade and uninstall in a disposable Windows account or VM; do not
 run these smoke tests against a real user's profile.
 
+
+Setup displays a Windows dialog with download, verification, extraction and
+installation stages, an animated progress bar, and a Close button after success
+or failure. It does not wait for input in a hidden console. Downloads time out
+after ten minutes. Run the isolated file-operation smoke test with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/packaging/Windows-Installer.Smoke.ps1
+```
+
+The test exercises installation, upgrade, running-app rejection, incomplete
+payload rejection and uninstall using real temporary files. Registry entries
+and COM shortcuts are mocked; the real profile remains untouched.
