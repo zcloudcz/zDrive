@@ -830,7 +830,7 @@ class LocalChangeScanner {
 
   // Each worker claims one item synchronously before awaiting. Future.wait
   // drains every worker even if one fails, before the delete phase can start.
-  // At most three temporary copies exist, and every copy is removed in finally.
+  // At most three snapshots are active; cleanup is attempted after each upload.
   Future<int> _uploadInParallel<T>(
     List<T> items,
     String Function(T) pathOf,
@@ -864,7 +864,14 @@ class LocalChangeScanner {
           _recordFailure(path, e, st);
           progress?.finishFile(path, failed: true);
         } finally {
-          if (staging != null) await staging.delete(recursive: true);
+          if (staging != null) {
+            try {
+              await staging.delete(recursive: true);
+            } on FileSystemException catch (e, st) {
+              log('Could not remove upload snapshot',
+                  error: e, stackTrace: st, name: 'LocalChangeScanner');
+            }
+          }
         }
       }
     }
