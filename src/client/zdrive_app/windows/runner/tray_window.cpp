@@ -41,9 +41,29 @@ void TrayWindow::Restore() {
 void TrayWindow::ShowMenu() {
   HMENU menu = CreatePopupMenu();
   if (!menu) return;
-  AppendMenuW(menu, MF_STRING, kOpenCommand, L"&Otev\u0159\u00edt zDrive");
+  const wchar_t* open = L"&Open zDrive";
+  const wchar_t* exit = L"E&xit";
+  const LANGID language = GetUserDefaultUILanguage();
+  switch (PRIMARYLANGID(language)) {
+    case LANG_CZECH: open = L"&Otev\u0159\u00edt zDrive"; exit = L"&Ukon\u010dit"; break;
+    case LANG_SLOVAK: open = L"&Otvori\u0165 zDrive"; exit = L"&Ukon\u010di\u0165"; break;
+    case LANG_SPANISH: open = L"&Abrir zDrive"; exit = L"&Salir"; break;
+    case LANG_FINNISH: open = L"&Avaa zDrive"; exit = L"&Lopeta"; break;
+    case LANG_SWEDISH: open = L"&\u00d6ppna zDrive"; exit = L"&Avsluta"; break;
+    case LANG_GERMAN: open = L"zDrive &\u00f6ffnen"; exit = L"&Beenden"; break;
+    case LANG_FRENCH: open = L"&Ouvrir zDrive"; exit = L"&Quitter"; break;
+    case LANG_DUTCH: open = L"zDrive &openen"; exit = L"&Afsluiten"; break;
+    case LANG_JAPANESE: open = L"zDrive\u3092\u958b\u304f"; exit = L"\u7d42\u4e86"; break;
+    case LANG_CHINESE:
+      if (SUBLANGID(language) == SUBLANG_CHINESE_SIMPLIFIED ||
+          SUBLANGID(language) == SUBLANG_CHINESE_SINGAPORE) {
+        open = L"\u6253\u5f00 zDrive"; exit = L"\u9000\u51fa";
+      }
+      break;
+  }
+  AppendMenuW(menu, MF_STRING, kOpenCommand, open);
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, kExitCommand, L"&Ukon\u010dit");
+  AppendMenuW(menu, MF_STRING, kExitCommand, exit);
   SetMenuDefaultItem(menu, kOpenCommand, FALSE);
   POINT position{};
   GetCursorPos(&position);
