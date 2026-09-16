@@ -3,6 +3,7 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -25,6 +26,7 @@ class FlutterWindow : public Win32Window {
 
  private:
   std::unique_ptr<TrayWindow> tray_window_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> lifecycle_channel_;
 
   // The project to run.
   flutter::DartProject project_;

@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -30,6 +31,24 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  lifecycle_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "zdrive/windows_lifecycle",
+          &flutter::StandardMethodCodec::GetInstance());
+  lifecycle_channel_->SetMethodCallHandler(
+      [window = GetHandle()](const auto& call, auto result) {
+        if (call.method_name() != "quit") {
+          result->NotImplemented();
+          return;
+        }
+        // A prepared update uses explicit Exit, not WM_CLOSE's hide-to-tray.
+        if (!PostMessageW(window, WM_COMMAND, TrayWindow::kExitCommand, 0)) {
+          result->Error("quit_failed", "Could not request application exit.");
+          return;
+        }
+        result->Success();
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -45,6 +64,10 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (lifecycle_channel_) {
+    lifecycle_channel_->SetMethodCallHandler(nullptr);
+    lifecycle_channel_ = nullptr;
+  }
   tray_window_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
