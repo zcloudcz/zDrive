@@ -8,6 +8,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_models.dart';
+import '../domain/sync_progress.dart';
 import 'sync_bloc.dart';
 
 /// The sync status page. Reads the ancestor [SyncBloc] provided once for the
@@ -99,37 +100,28 @@ class _SyncLoadedBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
-    // Nothing has ever synced: no registered devices. This is the only case
-    // with nothing to list, so it is the only case that gets a full-page
-    // message instead of the device list below — a fresh account must not
-    // be told "up to date" before anything has happened.
-    if (state.devices.isEmpty) {
-      return Column(
-        children: [
-          _FolderStatusTile(state: state),
-          Expanded(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.devices_other,
-                      size: 64, color: Theme.of(context).colorScheme.outline),
-                  const SizedBox(height: 16),
-                  Text(l10n.syncNoDevices, style: Theme.of(context).textTheme.titleMedium),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
     return ListView(
       children: [
         _FolderStatusTile(state: state),
+        if (state.isPulling && state.progress != null)
+          _SyncProgressView(progress: state.progress!),
+        if (state.failedFiles > 0)
+          ListTile(
+            leading: Icon(
+              Icons.warning_amber,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            title: Text(l10n.syncProgressFailures(state.failedFiles)),
+          ),
+        if (state.devices.isEmpty)
+          ListTile(
+            leading: const Icon(Icons.devices_other),
+            title: Text(l10n.syncNoDevices),
+          ),
         if (state.failedEvents.isNotEmpty) ...[
           _SectionHeader(title: l10n.syncSkippedItems),
-          for (final failed in state.failedEvents) _FailedEventTile(failed: failed),
+          for (final failed in state.failedEvents)
+            _FailedEventTile(failed: failed),
         ],
         _SectionHeader(title: l10n.syncDevices),
         for (final device in state.devices) _DeviceTile(device: device),
@@ -149,10 +141,9 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       child: Text(
         title,
-        style: Theme.of(context)
-            .textTheme
-            .titleSmall
-            ?.copyWith(color: Theme.of(context).colorScheme.primary),
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          color: Theme.of(context).colorScheme.primary,
+        ),
       ),
     );
   }
@@ -170,7 +161,9 @@ class _DeviceTile extends StatelessWidget {
       leading: const Icon(Icons.devices),
       title: Text(device.name),
       subtitle: Text(
-        device.lastSyncAt != null ? timeago.format(device.lastSyncAt!) : l10n.syncNeverSynced,
+        device.lastSyncAt != null
+            ? timeago.format(device.lastSyncAt!)
+            : l10n.syncNeverSynced,
       ),
     );
   }
@@ -215,7 +208,10 @@ class _FolderStatusTile extends StatelessWidget {
 
     if (state.pullError != null) {
       return ListTile(
-        leading: Icon(Icons.sync_problem, color: Theme.of(context).colorScheme.error),
+        leading: Icon(
+          Icons.sync_problem,
+          color: Theme.of(context).colorScheme.error,
+        ),
         title: Text(state.pullError!),
         subtitle: Text(state.syncFolderPath!),
       );
@@ -225,16 +221,22 @@ class _FolderStatusTile extends StatelessWidget {
     // PR #12 review) is not "up to date" — that line must not claim more
     // than pull actually delivered. The skipped-items section below the
     // fold has the detail; this just says something needs a look.
-    if (state.failedEvents.isNotEmpty) {
+    if (state.failedEvents.isNotEmpty || state.failedFiles > 0) {
       return ListTile(
-        leading: Icon(Icons.warning_amber, color: Theme.of(context).colorScheme.error),
+        leading: Icon(
+          Icons.warning_amber,
+          color: Theme.of(context).colorScheme.error,
+        ),
         title: Text(l10n.syncItemsSkipped),
         subtitle: Text(state.syncFolderPath!),
       );
     }
 
     return ListTile(
-      leading: Icon(Icons.check_circle_outline, color: Theme.of(context).colorScheme.primary),
+      leading: Icon(
+        Icons.check_circle_outline,
+        color: Theme.of(context).colorScheme.primary,
+      ),
       title: Text(l10n.syncDeviceUpToDate),
       subtitle: Text(state.syncFolderPath!),
     );
@@ -249,7 +251,8 @@ class _FolderStatusTile extends StatelessWidget {
     // folder that already has content in it is still worth a heads-up
     // before syncing starts writing into it — the user may not have
     // intended to point sync at, say, their whole Documents folder.
-    final isNonEmpty = await Directory(path).exists() &&
+    final isNonEmpty =
+        await Directory(path).exists() &&
         !(await Directory(path).list().isEmpty);
     if (isNonEmpty && context.mounted) {
       final proceed = await showDialog<bool>(
@@ -285,9 +288,102 @@ class _FailedEventTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
+      leading: Icon(
+        Icons.error_outline,
+        color: Theme.of(context).colorScheme.error,
+      ),
       title: Text(failed.fileId),
       subtitle: Text(failed.reason),
     );
+  }
+}
+
+class _SyncProgressView extends StatelessWidget {
+  final SyncProgress progress;
+  const _SyncProgressView({required this.progress});
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final phaseLabel = switch (progress.phase) {
+      SyncPhase.connecting => l10n.syncConnecting,
+      SyncPhase.downloading => l10n.syncDownloading,
+      SyncPhase.scanning => l10n.syncScanning,
+      SyncPhase.hashing => l10n.syncHashing,
+      SyncPhase.uploading => l10n.syncUploading,
+      SyncPhase.deleting => l10n.syncDeleting,
+    };
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(phaseLabel, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          if (progress.discovering)
+            Text(l10n.syncDiscovering)
+          else if (progress.totalFiles > 0)
+            Text(
+              l10n.syncProgressCounts(
+                progress.completedFiles,
+                progress.totalFiles,
+                progress.remainingFiles,
+              ),
+            ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: progress.discovering || progress.totalFiles == 0
+                ? null
+                : ((progress.completedFiles + progress.failedFiles) /
+                          progress.totalFiles)
+                      .clamp(0.0, 1.0),
+          ),
+          for (final file in progress.activeFiles)
+            _ActiveSyncFile(key: ValueKey(file.key), file: file),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActiveSyncFile extends StatelessWidget {
+  final SyncFileProgress file;
+  const _ActiveSyncFile({super.key, required this.file});
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final total = file.totalBytes;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(file.path, maxLines: 2, overflow: TextOverflow.ellipsis),
+          Text(
+            total == null
+                ? _bytes(file.transferredBytes)
+                : l10n.syncTransferredBytes(
+                    _bytes(file.transferredBytes),
+                    _bytes(total),
+                    _bytes((total - file.transferredBytes).clamp(0, total)),
+                  ),
+          ),
+          const SizedBox(height: 4),
+          LinearProgressIndicator(
+            value: total == null || total == 0
+                ? null
+                : (file.transferredBytes / total).clamp(0.0, 1.0),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _bytes(int value) {
+    if (value < 1024) return '$value B';
+    if (value < 1024 * 1024) return '${(value / 1024).toStringAsFixed(1)} KiB';
+    if (value < 1024 * 1024 * 1024) {
+      return '${(value / (1024 * 1024)).toStringAsFixed(1)} MiB';
+    }
+    return '${(value / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB';
   }
 }

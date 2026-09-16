@@ -12,6 +12,7 @@ import '../data/sync_coordinator.dart';
 import '../data/sync_remote_data_source.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_models.dart';
+import '../domain/sync_progress.dart';
 
 // --- Events ---
 
@@ -67,6 +68,8 @@ final class SyncLoaded extends SyncState {
   final bool isPulling;
   final String? pullError;
   final List<SyncFailedEvent> failedEvents;
+  final SyncProgress? progress;
+  final int failedFiles;
 
   const SyncLoaded({
     required this.devices,
@@ -74,6 +77,8 @@ final class SyncLoaded extends SyncState {
     this.isPulling = false,
     this.pullError,
     this.failedEvents = const [],
+    this.progress,
+    this.failedFiles = 0,
   });
 
   SyncLoaded copyWith({
@@ -82,6 +87,8 @@ final class SyncLoaded extends SyncState {
     bool? isPulling,
     String? Function()? pullError,
     List<SyncFailedEvent>? failedEvents,
+    SyncProgress? Function()? progress,
+    int? failedFiles,
   }) {
     return SyncLoaded(
       devices: devices ?? this.devices,
@@ -89,11 +96,21 @@ final class SyncLoaded extends SyncState {
       isPulling: isPulling ?? this.isPulling,
       pullError: pullError != null ? pullError() : this.pullError,
       failedEvents: failedEvents ?? this.failedEvents,
+      progress: progress != null ? progress() : this.progress,
+      failedFiles: failedFiles ?? this.failedFiles,
     );
   }
 
   @override
-  List<Object?> get props => [devices, syncFolderPath, isPulling, pullError, failedEvents];
+  List<Object?> get props => [
+    devices,
+    syncFolderPath,
+    isPulling,
+    pullError,
+    failedEvents,
+    progress,
+    failedFiles,
+  ];
 }
 
 final class SyncError extends SyncState {
@@ -169,16 +186,17 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     required RemoteFileChangeNotifier remoteChangeNotifier,
     required String userId,
     Stream<FileSystemEvent> Function(String path)? watch,
-  })  : _dataSource = dataSource,
-        _syncCoordinator = syncCoordinator,
-        _pullService = pullService,
-        _preferences = preferences,
-        _remoteChangeNotifier = remoteChangeNotifier,
-        _userId = userId,
-        // Defaults to a real recursive folder watch; tests inject a fake so
-        // they can drive events without touching the filesystem.
-        _watchFolder = watch ?? ((path) => Directory(path).watch(recursive: true)),
-        super(const SyncInitial()) {
+  }) : _dataSource = dataSource,
+       _syncCoordinator = syncCoordinator,
+       _pullService = pullService,
+       _preferences = preferences,
+       _remoteChangeNotifier = remoteChangeNotifier,
+       _userId = userId,
+       // Defaults to a real recursive folder watch; tests inject a fake so
+       // they can drive events without touching the filesystem.
+       _watchFolder =
+           watch ?? ((path) => Directory(path).watch(recursive: true)),
+       super(const SyncInitial()) {
     on<LoadSyncStatus>(_onLoadSyncStatus);
     on<SyncFolderChosen>(_onSyncFolderChosen);
     on<PullRequested>(_onPullRequested);
@@ -229,7 +247,9 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     _syncRequestedWhileRunning = false;
     try {
       final current = state;
-      final previousPath = current is SyncLoaded ? current.syncFolderPath : _preferences.syncFolderPath;
+      final previousPath = current is SyncLoaded
+          ? current.syncFolderPath
+          : _preferences.syncFolderPath;
       if (previousPath != null && previousPath != event.path) {
         // A different folder than the one already configured starts sync
         // over from a clean slate — see resetForNewFolder's doc comment. This
@@ -274,7 +294,14 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         // separate event) has gotten by this point — otherwise it could still
         // see isPulling: true and skip the new folder's first sync entirely
         // (PR #16 review round 2, finding 4).
-        emit(latest.copyWith(syncFolderPath: event.path, isPulling: false));
+        emit(
+          latest.copyWith(
+            syncFolderPath: event.path,
+            isPulling: false,
+            progress: () => null,
+            failedFiles: 0,
+          ),
+        );
       } else {
         final loaded = await _fetchLoadedState();
         // Same close()-during-await guard as above (see its comment), for
@@ -316,10 +343,8 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     }
   }
 
-  Future<void> _onPullRequested(
-    PullRequested event,
-    Emitter<SyncState> emit,
-  ) => _runSync(emit);
+  Future<void> _onPullRequested(PullRequested event, Emitter<SyncState> emit) =>
+      _runSync(emit);
 
   /// The guarded pull-once routine shared by [_onPullRequested] and
   /// [_onSyncFolderChosen] (PR #16 review round 2, finding 4) — extracted so
@@ -357,9 +382,34 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     final generation = _syncGeneration;
     final path = current.syncFolderPath!;
 
-    emit(current.copyWith(isPulling: true, pullError: () => null));
+    emit(
+      current.copyWith(
+        isPulling: true,
+        pullError: () => null,
+        progress: () => null,
+        failedFiles: 0,
+      ),
+    );
+    final phaseFailures = <SyncPhase, int>{};
     try {
-      final result = await _syncCoordinator.syncOnce(path);
+      final result = await _syncCoordinator.syncOnce(
+        path,
+        onProgress: (progress) {
+          if (generation != _syncGeneration || emit.isDone || isClosed) return;
+          final latest = state;
+          if (latest is! SyncLoaded || latest.syncFolderPath != path) return;
+          phaseFailures[progress.phase] = progress.failedFiles;
+          emit(
+            latest.copyWith(
+              progress: () => progress,
+              failedFiles: phaseFailures.values.fold<int>(
+                0,
+                (sum, count) => sum + count,
+              ),
+            ),
+          );
+        },
+      );
       // The Files tab (FileBrowserBloc) mirrors server state and otherwise
       // never refreshes after its initial load (see RemoteFileChangeNotifier's
       // doc comment) — a run that actually pulled or pushed something means
@@ -369,7 +419,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       if (result.pulled > 0 || result.pushed > 0) {
         _remoteChangeNotifier.notifyChanged();
       }
-      if (generation != _syncGeneration) {
+      if (generation != _syncGeneration || emit.isDone || isClosed) {
         // The folder changed via SyncFolderChosen, or this bloc closed,
         // while this run was pulling — a newer run already owns the sync UI
         // state, so this tail must not overwrite it with results for a
@@ -377,14 +427,17 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         // calls below (PR #16 review round 4, N1): a stale run has no use
         // for a fresh device list or failed-events count it is about to
         // throw away, so there is no reason to spend those requests.
-        log('stale sync run for $path finished after folder change; dropping result', name: 'SyncBloc');
+        log(
+          'stale sync run for $path finished after folder change; dropping result',
+          name: 'SyncBloc',
+        );
         return;
       }
       // A first pull registers the device, so the device list can now
       // include this installation — refresh it rather than assuming.
       final devices = await _dataSource.getDevices();
       final failedEvents = await _pullService.getFailedEvents();
-      if (generation != _syncGeneration) {
+      if (generation != _syncGeneration || emit.isDone || isClosed) {
         // A second, independent check — the one above only proves this run
         // wasn't already stale before spending the two requests just made;
         // it says nothing about whether a folder switch landed *during*
@@ -392,25 +445,40 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         // let this tail emit the OLD folder's device list and failed-events
         // snapshot (and isPulling: false) into whatever the NEW folder's own
         // run has since put in state (PR #16 review round 5, Codex C2).
-        log('stale sync run for $path finished after folder change; dropping result', name: 'SyncBloc');
+        log(
+          'stale sync run for $path finished after folder change; dropping result',
+          name: 'SyncBloc',
+        );
         return;
       }
       final latest = state;
       if (latest is SyncLoaded) {
-        emit(latest.copyWith(
-          devices: devices.map(SyncDevice.fromJson).toList(),
-          isPulling: false,
-          failedEvents: failedEvents,
-        ));
+        emit(
+          latest.copyWith(
+            devices: devices.map(SyncDevice.fromJson).toList(),
+            isPulling: false,
+            failedEvents: failedEvents,
+            progress: () => null,
+          ),
+        );
       }
     } catch (e) {
-      if (generation != _syncGeneration) {
-        log('stale sync run for $path failed after folder change; dropping error', name: 'SyncBloc');
+      if (generation != _syncGeneration || emit.isDone || isClosed) {
+        log(
+          'stale sync run for $path failed after folder change; dropping error',
+          name: 'SyncBloc',
+        );
         return;
       }
       final latest = state;
       if (latest is SyncLoaded) {
-        emit(latest.copyWith(isPulling: false, pullError: () => e.toString()));
+        emit(
+          latest.copyWith(
+            isPulling: false,
+            pullError: () => e.toString(),
+            progress: () => null,
+          ),
+        );
       }
     } finally {
       // In `finally` so it also covers the stale-generation returns above and
@@ -447,7 +515,10 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(_pollInterval, (_) => add(const PullRequested()));
+    _pollTimer = Timer.periodic(
+      _pollInterval,
+      (_) => add(const PullRequested()),
+    );
   }
 
   /// Subscribes to filesystem change events for [path], debounced so a burst
@@ -461,13 +532,17 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       _watchSubscription = _watchFolder(path).listen(
         (_) {
           _watchDebounceTimer?.cancel();
-          _watchDebounceTimer = Timer(_watchDebounce, () => add(const PullRequested()));
+          _watchDebounceTimer = Timer(
+            _watchDebounce,
+            () => add(const PullRequested()),
+          );
         },
         // Recursive watching is not supported on every platform (e.g.
         // Linux throws asynchronously via the stream rather than on this
         // call) — not fatal either way, since the poll timer above is the
         // fallback regardless of why the watch failed.
-        onError: (Object e) => log('sync folder watch failed: $path', error: e, name: 'SyncBloc'),
+        onError: (Object e) =>
+            log('sync folder watch failed: $path', error: e, name: 'SyncBloc'),
       );
     } catch (e) {
       log('failed to watch sync folder: $path', error: e, name: 'SyncBloc');

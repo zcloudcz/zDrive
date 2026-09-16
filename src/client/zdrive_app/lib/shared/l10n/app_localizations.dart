@@ -619,6 +619,70 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The request could not be completed.'**
   String get errorRequestFailed;
+
+  /// No description provided for @syncConnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting…'**
+  String get syncConnecting;
+
+  /// No description provided for @syncDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading'**
+  String get syncDownloading;
+
+  /// No description provided for @syncScanning.
+  ///
+  /// In en, this message translates to:
+  /// **'Scanning folder'**
+  String get syncScanning;
+
+  /// No description provided for @syncHashing.
+  ///
+  /// In en, this message translates to:
+  /// **'Comparing file contents'**
+  String get syncHashing;
+
+  /// No description provided for @syncUploading.
+  ///
+  /// In en, this message translates to:
+  /// **'Uploading'**
+  String get syncUploading;
+
+  /// No description provided for @syncDeleting.
+  ///
+  /// In en, this message translates to:
+  /// **'Applying deletions'**
+  String get syncDeleting;
+
+  /// No description provided for @syncDiscovering.
+  ///
+  /// In en, this message translates to:
+  /// **'Discovering items — total is not known yet'**
+  String get syncDiscovering;
+
+  /// No description provided for @syncProgressCounts.
+  ///
+  /// In en, this message translates to:
+  /// **'{completed} / {total} items completed · {remaining} remaining'**
+  String syncProgressCounts(int completed, int total, int remaining);
+
+  /// No description provided for @syncProgressFailures.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} items failed'**
+  String syncProgressFailures(int count);
+
+  /// No description provided for @syncTransferredBytes.
+  ///
+  /// In en, this message translates to:
+  /// **'{transferred} / {total} · {remaining} remaining'**
+  String syncTransferredBytes(
+    String transferred,
+    String total,
+    String remaining,
+  );
 }
 
 class _AppLocalizationsDelegate
