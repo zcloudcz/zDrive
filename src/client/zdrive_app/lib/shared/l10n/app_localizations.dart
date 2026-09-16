@@ -689,6 +689,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Known items: {completed} / {total} completed · {remaining} remaining'**
   String syncKnownProgressCounts(int completed, int total, int remaining);
+
+  /// No description provided for @updateRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry update'**
+  String get updateRetry;
+
+  /// No description provided for @updateRestarting.
+  ///
+  /// In en, this message translates to:
+  /// **'Finishing synchronization before restarting…'**
+  String get updateRestarting;
+
+  /// No description provided for @updateRestart.
+  ///
+  /// In en, this message translates to:
+  /// **'Restart and update'**
+  String get updateRestart;
+
+  /// No description provided for @updateDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading update: {percent}%'**
+  String updateDownloading(int percent);
+
+  /// No description provided for @updateReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Update {version} is ready. It will install on the next start.'**
+  String updateReady(String version);
+
+  /// No description provided for @updateFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic update failed. You can keep using zDrive and try again.'**
+  String get updateFailed;
 }
 
 class _AppLocalizationsDelegate

@@ -12,12 +12,16 @@ function gh {
         return '[[{"tag_name":"v0.1.0","draft":false,"assets":[{"name":"zDrive-0.1.0-windows-x64.zip"},{"name":"zDrive-0.1.0-Setup.exe"}]}],[{"tag_name":"v0.2.0","draft":false,"assets":[{"name":"zDrive-0.2.0-windows-x64.zip"},{"name":"zDrive-0.2.0-Setup.exe"}]},{"tag_name":"v0.3.0","draft":true,"assets":[{"name":"zDrive-0.3.0-windows-x64.zip"},{"name":"zDrive-0.3.0-Setup.exe"}]},{"tag_name":"v0.4.0","prerelease":true,"assets":[{"name":"zDrive-0.4.0-windows-x64.zip"},{"name":"zDrive-0.4.0-Setup.exe"}]},{"tag_name":"v0.5.0","assets":[]}]]'
     }
     $global:zDriveDownloadTestCalls += $args[2]
+    $releaseVersion = $args[2].TrimStart('v')
+    [IO.File]::WriteAllText((Join-Path $fixture "zDrive-$releaseVersion-windows-x64.zip"), 'fixture payload')
     if ($global:zDriveDownloadTestFail) { $global:LASTEXITCODE = 1 }
 }
 try {
     $include = Join-Path $PSScriptRoot 'Include-WindowsDownloads.ps1'
     & $include -Repository zcloudcz/zDrive -Version 0.2.0 -OutputDirectory $fixture
     if (($global:zDriveDownloadTestCalls -join ',') -ne 'v0.1.0,v0.2.0') { throw 'Historical versions were not retained or a draft/prerelease was included.' }
+    $feed = Get-Content -LiteralPath (Join-Path $fixture 'windows-latest.json') -Raw | ConvertFrom-Json
+    if ($feed.version -ne '0.2.0' -or $feed.schemaVersion -ne 1 -or $feed.sizeBytes -ne 15 -or $feed.sha256 -ne (Get-FileHash (Join-Path $fixture 'zDrive-0.2.0-windows-x64.zip')).Hash.ToLowerInvariant()) { throw 'Invalid update feed.' }
     $rejected = $false
     try { & $include -Repository zcloudcz/zDrive -Version 0.4.0 -OutputDirectory $fixture }
     catch { $rejected = $_.Exception.Message -like '*incomplete or missing*' }

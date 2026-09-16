@@ -150,5 +150,13 @@
         "type": "int"
       }
     }
-  }
+  },
+
+  "updateFailed": "Automatická aktualizace se nezdařila. zDrive můžete dál používat a zkusit to znovu.",
+  "updateDownloading": "Stahování aktualizace: {percent}%",
+  "updateRetry": "Zkusit aktualizaci znovu",
+  "updateRestart": "Restartovat a aktualizovat",
+  "updateReady": "Aktualizace {version} je připravena. Nainstaluje se při příštím spuštění.",
+  "updateRestarting": "Dokončuji synchronizaci před restartováním…"
+
 }

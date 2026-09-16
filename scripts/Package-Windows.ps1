@@ -31,6 +31,8 @@ try {
         Copy-Item -LiteralPath (Join-Path $repository "packaging/windows/$file") -Destination $package
     }
     Set-Content -LiteralPath (Join-Path $package 'version.txt') -Value $Version -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $app 'version.txt') -Value $Version -Encoding ASCII
+    Copy-Item -LiteralPath (Join-Path $repository 'packaging/windows/Apply-Update.ps1') -Destination $app
     $archive = Join-Path $output "zDrive-$Version-windows-x64.zip"
     Compress-Archive -Path (Join-Path $package '*') -DestinationPath $archive -CompressionLevel Optimal -Force
     $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()

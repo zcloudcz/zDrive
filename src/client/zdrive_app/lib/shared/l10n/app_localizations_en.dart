@@ -322,4 +322,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String syncKnownProgressCounts(int completed, int total, int remaining) {
     return 'Known items: $completed / $total completed · $remaining remaining';
   }
+
+  @override
+  String get updateRetry => 'Retry update';
+
+  @override
+  String get updateRestarting => 'Finishing synchronization before restarting…';
+
+  @override
+  String get updateRestart => 'Restart and update';
+
+  @override
+  String updateDownloading(int percent) {
+    return 'Downloading update: $percent%';
+  }
+
+  @override
+  String updateReady(String version) {
+    return 'Update $version is ready. It will install on the next start.';
+  }
+
+  @override
+  String get updateFailed =>
+      'Automatic update failed. You can keep using zDrive and try again.';
 }

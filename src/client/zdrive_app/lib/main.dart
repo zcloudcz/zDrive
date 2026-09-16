@@ -13,17 +13,41 @@ import 'shared/router/app_router.dart';
 import 'shared/theme/app_theme.dart';
 import 'shared/theme/theme_cubit.dart';
 import 'core/storage/app_preferences.dart';
+import 'core/update/auto_update.dart';
+import 'core/update/update_banner.dart';
+import 'core/update/update_controller.dart';
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  final updater = await createAutoUpdater(
+    drain: () => getIt<SyncCoordinator>().endSession(),
+    resume: () async {
+      final owner = getIt<AppPreferences>().syncOwnerUserId;
+      if (owner != null) await getIt<SyncCoordinator>().startSession(owner);
+    },
+  );
+  if (updater != null) {
+    runApp(
+      const MaterialApp(
+        home: Scaffold(body: Center(child: CircularProgressIndicator())),
+      ),
+    );
+    if (await updater.initialize(
+      skipApply: args.contains('--skip-auto-update-once'),
+    )) {
+      return;
+    }
+  }
   await Hive.initFlutter();
   await configureDependencies();
   await getIt.allReady();
-  runApp(const ZDriveApp());
+  runApp(ZDriveApp(updater: updater));
+  updater?.start();
 }
 
 class ZDriveApp extends StatelessWidget {
-  const ZDriveApp({super.key});
+  const ZDriveApp({super.key, this.updater});
+  final UpdateController? updater;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +61,9 @@ class ZDriveApp extends StatelessWidget {
       // SyncCoordinator>() would construct PullSyncService/
       // LocalChangeScanner, whose constructors read Platform.isWindows,
       // which throws on web (PR #16 review round 2, blocking finding 1).
-      beforeLogout: isDesktopSyncSupported ? () => getIt<SyncCoordinator>().endSession() : null,
+      beforeLogout: isDesktopSyncSupported
+          ? () => getIt<SyncCoordinator>().endSession()
+          : null,
     )..add(const CheckAuthStatus());
 
     final router = createRouter(authBloc);
@@ -45,9 +71,7 @@ class ZDriveApp extends StatelessWidget {
     return MultiBlocProvider(
       providers: [
         BlocProvider.value(value: authBloc),
-        BlocProvider(
-          create: (_) => ThemeCubit(getIt<AppPreferences>()),
-        ),
+        BlocProvider(create: (_) => ThemeCubit(getIt<AppPreferences>())),
       ],
       child: BlocBuilder<ThemeCubit, ThemeMode>(
         builder: (context, themeMode) {
@@ -60,6 +84,10 @@ class ZDriveApp extends StatelessWidget {
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,
             routerConfig: router,
+            builder: (context, child) => UpdateBanner(
+              controller: updater,
+              child: child ?? const SizedBox.shrink(),
+            ),
           );
         },
       ),
