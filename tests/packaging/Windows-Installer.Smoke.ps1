@@ -7,6 +7,7 @@ $originalLocalAppData = $env:LOCALAPPDATA
 $global:zDriveTestRegistry = @{}
 $global:zDriveTestShortcuts = @{}
 $global:zDriveTestRunningPath = $null
+$global:zDriveTestFailure = $null
 function Assert($condition, $message) { if (-not $condition) { throw $message } }
 function Get-Process { param($Name, $ErrorAction); if ($global:zDriveTestRunningPath) { [pscustomobject]@{ Path = $global:zDriveTestRunningPath } } }
 function New-Item {
@@ -18,6 +19,26 @@ function New-ItemProperty {
     param($Path, $Name, $Value, $PropertyType, [switch]$Force)
     Assert ($Path -eq 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/zDrive') 'Unexpected registry key'
     $global:zDriveTestRegistry[$Name] = $Value
+}
+function Copy-Item {
+    param($Path, $LiteralPath, $Destination, [switch]$Recurse, [switch]$Force)
+    if ($Destination -like '*.stage-*') {
+        if ($global:zDriveTestFailure -eq 'copy') {
+            Set-Content -LiteralPath (Join-Path $Destination 'zdrive_app.exe') -Value 'incomplete copy'
+            throw 'Injected copy failure'
+        }
+        if ($global:zDriveTestFailure -eq 'opened') { $global:zDriveTestRunningPath = Join-Path $env:LOCALAPPDATA 'Programs/zDrive/releases/0.2.0/zdrive_app.exe' }
+    }
+    if ($LiteralPath) { Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Recurse:$Recurse -Force:$Force }
+    else { Microsoft.PowerShell.Management\Copy-Item -Path $Path -Destination $Destination -Recurse:$Recurse -Force:$Force }
+}
+function Move-Item {
+    param($LiteralPath, $Destination)
+    foreach ($path in @($LiteralPath, $Destination)) {
+        Assert ([IO.Path]::GetFullPath($path).StartsWith($fixture.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) 'Unsafe test move'
+    }
+    if ($LiteralPath -like '*.stage-*' -and $global:zDriveTestFailure -eq 'swap') { throw 'Injected swap failure' }
+    Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination
 }
 function New-Object {
     param($ComObject)
@@ -66,6 +87,26 @@ try {
     Assert ($global:zDriveTestRegistry.DisplayVersion -eq '0.2.0') 'Upgrade registration failed'
     foreach ($target in $global:zDriveTestShortcuts.Values) { Assert ($target -like '*releases*0.2.0*zdrive_app.exe') 'Shortcut not upgraded' }
     Assert ((Get-Content -LiteralPath (Join-Path $root 'releases/0.2.0/zdrive_app.exe')) -eq 'version two fixture') 'Upgrade did not copy new binary'
+    $installedExe = Join-Path $root 'releases/0.2.0/zdrive_app.exe'
+    Set-Content -LiteralPath (Join-Path $package 'app/zdrive_app.exe') -Value 'reinstalled version two'
+    $shortcutsBefore = @{} + $global:zDriveTestShortcuts
+    foreach ($failure in @('copy', 'swap', 'opened')) {
+        $global:zDriveTestFailure = $failure
+        try { & (Join-Path $package 'Install.ps1'); throw 'Reinstall failure was not detected' }
+        catch { Assert ($_.Exception.Message -like 'Injected * failure' -or $_.Exception.Message -like 'Close zDrive*') "Unexpected reinstall error: $_" }
+        $global:zDriveTestFailure = $null
+        $global:zDriveTestRunningPath = $null
+        Assert ((Get-Content -LiteralPath $installedExe) -eq 'version two fixture') "Failed $failure reinstall damaged original executable"
+        foreach ($shortcut in $shortcutsBefore.Keys) {
+            Assert ($global:zDriveTestShortcuts[$shortcut] -eq $shortcutsBefore[$shortcut]) "Failed $failure reinstall changed shortcut"
+            Assert (Test-Path -LiteralPath $global:zDriveTestShortcuts[$shortcut]) 'Shortcut target no longer exists'
+        }
+        Assert (@(Get-ChildItem -LiteralPath (Join-Path $root 'releases') -Force | Where-Object Name -like '.*').Count -eq 0) 'Failure left staging or backup directories'
+        Assert ($global:zDriveTestRegistry.DisplayVersion -eq '0.2.0') 'Failed reinstall changed registration'
+    }
+    & (Join-Path $package 'Install.ps1')
+    Assert ((Get-Content -LiteralPath $installedExe) -eq 'reinstalled version two') 'Same-version reinstall did not update executable'
+    Assert (@(Get-ChildItem -LiteralPath (Join-Path $root 'releases') -Force | Where-Object Name -like '.*').Count -eq 0) 'Successful reinstall left staging or backup directories'
     Remove-Item -LiteralPath (Join-Path $package 'app/flutter_windows.dll') -Force
     Set-Content -LiteralPath (Join-Path $package 'version.txt') -Value '0.3.0'
     try { & (Join-Path $package 'Install.ps1'); throw 'Incomplete package was accepted' }
@@ -77,7 +118,7 @@ try {
     Assert ($global:zDriveTestRegistry.Count -eq 0) 'Uninstall left registry entry'
     Assert ($global:zDriveTestShortcuts.Count -eq 0) 'Uninstall left shortcuts'
     Assert ((Get-Content -LiteralPath $userData) -eq 'preserve me') 'Uninstall removed user data'
-    'PASS: install, running-app guard, upgrade, invalid payload and uninstall; user data preserved.'
+    'PASS: install, running-app guards, upgrade, same-version copy/swap rollback, reinstall, invalid payload and uninstall; user data preserved.'
 }
 finally {
     $env:LOCALAPPDATA = $originalLocalAppData
@@ -85,5 +126,5 @@ finally {
     if ([IO.Path]::GetFullPath($fixture).StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) {
         Microsoft.PowerShell.Management\Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
     }
-    Remove-Variable -Name zDriveTestRegistry, zDriveTestShortcuts, zDriveTestRunningPath -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name zDriveTestRegistry, zDriveTestShortcuts, zDriveTestRunningPath, zDriveTestFailure -Scope Global -ErrorAction SilentlyContinue
 }
