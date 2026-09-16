@@ -104,6 +104,12 @@ abstract class AppLocalizations {
   /// **'zDrive'**
   String get appTitle;
 
+  /// No description provided for @downloadForWindows.
+  ///
+  /// In en, this message translates to:
+  /// **'Download for Windows'**
+  String get downloadForWindows;
+
   /// No description provided for @login.
   ///
   /// In en, this message translates to:

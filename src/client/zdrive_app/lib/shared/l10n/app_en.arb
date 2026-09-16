@@ -1,6 +1,7 @@
 {
   "@@locale": "en",
   "appTitle": "zDrive",
+  "downloadForWindows": "Download for Windows",
   "login": "Login",
   "register": "Register",
   "email": "Email",

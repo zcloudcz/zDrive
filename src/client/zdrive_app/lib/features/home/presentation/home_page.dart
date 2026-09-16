@@ -4,6 +4,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/auth_bloc.dart';
+import '../../../shared/widgets/windows_download_button.dart';
 import '../../photos/photos_support.dart';
 
 class HomePage extends StatelessWidget {
@@ -19,6 +20,9 @@ class HomePage extends StatelessWidget {
       appBar: AppBar(
         title: Text(l10n.appTitle),
         actions: [
+          WindowsDownloadButton(
+            compact: MediaQuery.sizeOf(context).width < 600,
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: l10n.logout,

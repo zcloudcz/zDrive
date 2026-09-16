@@ -12,6 +12,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'zDrive';
 
   @override
+  String get downloadForWindows => 'Download for Windows';
+
+  @override
   String get login => 'Login';
 
   @override

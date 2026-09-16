@@ -12,6 +12,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get appTitle => 'zDrive';
 
   @override
+  String get downloadForWindows => 'Stáhnout pro Windows';
+
+  @override
   String get login => 'Přihlášení';
 
   @override
