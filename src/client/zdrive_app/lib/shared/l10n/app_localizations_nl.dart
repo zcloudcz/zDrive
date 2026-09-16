@@ -1,0 +1,370 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Dutch Flemish (`nl`).
+class AppLocalizationsNl extends AppLocalizations {
+  AppLocalizationsNl([String locale = 'nl']) : super(locale);
+
+  @override
+  String get aboutApp => 'Over de app';
+
+  @override
+  String get exitApp => 'Afsluiten';
+
+  @override
+  String get exitFailed =>
+      'De app kon niet worden afgesloten. Probeer het opnieuw.';
+
+  @override
+  String get appVersionFailed => 'De appversie kon niet worden geladen.';
+
+  @override
+  String appVersion(String version) {
+    return 'Versie $version';
+  }
+
+  @override
+  String get appTitle => 'zDrive';
+
+  @override
+  String get downloadForWindows => 'Downloaden voor Windows';
+
+  @override
+  String get login => 'Aanmelden';
+
+  @override
+  String get register => 'Registreren';
+
+  @override
+  String get email => 'E-mailadres';
+
+  @override
+  String get password => 'Wachtwoord';
+
+  @override
+  String get confirmPassword => 'Wachtwoord bevestigen';
+
+  @override
+  String get displayName => 'Weergavenaam';
+
+  @override
+  String get files => 'Bestanden';
+
+  @override
+  String get photos => 'Foto’s';
+
+  @override
+  String get settings => 'Instellingen';
+
+  @override
+  String get logout => 'Afmelden';
+
+  @override
+  String get createAccount => 'Account maken';
+
+  @override
+  String get loginButton => 'Aanmelden';
+
+  @override
+  String get registerButton => 'Account maken';
+
+  @override
+  String get emailRequired => 'E-mailadres is verplicht';
+
+  @override
+  String get invalidEmail => 'Voer een geldig e-mailadres in';
+
+  @override
+  String get passwordTooShort =>
+      'Het wachtwoord moet minstens 8 tekens bevatten';
+
+  @override
+  String get passwordsDontMatch => 'De wachtwoorden komen niet overeen';
+
+  @override
+  String get displayNameRequired => 'Weergavenaam is verplicht';
+
+  @override
+  String get loginFailed => 'Aanmelden mislukt. Controleer je inloggegevens.';
+
+  @override
+  String get registerFailed => 'Registratie mislukt. Probeer het opnieuw.';
+
+  @override
+  String comingSoon(String feature) {
+    return '$feature is binnenkort beschikbaar';
+  }
+
+  @override
+  String get folders => 'Mappen';
+
+  @override
+  String get newFolder => 'Nieuwe map';
+
+  @override
+  String get uploadFile => 'Bestand uploaden';
+
+  @override
+  String get rename => 'Naam wijzigen';
+
+  @override
+  String get delete => 'Verwijderen';
+
+  @override
+  String get share => 'Delen';
+
+  @override
+  String get restore => 'Herstellen';
+
+  @override
+  String get emptyTrash => 'Prullenbak legen';
+
+  @override
+  String get trash => 'Prullenbak';
+
+  @override
+  String get search => 'Zoeken';
+
+  @override
+  String get clearSearch => 'Zoekopdracht wissen';
+
+  @override
+  String get refresh => 'Vernieuwen';
+
+  @override
+  String get noFiles => 'Geen bestanden';
+
+  @override
+  String get createFolder => 'Map maken';
+
+  @override
+  String get folderName => 'Mapnaam';
+
+  @override
+  String get enterFolderName => 'Voer een mapnaam in';
+
+  @override
+  String get fileDeleted => 'Bestand verwijderd';
+
+  @override
+  String get fileRestored => 'Bestand hersteld';
+
+  @override
+  String get shareLink => 'Deellink';
+
+  @override
+  String get copyLink => 'Link kopiëren';
+
+  @override
+  String get linkCopied => 'Link gekopieerd';
+
+  @override
+  String get permission => 'Machtiging';
+
+  @override
+  String get readOnly => 'Alleen lezen';
+
+  @override
+  String get readWrite => 'Lezen en schrijven';
+
+  @override
+  String get expiresAt => 'Verloopt op';
+
+  @override
+  String get never => 'Nooit';
+
+  @override
+  String get uploadProgress => 'Uploaden…';
+
+  @override
+  String get downloadProgress => 'Downloaden…';
+
+  @override
+  String get uploadComplete => 'Upload voltooid';
+
+  @override
+  String get confirmDelete => 'Verwijderen bevestigen';
+
+  @override
+  String get confirmEmptyTrash =>
+      'Alle items in de prullenbak permanent verwijderen?';
+
+  @override
+  String get cancel => 'Annuleren';
+
+  @override
+  String get ok => 'OK';
+
+  @override
+  String get retry => 'Opnieuw proberen';
+
+  @override
+  String get loadMore => 'Meer laden';
+
+  @override
+  String get noPhotos => 'Nog geen foto’s';
+
+  @override
+  String get albums => 'Albums';
+
+  @override
+  String get noAlbums => 'Nog geen albums';
+
+  @override
+  String get newAlbum => 'Nieuw album';
+
+  @override
+  String get albumName => 'Albumnaam';
+
+  @override
+  String get syncStatus => 'Synchronisatiestatus';
+
+  @override
+  String get syncDevices => 'Apparaten';
+
+  @override
+  String get syncNoDevices => 'Geen geregistreerde apparaten';
+
+  @override
+  String get syncNeverSynced => 'Nooit gesynchroniseerd';
+
+  @override
+  String get syncChooseFolder => 'Synchronisatiemap kiezen';
+
+  @override
+  String get syncFolderNotConfigured =>
+      'Kies een lokale map om dit apparaat te synchroniseren.';
+
+  @override
+  String get syncPulling => 'Synchroniseren…';
+
+  @override
+  String get syncDeviceUpToDate => 'Dit apparaat is bijgewerkt.';
+
+  @override
+  String get syncItemsSkipped =>
+      'Sommige items konden niet worden gesynchroniseerd';
+
+  @override
+  String get syncSkippedItems => 'Overgeslagen items';
+
+  @override
+  String get syncFolderNotEmptyTitle => 'De map is niet leeg';
+
+  @override
+  String get syncFolderNotEmptyMessage =>
+      'Deze map bevat al bestanden. De synchronisatie overschrijft alleen bestanden die ze zelf heeft aangemaakt. Bestanden die conflicten zouden veroorzaken blijven ongewijzigd en worden vermeld als overgeslagen.';
+
+  @override
+  String get syncUnsupportedPlatform =>
+      'Synchronisatie is beschikbaar in de app voor Windows en macOS';
+
+  @override
+  String get versionHistory => 'Versiegeschiedenis';
+
+  @override
+  String get noVersions => 'Nog geen versies';
+
+  @override
+  String get restoreVersion => 'Herstellen';
+
+  @override
+  String versionLabel(int number) {
+    return 'Versie $number';
+  }
+
+  @override
+  String get confirmRestoreVersion => 'Deze versie herstellen?';
+
+  @override
+  String get versionRestored => 'Versie hersteld';
+
+  @override
+  String get latestVersion => 'Nieuwste';
+
+  @override
+  String get close => 'Sluiten';
+
+  @override
+  String get errorNoConnection =>
+      'De server is niet bereikbaar. Controleer je verbinding en probeer het opnieuw.';
+
+  @override
+  String get errorServiceUnavailable =>
+      'Deze functie is tijdelijk niet beschikbaar. Probeer het later opnieuw.';
+
+  @override
+  String get errorRequestFailed => 'Het verzoek kon niet worden voltooid.';
+
+  @override
+  String get syncConnecting => 'Verbinding maken…';
+
+  @override
+  String get syncDownloading => 'Downloaden';
+
+  @override
+  String get syncScanning => 'Map scannen';
+
+  @override
+  String get syncHashing => 'Bestandsinhoud vergelijken';
+
+  @override
+  String get syncUploading => 'Uploaden';
+
+  @override
+  String get syncDeleting => 'Verwijderingen toepassen';
+
+  @override
+  String get syncDiscovering =>
+      'Items zoeken — het totale aantal is nog onbekend';
+
+  @override
+  String syncProgressCounts(int completed, int total, int remaining) {
+    return '$completed / $total items voltooid · $remaining resterend';
+  }
+
+  @override
+  String syncProgressFailures(int count) {
+    return '$count items mislukt';
+  }
+
+  @override
+  String syncTransferredBytes(
+    String transferred,
+    String total,
+    String remaining,
+  ) {
+    return '$transferred / $total · $remaining resterend';
+  }
+
+  @override
+  String syncKnownProgressCounts(int completed, int total, int remaining) {
+    return 'Bekende items: $completed / $total voltooid · $remaining resterend';
+  }
+
+  @override
+  String get updateRetry => 'Update opnieuw proberen';
+
+  @override
+  String get updateRestarting => 'Synchronisatie afronden vóór het herstarten…';
+
+  @override
+  String get updateRestart => 'Herstarten en bijwerken';
+
+  @override
+  String updateDownloading(int percent) {
+    return 'Update downloaden: $percent%';
+  }
+
+  @override
+  String updateReady(String version) {
+    return 'Update $version is klaar. Deze wordt bij de volgende start geïnstalleerd.';
+  }
+
+  @override
+  String get updateFailed =>
+      'De automatische update is mislukt. Je kunt zDrive blijven gebruiken en het opnieuw proberen.';
+}

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:timeago/timeago.dart' as timeago;
+import 'package:zdrive_app/shared/l10n/relative_time.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../domain/sync_mirror_entry.dart';
@@ -166,7 +166,7 @@ class _DeviceTile extends StatelessWidget {
       title: Text(device.name),
       subtitle: Text(
         device.lastSyncAt != null
-            ? timeago.format(device.lastSyncAt!)
+            ? formatRelativeTime(device.lastSyncAt!, l10n.localeName)
             : l10n.syncNeverSynced,
       ),
     );

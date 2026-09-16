@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:timeago/timeago.dart' as timeago;
+import 'package:zdrive_app/shared/l10n/relative_time.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/network/error_message.dart';
@@ -187,7 +187,7 @@ class _VersionHistoryDialogState extends State<VersionHistoryDialog> {
                   subtitle: Text(
                     [
                       _formatSize(version.sizeBytes),
-                      timeago.format(version.createdAt),
+                      formatRelativeTime(version.createdAt, l10n.localeName),
                       if (version.comment?.isNotEmpty == true) version.comment!,
                     ].join(' · '),
                     maxLines: 2,
