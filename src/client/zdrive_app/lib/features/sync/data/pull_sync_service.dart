@@ -53,12 +53,10 @@ class LocalConflictException implements Exception {
 /// event's disk write and mirror-row update both complete — so if the app
 /// dies mid-[pullOnce], the persisted cursor never points past work that
 /// did not land. The event that was in flight (and everything after it)
-/// will be re-delivered on the next pull; re-applying it is safe because
-/// writing a file, removing one that is already gone, and renaming one that
-/// has already moved are all idempotent. Move/rename gets this deliberately:
-/// [_applyUpsert] deletes the stale path *before* committing the mirror row,
-/// not after, so a crash in between never leaves an orphaned duplicate that
-/// nothing would ever go back and clean up.
+/// will be re-delivered on the next pull. [_applyUpsert] installs the verified
+/// download, then deletes the stale path before committing the mirror row.
+/// Disk and mirror writes are not one transaction: interruption between
+/// them can leave content that a later pull reports as a local conflict.
 ///
 /// A *permanent* failure (an unsafe name, or a local file pull refuses to
 /// overwrite) does not get the "block until it succeeds" treatment above:
@@ -324,6 +322,8 @@ class PullSyncService {
     final dirPath = await _resolveLocalDirPath(remote.parentId, syncFolderPath);
     final localPath = _safeChildPath(syncFolderPath, dirPath, remote.name, _isWindows);
     final moved = previous != null && previous.localPath != localPath;
+    await _assertNoLinks(syncFolderPath, localPath);
+    if (moved) await _assertNoLinks(syncFolderPath, previous.localPath);
 
     String? contentHash;
     if (remote.isFolder) {
@@ -353,18 +353,23 @@ class PullSyncService {
         throw LocalConflictException(
             'local file differs from what was last synced: $localPath');
       }
-      if (moved) {
-        // Moved/renamed file: remove the stale copy before committing the
-        // mirror row below, not after — see the class doc comment. Deleting
-        // first is safe to repeat: an already-gone file is a no-op
-        // (_deleteLocal). This branch only runs for files (see the
-        // `remote.isFolder` check above), so previous is always a file too.
-        await _deleteLocal(syncFolderPath, previous.localPath);
+      if (moved && await _wouldOverwriteLocalChange(previous.localPath, previous)) {
+        throw LocalConflictException('moved file has local changes: ${previous.localPath}');
       }
-      final bytes = await _fileRepository.downloadFile(fileId);
-      await File(localPath).parent.create(recursive: true);
-      await File(localPath).writeAsBytes(bytes, flush: true);
-      contentHash = sha256.convert(bytes).toString();
+      contentHash = await _downloadToFile(fileId, localPath, syncFolderPath, previous);
+      if (moved) {
+        await _assertNoLinks(syncFolderPath, previous.localPath);
+        // Case-only renames can still resolve the old path to the installed
+        // destination. Compare actual filesystem entries before checking or
+        // deleting it; path casing alone cannot tell on every volume.
+        if (await File(previous.localPath).exists() &&
+            !await FileSystemEntity.identical(previous.localPath, localPath)) {
+          if (await _wouldOverwriteLocalChange(previous.localPath, previous)) {
+            throw LocalConflictException('moved file has local changes: ${previous.localPath}');
+          }
+          await _deleteLocal(syncFolderPath, previous.localPath);
+        }
+      }
     }
 
     await _mirror.upsert(SyncMirrorEntry(
@@ -390,8 +395,43 @@ class PullSyncService {
     final file = File(localPath);
     if (!await file.exists()) return false;
     if (previous == null) return true;
-    final onDiskHash = sha256.convert(await file.readAsBytes()).toString();
+    final onDiskHash = (await sha256.bind(file.openRead()).first).toString();
     return onDiskHash != previous.contentHash;
+  }
+
+  Future<String> _downloadToFile(String fileId, String localPath,
+      String syncFolderPath, SyncMirrorEntry? previous) async {
+    await _assertNoLinks(syncFolderPath, localPath);
+    final target = File(localPath);
+    await target.parent.create(recursive: true);
+    // Exclusive temporary directory creation avoids name collisions. This
+    // prefix is ignored by the scanner if the app stops during a transfer.
+    final staging = await target.parent.createTemp(r'~$zdrive-download-');
+    final temporary = File(p.join(staging.path, 'content'));
+    try {
+      final output = await temporary.open(mode: FileMode.write);
+      try {
+        await for (final chunk in _fileRepository.downloadFileStream(fileId)) {
+          await output.writeFrom(chunk);
+        }
+        await output.flush();
+      } finally {
+        await output.close();
+      }
+      final hash = (await sha256.bind(temporary.openRead()).first).toString();
+      await _assertNoLinks(syncFolderPath, localPath);
+      if (await _wouldOverwriteLocalChange(localPath, previous)) {
+        // Recheck after network I/O: a local edit may have arrived meanwhile.
+        throw LocalConflictException('local file changed during download: $localPath');
+      }
+      // Same-filesystem rename. Replacement semantics depend on the OS;
+      // never delete the destination ourselves to make a failed rename work.
+      await temporary.rename(localPath);
+      return hash;
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+      await staging.delete();
+    }
   }
 
   /// Resolves [folderId]'s local directory path under [syncFolderPath],
@@ -408,6 +448,7 @@ class PullSyncService {
     final parentPath = await _resolveLocalDirPath(folder.parentId, syncFolderPath);
     final dirPath = _safeChildPath(syncFolderPath, parentPath, folder.name, _isWindows);
 
+    await _assertNoLinks(syncFolderPath, dirPath);
     await Directory(dirPath).create(recursive: true);
     await _mirror.upsert(SyncMirrorEntry(
       serverId: folder.id,
@@ -598,6 +639,7 @@ class PullSyncService {
       } else {
         try {
           localPath = _safeChildPath(syncFolderPath, dirPath, item.name, _isWindows);
+          await _assertNoLinks(syncFolderPath, localPath);
           await Directory(localPath).create(recursive: true);
           await _mirror.upsert(SyncMirrorEntry(
             serverId: item.id,
@@ -643,15 +685,13 @@ class PullSyncService {
         return;
       }
 
-      final bytes = await _fileRepository.downloadFile(item.id);
-      await File(localPath).parent.create(recursive: true);
-      await File(localPath).writeAsBytes(bytes, flush: true);
+      final contentHash = await _downloadToFile(item.id, localPath, syncFolderPath, null);
       await _mirror.upsert(SyncMirrorEntry(
         serverId: item.id,
         localPath: localPath,
         isFolder: false,
         sizeBytes: item.sizeBytes,
-        contentHash: sha256.convert(bytes).toString(),
+        contentHash: contentHash,
         updatedAt: item.updatedAt,
         syncedAt: DateTime.now(),
       ));
@@ -686,5 +726,18 @@ void _assertWithinSyncFolder(String syncFolderPath, String path) {
   final resolved = p.canonicalize(path);
   if (!p.isWithin(root, resolved)) {
     throw UnsafeRemoteNameException('resolved path escapes the sync folder: $path');
+  }
+}
+
+/// Lexical containment cannot detect a local symlink redirecting writes.
+/// Reject links in every existing component, including the sync root.
+Future<void> _assertNoLinks(String syncFolderPath, String path) async {
+  _assertWithinSyncFolder(syncFolderPath, path);
+  var current = p.absolute(syncFolderPath);
+  for (final segment in ['', ...p.split(p.relative(path, from: syncFolderPath))]) {
+    if (segment.isNotEmpty) current = p.join(current, segment);
+    if (await FileSystemEntity.type(current, followLinks: false) == FileSystemEntityType.link) {
+      throw UnsafeRemoteNameException('local path contains a link: $current');
+    }
   }
 }

@@ -9,5 +9,6 @@ public interface IFileDbContext
     DbSet<FileVersion> FileVersions { get; }
     DbSet<Share> Shares { get; }
     DbSet<FileChange> FileChanges { get; }
+    Task<IAsyncDisposable> BeginFileChangeReadAsync(CancellationToken cancellationToken = default);
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

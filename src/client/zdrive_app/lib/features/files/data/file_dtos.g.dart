@@ -129,12 +129,14 @@ ManifestDto _$ManifestDtoFromJson(Map<String, dynamic> json) => ManifestDto(
   chunks: (json['chunks'] as List<dynamic>)
       .map((e) => ManifestChunkDto.fromJson(e as Map<String, dynamic>))
       .toList(),
+  manifestHash: json['manifestHash'] as String?,
 );
 
 Map<String, dynamic> _$ManifestDtoToJson(ManifestDto instance) =>
     <String, dynamic>{
       'totalSize': instance.totalSize,
       'chunks': instance.chunks,
+      'manifestHash': instance.manifestHash,
     };
 
 ManifestChunkDto _$ManifestChunkDtoFromJson(Map<String, dynamic> json) =>

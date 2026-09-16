@@ -107,6 +107,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get search => 'Hledat';
 
   @override
+  String get clearSearch => 'Vymazat hledání';
+
+  @override
   String get refresh => 'Obnovit';
 
   @override
@@ -155,6 +158,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get uploadProgress => 'Nahrávání...';
 
   @override
+  String get downloadProgress => 'Stahování...';
+
+  @override
   String get uploadComplete => 'Nahrávání dokončeno';
 
   @override
@@ -171,6 +177,9 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get retry => 'Zkusit znovu';
+
+  @override
+  String get loadMore => 'Načíst další';
 
   @override
   String get noPhotos => 'Zatím žádné fotky';

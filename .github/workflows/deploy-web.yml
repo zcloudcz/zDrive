@@ -32,6 +32,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,7 +41,7 @@ jobs:
       # its own package versions, so a floating `stable` resolves something
       # other than the committed lock. Bump both workflows together.
       - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: "3.41.2"
@@ -55,11 +56,27 @@ jobs:
       # base-href is "/" because the site is served from a custom domain root,
       # not from /<repo>/.
       - name: Build web
+        env:
+          API_BASE_URL: ${{ vars.WEB_API_BASE_URL || 'https://zdrive-gateway.azurewebsites.net/api/v1' }}
         run: >-
           flutter build web --release
-          --dart-define=API_BASE_URL=${{ vars.WEB_API_BASE_URL || 'https://zdrive-gateway.azurewebsites.net/api/v1' }}
+          --dart-define=API_BASE_URL="$API_BASE_URL"
           --base-href /
         working-directory: src/client/zdrive_app
+
+      # The repository is private; publish only the distributable binaries
+      # alongside the public web app so the small installer needs no token.
+      # Retain historical payloads so already-downloaded installers keep working.
+      # A release must be packaged before its web version can be deployed.
+      - name: Include Windows release downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $versionLine = Get-Content src/client/zdrive_app/pubspec.yaml | Where-Object { $_ -match '^version:' }
+          $version = ($versionLine -replace '^version:\s*', '').Split('+')[0]
+          ./scripts/Include-WindowsDownloads.ps1 -Repository $env:GH_REPO -Version $version -OutputDirectory src/client/zdrive_app/build/web/downloads
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -69,6 +86,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

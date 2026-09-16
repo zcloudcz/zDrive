@@ -100,6 +100,18 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         return JsonSerializer.Deserialize<ChunkManifest>(response.Value.Content.ToString());
     }
 
+    public async Task<ChunkManifest?> DownloadManifestSnapshotAsync(
+        Guid tenantId, Guid userId, Guid fileId, string manifestHash, CancellationToken ct = default)
+    {
+        var container = _blobServiceClient.GetBlobContainerClient(StorageContainer);
+        var blob = container.GetBlobClient(GetManifestSnapshotPath(tenantId, userId, fileId, manifestHash));
+        if (!await blob.ExistsAsync(ct))
+            return null;
+
+        var response = await blob.DownloadContentAsync(ct);
+        return JsonSerializer.Deserialize<ChunkManifest>(response.Value.Content.ToString());
+    }
+
     public string GenerateDownloadSasUrl(Guid tenantId, Guid userId, Guid fileId)
     {
         var blobPath = GetManifestPath(tenantId, userId, fileId);

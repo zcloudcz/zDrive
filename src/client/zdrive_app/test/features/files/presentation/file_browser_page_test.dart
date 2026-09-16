@@ -136,10 +136,26 @@ void main() {
       mockRepository = MockFileRepository();
     });
 
-    test('fetches the reassembled bytes and hands them to the platform saver', () async {
-      final bytes = Uint8List.fromList([1, 2, 3]);
+    test('cancelled save does not consume the download or use the byte API', () async {
+      var consumed = false;
       when(() => mockRepository.downloadFile('file-1'))
-          .thenAnswer((_) async => bytes);
+          .thenAnswer((_) async => Uint8List.fromList([1]));
+      when(() => mockRepository.downloadFileStream('file-1'))
+          .thenAnswer((_) async* {
+        consumed = true;
+        yield Uint8List.fromList([1]);
+      });
+
+      await downloadFile(testFile, mockRepository, save: (_, _) async {});
+
+      expect(consumed, isFalse);
+      verifyNever(() => mockRepository.downloadFile(any()));
+    });
+
+    test('hands the verified stream to the platform saver', () async {
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      when(() => mockRepository.downloadFileStream('file-1'))
+          .thenAnswer((_) => Stream.value(bytes));
 
       String? savedName;
       Uint8List? savedBytes;
@@ -149,18 +165,19 @@ void main() {
         mockRepository,
         save: (fileName, data) async {
           savedName = fileName;
-          savedBytes = data;
+          savedBytes = await data.single;
         },
       );
 
-      verify(() => mockRepository.downloadFile('file-1')).called(1);
+      verify(() => mockRepository.downloadFileStream('file-1')).called(1);
+      verifyNever(() => mockRepository.downloadFile(any()));
       expect(savedName, 'readme.txt');
       expect(savedBytes, bytes);
     });
 
-    test('propagates a failure reassembling the file without saving', () async {
-      when(() => mockRepository.downloadFile('file-1'))
-          .thenThrow(Exception('chunk hash mismatch'));
+    test('propagates a download stream failure through the saver', () async {
+      when(() => mockRepository.downloadFileStream('file-1'))
+          .thenAnswer((_) => Stream.error(Exception('chunk hash mismatch')));
 
       var saverCalled = false;
 
@@ -170,16 +187,17 @@ void main() {
           mockRepository,
           save: (fileName, data) async {
             saverCalled = true;
+            await data.drain<void>();
           },
         ),
         throwsA(isException),
       );
-      expect(saverCalled, isFalse);
+      expect(saverCalled, isTrue);
     });
 
     test('propagates a failure from the platform saver', () async {
-      when(() => mockRepository.downloadFile('file-1'))
-          .thenAnswer((_) async => Uint8List.fromList([1]));
+      when(() => mockRepository.downloadFileStream('file-1'))
+          .thenAnswer((_) => Stream.value(Uint8List.fromList([1])));
 
       await expectLater(
         () => downloadFile(

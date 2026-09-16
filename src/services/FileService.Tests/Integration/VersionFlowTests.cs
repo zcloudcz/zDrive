@@ -88,6 +88,25 @@ public sealed class VersionFlowTests : IClassFixture<FileServiceFactory>
     }
 
     [Fact]
+    public async Task RestoreVersion_AtRetentionLimit_PrunesOldestAndKeepsRestoredContent()
+    {
+        var file = await CreateFile("restore-retention.txt");
+        var original = await CreateVersion(file.Id, FakeManifestHash("retained-original"), sizeBytes: 111);
+        for (var i = 2; i <= FileServiceFactory.MaxVersionsPerFile; i++)
+            await CreateVersion(file.Id, FakeManifestHash($"retained-{i}"), sizeBytes: i * 100);
+
+        using var response = await _client.PostAsync(
+            $"/api/v1/files/{file.Id}/versions/{original.Id}/restore", null);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var versions = await ListVersions(file.Id);
+        versions.Should().HaveCount(FileServiceFactory.MaxVersionsPerFile);
+        versions[0].BlobVersionId.Should().Be(original.BlobVersionId);
+        versions[0].VersionNumber.Should().Be(FileServiceFactory.MaxVersionsPerFile + 1);
+        versions.Should().NotContain(v => v.Id == original.Id);
+        (await GetFile(file.Id)).SizeBytes.Should().Be(111);
+    }
+
+    [Fact]
     public async Task RestoreVersion_UnknownVersion_Returns404()
     {
         var file = await CreateFile("no-versions.txt");

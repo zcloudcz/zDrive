@@ -101,13 +101,14 @@ public sealed class StorageController : ControllerBase
 
     [HttpGet("download/{fileId:guid}/manifest")]
     [ProducesResponseType(typeof(ApiResponse<ManifestDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetManifest(Guid fileId, CancellationToken ct)
+    public async Task<IActionResult> GetManifest(Guid fileId, CancellationToken ct, [FromQuery] string? manifestHash = null)
     {
         var userId = User.GetUserId();
         var tenantId = User.GetTenantId() ?? userId;
 
-        var query = new GetManifestQuery(tenantId, userId, fileId);
+        var query = new GetManifestQuery(tenantId, userId, fileId, manifestHash);
         var result = await _mediator.Send(query, ct);
         return Ok(ApiResponse<ManifestDto>.Ok(result));
     }

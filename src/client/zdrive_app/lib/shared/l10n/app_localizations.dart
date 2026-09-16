@@ -290,6 +290,12 @@ abstract class AppLocalizations {
   /// **'Search'**
   String get search;
 
+  /// No description provided for @clearSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear search'**
+  String get clearSearch;
+
   /// No description provided for @refresh.
   ///
   /// In en, this message translates to:
@@ -386,6 +392,12 @@ abstract class AppLocalizations {
   /// **'Uploading...'**
   String get uploadProgress;
 
+  /// No description provided for @downloadProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading...'**
+  String get downloadProgress;
+
   /// No description provided for @uploadComplete.
   ///
   /// In en, this message translates to:
@@ -421,6 +433,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Retry'**
   String get retry;
+
+  /// No description provided for @loadMore.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get loadMore;
 
   /// No description provided for @noPhotos.
   ///

@@ -107,6 +107,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get search => 'Search';
 
   @override
+  String get clearSearch => 'Clear search';
+
+  @override
   String get refresh => 'Refresh';
 
   @override
@@ -155,6 +158,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get uploadProgress => 'Uploading...';
 
   @override
+  String get downloadProgress => 'Downloading...';
+
+  @override
   String get uploadComplete => 'Upload complete';
 
   @override
@@ -171,6 +177,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get retry => 'Retry';
+
+  @override
+  String get loadMore => 'Load more';
 
   @override
   String get noPhotos => 'No photos yet';

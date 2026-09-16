@@ -90,7 +90,7 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "cz.zcloud" "\0"
-            VALUE "FileDescription", "zdrive_app" "\0"
+            VALUE "FileDescription", "zDrive" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "zdrive_app" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 cz.zcloud. All rights reserved." "\0"

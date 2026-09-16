@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Azure.Storage.Blobs;
 using FluentAssertions;
 using Xunit;
@@ -21,12 +23,14 @@ public sealed class ManifestVersioningTests : IClassFixture<StorageServiceFactor
     private readonly StorageServiceFactory _factory;
     private readonly HttpClient _client;
     private readonly string _accessToken;
+    private readonly Guid _userId = Guid.NewGuid();
+    private readonly Guid _tenantId = Guid.NewGuid();
 
     public ManifestVersioningTests(StorageServiceFactory factory)
     {
         _factory = factory;
         _client = factory.CreateClient();
-        _accessToken = factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid());
+        _accessToken = factory.CreateAccessToken(_userId, _tenantId);
     }
 
     [Fact]
@@ -68,6 +72,69 @@ public sealed class ManifestVersioningTests : IClassFixture<StorageServiceFactor
 
         var restoredManifest = await ReadBlob(container, $"{v1.BlobPath}/manifest.json");
         restoredManifest.Should().Be(snapshotV1);
+    }
+
+    [Fact]
+    public async Task GetManifest_PinnedSnapshot_ReturnsOldContentWithoutFlippingLatest()
+    {
+        var fileId = Guid.NewGuid();
+        var original = "original version"u8.ToArray();
+        var first = await UploadFile(fileId, original);
+        var latest = await UploadFile(fileId, "newer content with different length"u8.ToArray());
+
+        using var response = await AuthGet(
+            $"/api/v1/storage/download/{fileId}/manifest?manifestHash={first.ManifestHash}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var manifest = (await response.Content.ReadFromJsonAsync<ApiResponse<ManifestDto>>())!.Data!;
+        manifest.TotalSize.Should().Be(original.Length);
+        manifest.Chunks.Should().ContainSingle().Which.Hash.Should()
+            .Be(Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant());
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        payload.RootElement.GetProperty("data").TryGetProperty("manifestHash", out var servedHash)
+            .Should().BeTrue("clients must detect older servers that ignore the snapshot parameter");
+        servedHash.GetString().Should().Be(first.ManifestHash);
+
+        using var latestResponse = await AuthGet($"/api/v1/storage/download/{fileId}/manifest");
+        var current = (await latestResponse.Content.ReadFromJsonAsync<ApiResponse<ManifestDto>>())!.Data!;
+        current.TotalSize.Should().Be(latest.TotalSize);
+    }
+
+    [Fact]
+    public async Task GetManifest_MissingSnapshot_Returns404InsteadOfLatest()
+    {
+        var fileId = Guid.NewGuid();
+        await UploadFile(fileId, new byte[64]);
+        using var response = await AuthGet(
+            $"/api/v1/storage/download/{fileId}/manifest?manifestHash={new string('a', 64)}");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Theory]
+    [InlineData("not-a-hash")]
+    [InlineData("../manifest")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    public async Task GetManifest_InvalidSnapshotHash_Returns400(string hash)
+    {
+        var fileId = Guid.NewGuid();
+        await UploadFile(fileId, new byte[64]);
+        using var response = await AuthGet(
+            $"/api/v1/storage/download/{fileId}/manifest?manifestHash={Uri.EscapeDataString(hash)}");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetManifest_SnapshotFromAnotherOwner_Returns404(bool otherTenant)
+    {
+        var fileId = Guid.NewGuid();
+        var version = await UploadFile(fileId, new byte[64]);
+        var token = _factory.CreateAccessToken(
+            otherTenant ? _userId : Guid.NewGuid(),
+            otherTenant ? Guid.NewGuid() : _tenantId);
+        using var response = await AuthGet(
+            $"/api/v1/storage/download/{fileId}/manifest?manifestHash={version.ManifestHash}", token);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -122,6 +189,13 @@ public sealed class ManifestVersioningTests : IClassFixture<StorageServiceFactor
         var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
         request.Content = JsonContent.Create(body);
+        return await _client.SendAsync(request);
+    }
+
+    private async Task<HttpResponseMessage> AuthGet(string url, string? token = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token ?? _accessToken);
         return await _client.SendAsync(request);
     }
 

@@ -7,6 +7,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/events/remote_file_change_notifier.dart';
+import '../../../../core/network/error_message.dart';
 import '../../data/file_saver.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
@@ -281,10 +282,39 @@ class _FileBrowserView extends StatelessWidget {
 
   Future<void> _downloadFile(BuildContext context, FileItem file) async {
     final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final l10n = AppLocalizations.of(context)!;
+    final progressRoute = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: Text(l10n.downloadProgress),
+          content: Row(
+            children: [
+              CircularProgressIndicator(semanticsLabel: l10n.downloadProgress),
+              const SizedBox(width: 24),
+              Expanded(child: Text(file.name)),
+            ],
+          ),
+        ),
+      ),
+    );
+    navigator.push(progressRoute);
     try {
+      // Paint feedback before opening the native save dialog or starting I/O.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!context.mounted || !progressRoute.isActive) return;
       await downloadFile(file, getIt<FileRepository>());
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+      if (context.mounted && messenger.mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(describeError(e, l10n))));
+      }
+    } finally {
+      if (navigator.mounted && progressRoute.isActive) {
+        navigator.removeRoute(progressRoute);
+      }
     }
   }
 
@@ -426,10 +456,9 @@ class _FileBrowserView extends StatelessWidget {
   }
 }
 
-/// Downloads [file]'s complete content (reassembled from its chunks by
-/// [repository]) and saves it via the platform-appropriate mechanism in
-/// [save] — file_picker + dart:io on native platforms, a Blob download on
-/// web (see `file_saver.dart`).
+/// Hands [file]'s lazy verified stream to the platform saver. Desktop can
+/// cancel its save dialog without subscribing or starting network requests;
+/// mobile and web savers collect bytes as required by their platform APIs.
 ///
 /// A top-level function (rather than inlined in [_FileBrowserView]) so it
 /// can be unit tested without a full widget/DI/router harness; [save]
@@ -438,8 +467,7 @@ class _FileBrowserView extends StatelessWidget {
 Future<void> downloadFile(
   FileItem file,
   FileRepository repository, {
-  Future<void> Function(String fileName, Uint8List bytes) save = saveFile,
+  Future<void> Function(String fileName, Stream<Uint8List> content) save = saveFileStream,
 }) async {
-  final bytes = await repository.downloadFile(file.id);
-  await save(file.name, bytes);
+  await save(file.name, repository.downloadFileStream(file.id));
 }

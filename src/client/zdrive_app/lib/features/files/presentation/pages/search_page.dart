@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/network/error_message.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
 import '../widgets/file_icon.dart';
@@ -22,6 +23,11 @@ class _SearchPageState extends State<SearchPage> {
   Timer? _debounce;
   List<FileItem>? _results;
   bool _loading = false;
+  bool _loadingMore = false;
+  bool _hasMore = false;
+  int _page = 0;
+  int _generation = 0;
+  Object? _error;
 
   @override
   void dispose() {
@@ -32,27 +38,52 @@ class _SearchPageState extends State<SearchPage> {
 
   void _onQueryChanged(String query) {
     _debounce?.cancel();
-    if (query.trim().isEmpty) {
-      setState(() => _results = null);
-      return;
-    }
+    final generation = ++_generation;
+    setState(() {
+      _results = null;
+      _loading = false;
+      _loadingMore = false;
+      _hasMore = false;
+      _page = 0;
+      _error = null;
+    });
+    if (query.trim().isEmpty) return;
     _debounce = Timer(const Duration(milliseconds: 400), () {
-      _search(query.trim());
+      _search(query.trim(), generation);
     });
   }
 
-  Future<void> _search(String query) async {
-    setState(() => _loading = true);
+  Future<void> _search(
+    String query,
+    int generation, {
+    bool loadMore = false,
+  }) async {
+    if (!mounted || generation != _generation || _loading || query.isEmpty) {
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _loadingMore = loadMore;
+      _error = null;
+    });
     try {
-      final result = await _repository.searchFiles(query);
-      if (mounted) {
+      final result = await _repository.searchFiles(
+        query,
+        page: loadMore ? _page + 1 : 1,
+      );
+      if (mounted && generation == _generation) {
         setState(() {
-          _results = result.items;
-          _loading = false;
+          _results = loadMore ? [...?_results, ...result.items] : result.items;
+          _page = result.page;
+          _hasMore = result.hasMore;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted && generation == _generation) setState(() => _error = e);
+    } finally {
+      if (mounted && generation == _generation) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -76,9 +107,10 @@ class _SearchPageState extends State<SearchPage> {
           if (_controller.text.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.clear),
+              tooltip: l10n.clearSearch,
               onPressed: () {
                 _controller.clear();
-                setState(() => _results = null);
+                _onQueryChanged('');
               },
             ),
         ],
@@ -88,8 +120,11 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildBody(BuildContext context, AppLocalizations l10n) {
-    if (_loading) {
+    if (_loading && _results == null) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _results == null) {
+      return Center(child: _buildFooter(l10n));
     }
     if (_results == null) {
       return Center(
@@ -102,15 +137,20 @@ class _SearchPageState extends State<SearchPage> {
     }
     if (_results!.isEmpty) {
       return Center(
-        child: Text(l10n.noFiles, style: Theme.of(context).textTheme.titleMedium),
+        child: Text(
+          l10n.noFiles,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
       );
     }
 
     return ListView.builder(
-      itemCount: _results!.length,
+      itemCount: _results!.length + 1,
       itemBuilder: (context, index) {
+        if (index == _results!.length) return _buildFooter(l10n);
         final file = _results![index];
         return ListTile(
+          key: ValueKey(file.id),
           leading: FileIcon(file: file),
           title: Text(file.name),
           onTap: () {
@@ -121,5 +161,45 @@ class _SearchPageState extends State<SearchPage> {
         );
       },
     );
+  }
+
+  Widget _buildFooter(AppLocalizations l10n) {
+    if (_loading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    if (_error != null) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(describeError(_error!, l10n), textAlign: TextAlign.center),
+            TextButton(
+              onPressed: () => _search(
+                _controller.text.trim(),
+                _generation,
+                loadMore: _loadingMore,
+              ),
+              child: Text(l10n.retry),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_hasMore) {
+      return Center(
+        child: TextButton(
+          onPressed: () =>
+              _search(_controller.text.trim(), _generation, loadMore: true),
+          child: Text(l10n.loadMore),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 }

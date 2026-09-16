@@ -7,10 +7,8 @@ namespace ZDrive.FileService.Application.Queries.GetFileChanges;
 
 public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQuery, FileChangesPageDto>
 {
-    // Identity values are assigned at insert time, not at commit time: a
-    // transaction that took id N+1 can still commit after one that took id
-    // N+2. Holding back anything younger than this closes that window for
-    // any transaction shorter than it — known limit, see the ADR.
+    // Preserve the existing feed delay. Commit-order correctness comes from
+    // the read scope below, independently of how long a writer takes.
     private static readonly TimeSpan CommitOrderHoldBack = TimeSpan.FromSeconds(5);
 
     private readonly IFileDbContext _db;
@@ -22,8 +20,12 @@ public sealed class GetFileChangesQueryHandler : IRequestHandler<GetFileChangesQ
 
     public async Task<FileChangesPageDto> Handle(GetFileChangesQuery request, CancellationToken cancellationToken)
     {
+        // READ COMMITTED takes the query snapshot after the SHARE lock has
+        // waited for outstanding inserts. Disposal releases it on every exit.
+        await using var readScope = await _db.BeginFileChangeReadAsync(cancellationToken);
+
         // Read one row past the limit in id order. Id order is NOT commit
-        // order (see the field comment above), which is why there is no
+        // order, which is why there is no
         // per-row time filter here: a row can still be young while a
         // higher-id row carries an older stamp, and a per-row filter would
         // let the higher id through and move the cursor past the younger

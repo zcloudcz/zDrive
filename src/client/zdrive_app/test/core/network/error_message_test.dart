@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zdrive_app/core/network/api_envelope.dart';
 import 'package:zdrive_app/core/network/error_message.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations_cs.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
@@ -76,9 +77,15 @@ void main() {
     expect(describeError(_withStatus(502), cs), isNot(en.errorServiceUnavailable));
   });
 
-  test('a non-Dio error keeps toString(), matching how the rest of the app '
-      'surfaces errors', () {
-    expect(describeError(Exception('folder is missing'), en),
-        contains('folder is missing'));
-  });
+  for (final error in [
+    Exception('Internal server details'),
+    const ApiException('database_error', 'relation file_versions is missing'),
+    const FormatException('Unexpected internal response body'),
+    StateError('Local file C:/private/user/document could not be read'),
+  ]) {
+    test('${error.runtimeType} hides internal details in both locales', () {
+      expect(describeError(error, en), en.errorRequestFailed);
+      expect(describeError(error, cs), cs.errorRequestFailed);
+    });
+  }
 }

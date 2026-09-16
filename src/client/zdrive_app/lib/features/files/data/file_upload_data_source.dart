@@ -208,9 +208,10 @@ class FileUploadDataSource {
   }
 
   /// Fetches the chunk manifest for a file.
-  Future<ManifestDto> getManifest(String fileId) async {
+  Future<ManifestDto> getManifest(String fileId, {String? manifestHash}) async {
     final response = await _dio.get(
       '${ApiConstants.storage}/download/$fileId/manifest',
+      queryParameters: manifestHash == null ? null : {'manifestHash': manifestHash},
     );
     return ManifestDto.fromJson(unwrapMap(response));
   }
@@ -241,8 +242,21 @@ class FileUploadDataSource {
   /// support it locally either), so a browser client could never complete
   /// that cross-origin fetch. The gateway this app already talks to has CORS
   /// configured, so proxying works identically on every platform.
-  Future<Uint8List> downloadFile(String fileId) async {
-    final manifest = await getManifest(fileId);
+  Future<Uint8List> downloadFile(String fileId, {String? manifestHash}) async {
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in downloadFileStream(fileId, manifestHash: manifestHash)) {
+      builder.add(chunk);
+    }
+    return builder.takeBytes();
+  }
+
+  /// Each yielded chunk has a valid SHA-256. Successful stream completion
+  /// additionally proves index completeness and total byte length.
+  Stream<Uint8List> downloadFileStream(String fileId, {String? manifestHash}) async* {
+    final manifest = await getManifest(fileId, manifestHash: manifestHash);
+    if (manifestHash != null && manifest.manifestHash != manifestHash) {
+      throw StateError('Storage did not confirm the requested immutable manifest');
+    }
 
     final chunks = [...manifest.chunks]
       ..sort((a, b) => a.index.compareTo(b.index));
@@ -258,13 +272,7 @@ class FileUploadDataSource {
       }
     }
 
-    // ponytail: whole file is buffered in memory (this BytesBuilder plus the
-    // copy toBytes() makes), peak ~2-3x file size. uploadFile above streams
-    // chunk-by-chunk and never holds more than one chunk at a time, so this
-    // client can now upload a file it cannot download back — asymmetric, not
-    // a matched pair. Upgrade path: stream to a temp file on native, File
-    // System Access API on web.
-    final builder = BytesBuilder(copy: false);
+    var receivedSize = 0;
     for (final chunk in chunks) {
       final bytes = await downloadChunkBytes(fileId, chunk.hash);
 
@@ -272,17 +280,19 @@ class FileUploadDataSource {
       if (actualHash != chunk.hash) {
         throw ChunkHashMismatchException(chunk.hash, actualHash);
       }
-      builder.add(bytes);
+      receivedSize += bytes.length;
+      if (receivedSize > manifest.totalSize) {
+        throw ManifestSizeMismatchException(manifest.totalSize, receivedSize);
+      }
+      yield bytes;
     }
 
-    final assembled = builder.toBytes();
     // Per-chunk hashing only proves each chunk's own bytes are intact — it
     // says nothing about whether the *set* of chunks is complete. Together
     // with the index check above (which catches duplicates and gaps at equal
     // total size), this catches a truncated manifest and an empty chunk list.
-    if (assembled.length != manifest.totalSize) {
-      throw ManifestSizeMismatchException(manifest.totalSize, assembled.length);
+    if (receivedSize != manifest.totalSize) {
+      throw ManifestSizeMismatchException(manifest.totalSize, receivedSize);
     }
-    return assembled;
   }
 }

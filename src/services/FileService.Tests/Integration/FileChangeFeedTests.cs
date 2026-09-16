@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using ZDrive.FileService.Application.DTOs;
+using ZDrive.FileService.Domain.Entities;
+using ZDrive.FileService.Domain.Enums;
 using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.Shared.DTOs;
 
@@ -18,7 +20,7 @@ namespace ZDrive.FileService.Tests.Integration;
 /// clock_timestamp() (FileChangeConfiguration), not by application code, so
 /// tests age a row past the 5-second hold-back with a raw SQL UPDATE against
 /// the real column instead of a fake clock — that is the only way to
-/// reproduce the commit-order skip the hold-back exists to close:
+/// reproduce the timestamp-order skip the hold-back exists to close:
 /// two rows need INDEPENDENT ages, which a single shared clock cannot give.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -422,6 +424,96 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
         afterAgingBoth.Changes.Select(c => c.FileId).Should().Equal(changeA.Id, changeB.Id);
     }
 
+    [Fact]
+    public async Task GetChanges_LowerIdTransactionCommitsLate_WaitsAndReturnsBothChangesInOrder()
+    {
+        var baseline = await GetLatestCursorAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var writerScope = _factory.Services.CreateScope();
+        var writer = writerScope.ServiceProvider.GetRequiredService<FileDbContext>();
+        await using var transaction = await writer.Database.BeginTransactionAsync(timeout.Token);
+        var delayedChange = new FileChange
+        {
+            TenantId = _factory.TestTenantId,
+            UserId = _factory.TestUserId,
+            FileId = Guid.NewGuid(),
+            Type = FileChangeType.Create
+        };
+        writer.FileChanges.Add(delayedChange);
+        await writer.SaveChangesAsync(timeout.Token);
+        await writer.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE files.file_changes SET occurred_at = occurred_at - interval '6 seconds' WHERE id = {delayedChange.Id}",
+            timeout.Token);
+
+        // The higher id is committed and old enough to pass the hold-back,
+        // while the lower id remains invisible in a different transaction.
+        var laterFile = await CreateFileAsync("change-late-commit.txt");
+        await AgeChangeAsync(laterFile.Id);
+        var pendingPage = GetChangesAsync(baseline, cancellationToken: timeout.Token);
+        await WaitForBlockedFeedAsync(pendingPage, timeout.Token);
+        pendingPage.IsCompleted.Should().BeFalse("an open lower-id insert must prevent advancing the cursor");
+
+        await transaction.CommitAsync(timeout.Token);
+        var page = await pendingPage;
+        page.Changes.Select(c => c.FileId).Should().Equal(delayedChange.FileId, laterFile.Id);
+        page.NextCursor.Should().Be(page.Changes[^1].Id);
+
+        var nextPage = await GetChangesAsync(page.NextCursor);
+        nextPage.Changes.Should().BeEmpty();
+        nextPage.NextCursor.Should().Be(page.NextCursor);
+    }
+
+    [Fact]
+    public async Task BeginFileChangeRead_CancelledWhileWaiting_ReleasesTransactionAndAllowsRetry()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        using var writerScope = _factory.Services.CreateScope();
+        var writer = writerScope.ServiceProvider.GetRequiredService<FileDbContext>();
+        await using var transaction = await writer.Database.BeginTransactionAsync(timeout.Token);
+        await writer.Database.ExecuteSqlRawAsync(
+            "LOCK TABLE files.file_changes IN ROW EXCLUSIVE MODE", timeout.Token);
+
+        using var readerScope = _factory.Services.CreateScope();
+        var reader = readerScope.ServiceProvider.GetRequiredService<FileDbContext>();
+        var pendingRead = reader.BeginFileChangeReadAsync(cancellation.Token);
+        await WaitForBlockedFeedAsync(pendingRead, timeout.Token);
+        cancellation.Cancel();
+        var act = async () => await pendingRead;
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        reader.Database.CurrentTransaction.Should().BeNull();
+
+        await transaction.RollbackAsync(timeout.Token);
+        await using (await reader.BeginFileChangeReadAsync(timeout.Token))
+        {
+            await reader.FileChanges.CountAsync(timeout.Token);
+        }
+        reader.Database.CurrentTransaction.Should().BeNull();
+
+        // A writer can acquire its lock while the reader context is still
+        // alive: both failed acquisition and successful disposal cleaned up.
+        await using var nextTransaction = await writer.Database.BeginTransactionAsync(timeout.Token);
+        await writer.Database.ExecuteSqlRawAsync(
+            "LOCK TABLE files.file_changes IN ROW EXCLUSIVE MODE", timeout.Token);
+    }
+
+    private async Task WaitForBlockedFeedAsync(Task pendingRead, CancellationToken cancellationToken)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FileDbContext>();
+        while (!pendingRead.IsCompleted)
+        {
+            var waiting = await db.Database.SqlQueryRaw<int>("""
+                SELECT count(*)::int AS "Value" FROM pg_locks
+                WHERE relation = 'files.file_changes'::regclass
+                  AND mode = 'ShareLock' AND NOT granted
+                """).SingleAsync(cancellationToken);
+            if (waiting > 0)
+                return;
+            await Task.Delay(20, cancellationToken);
+        }
+    }
+
     private async Task<long> GetLatestCursorAsync()
     {
         // Earlier tests in this class already age every row they create
@@ -469,14 +561,15 @@ public sealed class FileChangeFeedTests : IClassFixture<FileServiceFactory>
         return (await response.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
     }
 
-    private async Task<FileChangesPageDto> GetChangesAsync(long cursor = 0, int? limit = null, Guid? deviceId = null)
+    private async Task<FileChangesPageDto> GetChangesAsync(
+        long cursor = 0, int? limit = null, Guid? deviceId = null, CancellationToken cancellationToken = default)
     {
         var url = $"/api/v1/files/changes?cursor={cursor}" + (limit.HasValue ? $"&limit={limit}" : "");
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         if (deviceId.HasValue)
             request.Headers.Add("X-Device-Id", deviceId.Value.ToString());
 
-        var response = await _client.SendAsync(request);
+        var response = await _client.SendAsync(request, cancellationToken);
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         return (await response.Content.ReadFromJsonAsync<ApiResponse<FileChangesPageDto>>())!.Data!;
     }
