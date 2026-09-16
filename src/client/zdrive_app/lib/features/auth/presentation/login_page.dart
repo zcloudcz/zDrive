@@ -4,6 +4,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/auth_bloc.dart';
+import '../../../shared/widgets/windows_download_button.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -124,6 +125,7 @@ class _LoginPageState extends State<LoginPage> {
                       onPressed: () => context.go('/register'),
                       child: Text(l10n.createAccount),
                     ),
+                    const WindowsDownloadButton(),
                   ],
                 ),
               ),

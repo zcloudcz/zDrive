@@ -1,6 +1,7 @@
 {
   "@@locale": "cs",
   "appTitle": "zDrive",
+  "downloadForWindows": "Stáhnout pro Windows",
   "login": "Přihlášení",
   "register": "Registrace",
   "email": "E-mail",
