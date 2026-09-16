@@ -197,8 +197,9 @@ class SyncCoordinator {
   Future<void> _sendHeartbeat() async {
     try {
       final deviceId = await _deviceRegistration.localDeviceId();
-      if (deviceId == null)
+      if (deviceId == null) {
         return; // First-run edge case — nothing registered yet.
+      }
       await _remote.heartbeat(deviceId);
     } catch (e, st) {
       log(

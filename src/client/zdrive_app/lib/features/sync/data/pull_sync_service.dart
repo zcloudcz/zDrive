@@ -901,8 +901,9 @@ class PullSyncService {
       return;
     }
 
-    if (existing != null)
+    if (existing != null) {
       return; // Already delivered by the drain above, or a previous run.
+    }
 
     try {
       final localPath = _safeChildPath(
