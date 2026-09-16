@@ -69,6 +69,7 @@ abstract class FileRepository {
     Stream<List<int>> content,
     int sizeBytes, {
     String? originDeviceId,
+    void Function(double progress)? onProgress,
   });
 
   /// Lists recorded versions of a file, newest first.

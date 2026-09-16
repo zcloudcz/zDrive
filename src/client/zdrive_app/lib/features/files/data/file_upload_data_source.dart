@@ -2,11 +2,14 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 
 import '../../../core/network/api_constants.dart';
 import '../../../core/network/api_envelope.dart';
 import 'file_dtos.dart';
+
+String _chunkHash(Uint8List bytes) => sha256.convert(bytes).toString();
 
 /// Thrown when a downloaded chunk's content does not hash to the value
 /// recorded for it in the manifest — corruption or tampering in transit.
@@ -105,7 +108,7 @@ class FileUploadDataSource {
     Uint8List bytes, {
     void Function(int sent, int total)? onProgress,
   }) async {
-    final chunkHash = sha256.convert(bytes).toString();
+    final chunkHash = await compute(_chunkHash, bytes);
     final response = await _dio.put(
       '${ApiConstants.storage}/upload/$sessionId/chunk/$chunkIndex',
       data: Stream.fromIterable([bytes]),
@@ -168,6 +171,9 @@ class FileUploadDataSource {
               },
       );
       uploadedBytes += chunk.length;
+      if (sizeBytes > 0) {
+        onProgress?.call((uploadedBytes / sizeBytes).clamp(0.0, 1.0));
+      }
       index++;
     }
 
@@ -186,24 +192,30 @@ class FileUploadDataSource {
   /// empty chunk, matching Chunking.cs's handling of zero-byte files (a
   /// session needs totalChunks > 0).
   static Stream<Uint8List> _splitIntoChunks(Stream<List<int>> source) async* {
-    final buffer = BytesBuilder(copy: false);
+    var buffer = Uint8List(chunkSize);
+    var buffered = 0;
     var yielded = false;
 
     await for (final piece in source) {
-      buffer.add(piece);
-      while (buffer.length >= chunkSize) {
-        final bytes = buffer.toBytes();
-        buffer.clear();
-        yield Uint8List.sublistView(bytes, 0, chunkSize);
-        yielded = true;
-        if (bytes.length > chunkSize) {
-          buffer.add(bytes.sublist(chunkSize));
+      var offset = 0;
+      while (offset < piece.length) {
+        final available = chunkSize - buffered;
+        final remaining = piece.length - offset;
+        final count = remaining < available ? remaining : available;
+        buffer.setRange(buffered, buffered + count, piece, offset);
+        buffered += count;
+        offset += count;
+        if (buffered == chunkSize) {
+          yield buffer;
+          yielded = true;
+          buffer = Uint8List(chunkSize);
+          buffered = 0;
         }
       }
     }
 
-    if (buffer.isNotEmpty || !yielded) {
-      yield buffer.toBytes();
+    if (buffered > 0 || !yielded) {
+      yield Uint8List.sublistView(buffer, 0, buffered);
     }
   }
 
@@ -276,7 +288,7 @@ class FileUploadDataSource {
     for (final chunk in chunks) {
       final bytes = await downloadChunkBytes(fileId, chunk.hash);
 
-      final actualHash = sha256.convert(bytes).toString();
+      final actualHash = await compute(_chunkHash, bytes);
       if (actualHash != chunk.hash) {
         throw ChunkHashMismatchException(chunk.hash, actualHash);
       }

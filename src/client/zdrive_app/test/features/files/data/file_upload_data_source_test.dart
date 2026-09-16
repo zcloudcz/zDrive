@@ -122,6 +122,33 @@ void main() {
       expect(totalChunksSent, [1, 1, 2, 3]);
     });
 
+    test('UploadFile_AcknowledgedChunks_ReportsProgressWithoutTransportEvents', () async {
+      stubUploadSession();
+      final progress = <double>[];
+      const size = FileUploadDataSource.chunkSize + 1;
+
+      await ds.uploadFile('f1', 'x.bin', Stream.value(Uint8List(size)), size,
+          onProgress: progress.add);
+
+      expect(progress, [FileUploadDataSource.chunkSize / size, 1.0]);
+    });
+
+    test('UploadFile_FailedChunk_DoesNotCompleteOrReportAcknowledgement', () async {
+      stubUploadSession();
+      when(() => dio.put(any(), data: any(named: 'data'),
+          options: any(named: 'options'),
+          onSendProgress: any(named: 'onSendProgress')))
+          .thenThrow(StateError('upload failed'));
+      final progress = <double>[];
+
+      await expectLater(ds.uploadFile('f1', 'x.bin',
+          Stream.value(Uint8List.fromList([1, 2, 3])), 3,
+          onProgress: progress.add), throwsStateError);
+
+      expect(progress, isEmpty);
+      verifyNever(() => dio.post('/storage/upload/s1/complete'));
+    });
+
     test(
         'throws UploadSizeMismatchException when the stream produces fewer '
         'bytes than sizeBytes declared, even though the chunk count still '
@@ -157,17 +184,17 @@ void main() {
     });
 
     test('a multi-chunk upload round-trips through downloadFile', () async {
-      // Two chunks: one full ChunkSize window plus a short remainder — big
+      // Three chunks from uneven source pieces, including an oversized piece — big
       // enough that a hard-coded single-chunk upload (the old behaviour)
       // would silently drop everything past the first ChunkSize bytes.
       final content = Uint8List.fromList(
-          List.generate(FileUploadDataSource.chunkSize + 10, (i) => i % 256));
+          List.generate(FileUploadDataSource.chunkSize * 2 + 10, (i) => i % 256));
 
       when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer(
           (_) async => ok({'sessionId': 's1', 'sasUploadUrl': 'x'}, apiInit));
 
       final uploadedChunks = <int, Uint8List>{};
-      for (final index in [0, 1]) {
+      for (final index in [0, 1, 2]) {
         when(() => dio.put(
               '/storage/upload/s1/chunk/$index',
               data: any(named: 'data'),
@@ -176,6 +203,8 @@ void main() {
             )).thenAnswer((invocation) async {
           final stream = invocation.namedArguments[#data] as Stream<List<int>>;
           final bytes = Uint8List.fromList((await stream.toList()).expand((e) => e).toList());
+          final options = invocation.namedArguments[#options] as Options;
+          expect(options.headers!['X-Chunk-Hash'], sha256.convert(bytes).toString());
           uploadedChunks[index] = bytes;
           return ok({'sessionId': 's1', 'chunkIndex': index, 'chunkHash': 'h', 'accepted': true},
               '/storage/upload/s1/chunk/$index');
@@ -185,13 +214,17 @@ void main() {
       when(() => dio.post('/storage/upload/s1/complete')).thenAnswer((_) async =>
           ok({'blobPath': 'p', 'manifestHash': 'h1', 'totalSize': content.length}, ''));
 
-      final complete = await ds.uploadFile('f1', 'big.bin', Stream.value(content), content.length);
+      final complete = await ds.uploadFile('f1', 'big.bin', Stream.fromIterable([
+        Uint8List.sublistView(content, 0, 3),
+        Uint8List.sublistView(content, 3),
+      ]), content.length);
 
       expect(complete.totalSize, content.length);
-      expect(uploadedChunks.keys.toSet(), {0, 1});
+      expect(uploadedChunks.keys.toList(), [0, 1, 2]);
       expect(uploadedChunks[0]!.length, FileUploadDataSource.chunkSize);
-      expect(uploadedChunks[1]!.length, 10);
-      expect([...uploadedChunks[0]!, ...uploadedChunks[1]!], content);
+      expect(uploadedChunks[1]!.length, FileUploadDataSource.chunkSize);
+      expect(uploadedChunks[2]!.length, 10);
+      expect([...uploadedChunks[0]!, ...uploadedChunks[1]!, ...uploadedChunks[2]!], content);
 
       // Now serve those same chunks back through the manifest/download
       // endpoints downloadFile already exercises (see the group below), and
