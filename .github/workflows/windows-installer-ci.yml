@@ -1,0 +1,33 @@
+name: Windows installer CI
+
+on:
+  push:
+    paths:
+      - 'packaging/windows/**'
+      - 'scripts/*Windows*.ps1'
+      - 'tests/packaging/**'
+      - '.github/workflows/windows-installer-ci.yml'
+      - '.github/workflows/deploy-web.yml'
+  pull_request:
+    paths:
+      - 'packaging/windows/**'
+      - 'scripts/*Windows*.ps1'
+      - 'tests/packaging/**'
+      - '.github/workflows/windows-installer-ci.yml'
+      - '.github/workflows/deploy-web.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  installer-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify install, upgrade and uninstall without touching the user profile
+        shell: powershell
+        run: ./tests/packaging/Windows-Installer.Smoke.ps1
+      - name: Verify historical download retention and release failures
+        shell: pwsh
+        run: ./scripts/Test-WindowsDownloadRetention.ps1
