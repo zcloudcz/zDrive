@@ -1,3 +1,6 @@
+import 'dart:ui';
+
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
@@ -6,6 +9,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'core/auth/auth_bloc.dart';
 import 'core/auth/token_storage.dart';
 import 'core/di/injection.dart';
+import 'core/diagnostics/diagnostics.dart';
 import 'features/auth/domain/auth_repository.dart';
 import 'features/sync/data/sync_coordinator.dart';
 import 'features/sync/sync_support.dart';
@@ -20,6 +24,29 @@ import 'core/update/update_controller.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Diagnostics.initialize();
+  final previousFlutterError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    Diagnostics.error('flutter.error', details.exception, details.stack);
+    if (previousFlutterError != null) {
+      previousFlutterError(details);
+    } else {
+      FlutterError.presentError(details);
+    }
+  };
+  final previousPlatformError = PlatformDispatcher.instance.onError;
+  PlatformDispatcher.instance.onError = (error, stack) {
+    Diagnostics.error('platform.error', error, stack);
+    return previousPlatformError?.call(error, stack) ?? false;
+  };
+  try {
+    final info = await PackageInfo.fromPlatform().timeout(
+      const Duration(seconds: 3),
+    );
+    Diagnostics.event('app.version.${info.version}.${info.buildNumber}');
+  } catch (error, stack) {
+    Diagnostics.error('app.version_failed', error, stack);
+  }
   final updater = await createAutoUpdater(
     drain: () => getIt<SyncCoordinator>().endSession(),
     resume: () async {

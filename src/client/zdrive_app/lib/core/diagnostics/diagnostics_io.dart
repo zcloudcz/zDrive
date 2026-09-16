@@ -1,0 +1,263 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:isolate';
+
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+import 'diagnostic_record.dart';
+
+class Diagnostics {
+  static SendPort? _writer;
+  static Isolate? _isolate;
+  static ReceivePort? _acks;
+  static Timer? _heartbeat;
+  static int _pending = 0;
+  static int _dropped = 0;
+
+  static Future<void> initialize({
+    String? version,
+    String? directory,
+    int maxBytes = 2 * 1024 * 1024,
+    Duration stallThreshold = const Duration(seconds: 10),
+  }) async {
+    if (_writer != null) return;
+    final ready = ReceivePort();
+    try {
+      final base =
+          directory ??
+          (Platform.isWindows && Platform.environment['LOCALAPPDATA'] != null
+              ? p.join(Platform.environment['LOCALAPPDATA']!, 'zDrive', 'logs')
+              : p.join(
+                  (await getApplicationSupportDirectory().timeout(
+                    const Duration(seconds: 3),
+                  )).path,
+                  'logs',
+                ));
+      _acks = ReceivePort()
+        ..listen((_) {
+          if (_pending > 0) _pending--;
+        });
+      _isolate = await Isolate.spawn(_writeLogs, [
+        ready.sendPort,
+        _acks!.sendPort,
+        base,
+        maxBytes,
+        stallThreshold.inMilliseconds,
+        version ?? 'unknown',
+      ]);
+      final result = await ready.first.timeout(const Duration(seconds: 5));
+      if (result is! SendPort) {
+        throw StateError('Diagnostic writer unavailable');
+      }
+      _writer = result;
+      _heartbeat = Timer.periodic(
+        const Duration(seconds: 2),
+        (_) => _writer?.send('heartbeat'),
+      );
+    } catch (_) {
+      await shutdown();
+    } finally {
+      ready.close();
+    }
+  }
+
+  static void event(String name, [Map<String, Object?> fields = const {}]) {
+    _send(diagnosticRecord(name, fields));
+  }
+
+  static void error(String name, Object error, [StackTrace? stack]) {
+    final record = diagnosticRecord(name, {});
+    final type = error.runtimeType.toString().replaceAll(
+      RegExp(r'[^a-zA-Z0-9_]'),
+      '',
+    );
+    record['errorType'] = type.substring(0, type.length.clamp(0, 80));
+    record['stack'] = diagnosticStack(stack);
+    _send(record);
+  }
+
+  static void _send(Map<String, Object?> record) {
+    if (_writer == null) return;
+    if (_pending >= 256) {
+      _dropped++;
+      return;
+    }
+    if (_dropped > 0) {
+      record['droppedEvents'] = _dropped;
+      _dropped = 0;
+    }
+    _pending++;
+    _writer!.send(record);
+  }
+
+  static Future<String?> exportLogs() async {
+    if (_writer == null) return null;
+    final reply = ReceivePort();
+    try {
+      _writer!.send(reply.sendPort);
+      return await reply.first.timeout(const Duration(seconds: 10)) as String?;
+    } catch (_) {
+      return null;
+    } finally {
+      reply.close();
+    }
+  }
+
+  /// Also releases resources for isolated filesystem tests.
+  static Future<void> shutdown() async {
+    _heartbeat?.cancel();
+    _heartbeat = null;
+    if (_writer != null) {
+      final closed = ReceivePort();
+      _writer!.send(['shutdown', closed.sendPort]);
+      try {
+        await closed.first.timeout(const Duration(seconds: 1));
+      } catch (_) {
+        /* A failed writer must not prevent app shutdown. */
+      } finally {
+        closed.close();
+      }
+    }
+    _writer = null;
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+    _acks?.close();
+    _acks = null;
+    _pending = 0;
+    _dropped = 0;
+  }
+}
+
+void _writeLogs(List<Object> args) {
+  final ready = args[0] as SendPort;
+  final ack = args[1] as SendPort;
+  final directory = args[2] as String;
+  final maxBytes = args[3] as int;
+  final threshold = args[4] as int;
+  final session = '${DateTime.now().toUtc().microsecondsSinceEpoch}-$pid';
+  final inbox = ReceivePort();
+  RandomAccessFile? lease;
+  RandomAccessFile? output;
+  var length = 0;
+  File log(int index) => File(p.join(directory, 'diagnostic-$index.jsonl'));
+  void append(Map<String, Object?> record) {
+    final bytes = utf8.encode(
+      '${jsonEncode({...record, 'session': session})}\n',
+    );
+    if (length + bytes.length > maxBytes) {
+      output?.closeSync();
+      output = null;
+      if (log(2).existsSync()) log(2).deleteSync();
+      for (var i = 1; i >= 0; i--) {
+        if (log(i).existsSync()) log(i).renameSync(log(i + 1).path);
+      }
+      length = 0;
+    }
+    output ??= log(0).openSync(mode: FileMode.append);
+    output!.writeFromSync(bytes);
+    output!.flushSync();
+    length += bytes.length;
+  }
+
+  try {
+    Directory(directory).createSync(recursive: true);
+    // A second process must not rotate files underneath the active writer.
+    // This lock is non-blocking and the OS releases it after a forced exit.
+    lease = File(
+      p.join(directory, 'diagnostic.lock'),
+    ).openSync(mode: FileMode.append);
+    lease.lockSync(FileLock.exclusive);
+    length = log(0).existsSync() ? log(0).lengthSync() : 0;
+    final version = args[5] as String;
+    append({
+      ...diagnosticRecord('app.started', {'pid': pid}),
+      'version': RegExp(r'^[a-zA-Z0-9.+_-]{1,60}$').hasMatch(version)
+          ? version
+          : 'unknown',
+      'os': Platform.operatingSystem,
+    });
+  } catch (_) {
+    output?.closeSync();
+    lease?.closeSync();
+    ready.send(null);
+    inbox.close();
+    return;
+  }
+  final clock = Stopwatch()..start();
+  var lastHeartbeat = 0;
+  var stalled = false;
+  var failed = false;
+  void safeAppend(Map<String, Object?> record) {
+    try {
+      append(record);
+    } catch (_) {
+      failed = true;
+    }
+  }
+
+  final watchdog = Timer.periodic(
+    Duration(milliseconds: threshold.clamp(50, 2000)),
+    (_) {
+      if (!stalled && clock.elapsedMilliseconds - lastHeartbeat > threshold) {
+        stalled = true;
+        safeAppend(
+          diagnosticRecord('ui.heartbeat_stalled', {
+            'gapMs': clock.elapsedMilliseconds - lastHeartbeat,
+          }),
+        );
+      }
+    },
+  );
+  inbox.listen(
+    (message) {
+      if (message is List && message.first == 'shutdown') {
+        watchdog.cancel();
+        output?.closeSync();
+        output = null;
+        lease?.closeSync();
+        lease = null;
+        inbox.close();
+        (message[1] as SendPort).send(null);
+      } else if (message == 'heartbeat') {
+        if (stalled) {
+          safeAppend(
+            diagnosticRecord('ui.heartbeat_recovered', {
+              'gapMs': clock.elapsedMilliseconds - lastHeartbeat,
+            }),
+          );
+        }
+        stalled = false;
+        lastHeartbeat = clock.elapsedMilliseconds;
+      } else if (message is Map<String, Object?>) {
+        safeAppend(message);
+        ack.send(null);
+      } else if (message is SendPort) {
+        try {
+          if (failed) throw StateError('Diagnostic write failed');
+          final exported = File(p.join(directory, 'diagnostic-export.log'));
+          final snapshot = exported.openSync(mode: FileMode.write);
+          try {
+            for (var i = 2; i >= 0; i--) {
+              if (log(i).existsSync()) {
+                snapshot.writeFromSync(log(i).readAsBytesSync());
+              }
+            }
+            snapshot.flushSync();
+          } finally {
+            snapshot.closeSync();
+          }
+          message.send(exported.path);
+        } catch (_) {
+          message.send(null);
+        }
+      }
+    },
+    onDone: () {
+      output?.closeSync();
+      lease?.closeSync();
+    },
+  );
+  ready.send(inbox.sendPort);
+}
