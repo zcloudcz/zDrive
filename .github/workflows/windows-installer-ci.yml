@@ -31,3 +31,6 @@ jobs:
       - name: Verify historical download retention and release failures
         shell: pwsh
         run: ./scripts/Test-WindowsDownloadRetention.ps1
+      - name: Verify automatic update recovery and payload integrity
+        shell: powershell
+        run: ./tests/packaging/Windows-Update.Smoke.ps1

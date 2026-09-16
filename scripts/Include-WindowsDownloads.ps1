@@ -27,3 +27,12 @@ foreach ($page in $pages) {
 }
 # Retain every published version: an older installer pins its original ZIP URL.
 if (-not $currentIncluded) { throw "Windows release v$Version is incomplete or missing." }
+$payload = Join-Path $OutputDirectory "zDrive-$Version-windows-x64.zip"
+$feed = @{
+    schemaVersion = 1
+    version = $Version
+    url = "https://drive.zcloud.cz/downloads/zDrive-$Version-windows-x64.zip"
+    sha256 = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+    sizeBytes = (Get-Item -LiteralPath $payload).Length
+}
+$feed | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputDirectory 'windows-latest.json') -Encoding UTF8

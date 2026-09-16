@@ -1,0 +1,125 @@
+# Execute in a fresh Windows PowerShell process. All writes stay in a temp profile.
+$ErrorActionPreference = 'Stop'
+$fixture = Join-Path ([IO.Path]::GetTempPath()) ('zDrive-Update-Test-' + [guid]::NewGuid().ToString('N'))
+$originalProfile = $env:LOCALAPPDATA
+$global:launched = @()
+$global:parentMode = 'gone'
+$global:installedVersion = '0.2.1'
+function Assert($condition, $message) { if (-not $condition) { throw $message } }
+function Get-Process {
+    param($Id, $Name, $ErrorAction)
+    if ($Name) {
+        if ($global:parentMode -eq 'another') { [pscustomobject]@{ Path = (Join-Path $source 'zdrive_app.exe') } }
+        return
+    }
+    if ($global:parentMode -eq 'gone') { return }
+    $process = [pscustomobject]@{ Path = (Join-Path $source 'zdrive_app.exe') }
+    $process | Add-Member ScriptMethod WaitForExit {
+        param($timeout)
+        Assert (Test-Path (Join-Path $updates "handoff-$handoff.ready")) 'Parent waited before readiness signal'
+        return $global:parentMode -ne 'running'
+    }
+    $process
+}
+function Get-ItemProperty { param($LiteralPath, $ErrorAction); [pscustomobject]@{ DisplayVersion = $global:installedVersion } }
+function Start-Process { param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle); $global:launched += $FilePath; Assert ($ArgumentList -eq '--skip-auto-update-once') 'Missing restart guard' }
+try {
+    $env:LOCALAPPDATA = Join-Path $fixture 'profile'
+    $root = Join-Path $env:LOCALAPPDATA 'Programs/zDrive'
+    $source = [IO.Path]::GetFullPath((Join-Path $root 'releases/0.2.1'))
+    $updates = Join-Path $root 'updates'
+    $package = Join-Path $fixture 'payload'
+    New-Item -ItemType Directory -Path $source, (Join-Path $updates '0.2.2'), (Join-Path $package 'app'), (Join-Path $env:LOCALAPPDATA 'zdrive_app') -Force | Out-Null
+    $userdata = Join-Path $env:LOCALAPPDATA 'zdrive_app/settings.json'
+    Set-Content $userdata 'preserve me'
+    Set-Content (Join-Path $source 'zdrive_app.exe') 'old executable'
+    Copy-Item (Join-Path $PSScriptRoot '../../packaging/windows/Apply-Update.ps1') $source
+    Set-Content (Join-Path $package 'version.txt') '0.2.2'
+    Set-Content (Join-Path $package 'app/version.txt') '0.2.2'
+    Set-Content (Join-Path $package 'app/zdrive_app.exe') 'new executable'
+    @'
+if ($global:injectInstallFailure) { throw 'Injected installer failure' }
+$target = Join-Path $env:LOCALAPPDATA 'Programs/zDrive/releases/0.2.2'
+New-Item -ItemType Directory -Path $target -Force | Out-Null
+Copy-Item (Join-Path $PSScriptRoot 'app/*') $target -Recurse
+'@ | Set-Content (Join-Path $package 'Install.ps1')
+    $zip = Join-Path $updates '0.2.2/payload.zip'
+    Compress-Archive -Path (Join-Path $package '*') -DestinationPath $zip
+    $hash = (Get-FileHash $zip).Hash
+    $size = (Get-Item $zip).Length
+    $helper = Join-Path $source 'Apply-Update.ps1'
+    $handoff = [guid]::NewGuid().ToString('N')
+    Add-Type -TypeDefinition @'
+using System;
+using System.Threading;
+public sealed class UpdateTestLock : IDisposable {
+    readonly ManualResetEvent ready = new ManualResetEvent(false);
+    readonly ManualResetEvent release = new ManualResetEvent(false);
+    readonly Thread thread;
+    public UpdateTestLock(string name) {
+        thread = new Thread(() => {
+            using (var mutex = new Mutex(false, name)) {
+                mutex.WaitOne(); ready.Set(); release.WaitOne(); mutex.ReleaseMutex();
+            }
+        });
+        thread.Start(); ready.WaitOne();
+    }
+    public void Dispose() { release.Set(); thread.Join(); ready.Dispose(); release.Dispose(); }
+}
+'@
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $held = [UpdateTestLock]::new("Local\zDrive.Update.$sid")
+    try {
+        Set-Content (Join-Path $updates 'pending.json') '{"version":"0.2.2"}'
+        & $helper -ParentProcessId 123 -SourceVersion 0.2.1 -Version 0.2.2 -ExpectedSha256 $hash -ExpectedSize $size -HandoffId $handoff
+        Assert (Test-Path (Join-Path $updates 'pending.json')) 'Concurrent helper changed pending update'
+        Assert ($global:launched.Count -eq 0) 'Concurrent helper launched app'
+        Assert (-not (Test-Path (Join-Path $updates "handoff-$handoff.ready"))) 'Concurrent helper signaled readiness'
+    } finally { $held.Dispose() }
+    foreach ($scenario in @('size', 'hash', 'timeout', 'another', 'older', 'install', 'success')) {
+        $global:launched = @()
+        $global:injectInstallFailure = $scenario -eq 'install'
+        $global:parentMode = if ($scenario -eq 'timeout') { 'running' } elseif ($scenario -eq 'another') { 'another' } else { 'exited' }
+        $global:installedVersion = if ($scenario -eq 'older') { '0.2.3' } else { '0.2.1' }
+        if ($scenario -eq 'older') {
+            New-Item -ItemType Directory -Path (Join-Path $root 'releases/0.2.3') -Force | Out-Null
+            Set-Content (Join-Path $root 'releases/0.2.3/zdrive_app.exe') 'newer executable'
+        }
+        Set-Content (Join-Path $updates 'pending.json') '{"version":"0.2.2"}'
+        $testSize = if ($scenario -eq 'size') { $size + 1 } else { $size }
+        $testHash = if ($scenario -eq 'hash') { '0' * 64 } else { $hash }
+        & $helper -ParentProcessId 123 -SourceVersion 0.2.1 -Version 0.2.2 -ExpectedSha256 $testHash -ExpectedSize $testSize -HandoffId $handoff
+        Assert (-not (Test-Path (Join-Path $updates 'pending.json'))) "$scenario left pending restart loop"
+        Assert (-not (Test-Path (Join-Path $updates "handoff-$handoff.ready"))) 'Readiness marker leaked'
+        Assert ((Get-Content $userdata) -eq 'preserve me') "$scenario modified user data"
+        Assert ((Get-Content (Join-Path $source 'zdrive_app.exe')) -eq 'old executable') "$scenario damaged old installation"
+        Assert (@(Get-ChildItem $updates -Force | Where-Object Name -like '.apply-*').Count -eq 0) 'Extraction directory leaked'
+        if ($scenario -in @('timeout', 'another')) { Assert ($global:launched.Count -eq 0) 'Launched duplicate app while another app still running' }
+        else {
+            Assert ($global:launched.Count -eq 1) "$scenario did not restart"
+            $expected = switch ($scenario) { 'success' { '0.2.2' } 'older' { '0.2.3' } default { '0.2.1' } }
+            Assert ($global:launched[0] -like "*releases*$expected*zdrive_app.exe") "$scenario restarted wrong version"
+        }
+        if ($scenario -eq 'success') { Assert (-not (Test-Path (Join-Path $updates 'last-error.json'))) 'Success left error' }
+        else { Assert (Test-Path (Join-Path $updates 'last-error.json')) "$scenario did not record error" }
+    }
+    # A valid checksum does not make path traversal safe to extract.
+    Remove-Item -LiteralPath $zip -Force
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $entry = $archive.CreateEntry('../escape.txt')
+        $writer = [IO.StreamWriter]::new($entry.Open())
+        try { $writer.Write('escape') } finally { $writer.Dispose() }
+    } finally { $archive.Dispose() }
+    $global:parentMode = 'gone'
+    $global:installedVersion = '0.2.1'
+    & $helper -ParentProcessId 123 -SourceVersion 0.2.1 -Version 0.2.2 -ExpectedSha256 (Get-FileHash $zip).Hash -ExpectedSize (Get-Item $zip).Length -HandoffId $handoff
+    Assert (-not (Test-Path (Join-Path $updates 'escape.txt'))) 'ZIP escaped extraction directory'
+    Assert ((Get-Content (Join-Path $updates 'last-error.json') -Raw | ConvertFrom-Json).message -eq 'Unsafe update archive path.') 'Unsafe ZIP not rejected'
+    'PASS: update success, size/hash and unsafe ZIP rejection, concurrent helper, parent timeout, other instance, newer-install protection, installer failure recovery and preserved user data.'
+} finally {
+    $env:LOCALAPPDATA = $originalProfile
+    $boundary = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if ([IO.Path]::GetFullPath($fixture).StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue }
+}
