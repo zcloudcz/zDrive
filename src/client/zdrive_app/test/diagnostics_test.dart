@@ -66,7 +66,7 @@ void main() {
       await Diagnostics.flush();
       (await rendezvous.first as SendPort).send(null);
       rendezvous.close();
-      expect(await second, endsWith('diagnostic-export.log'));
+      expect(await second, matches(r'diagnostic-export-[^/\\]+\.log$'));
       Diagnostics.event('first.recovered');
       final exported = await Diagnostics.exportLogs();
       expect(exported, isNotNull);
@@ -186,7 +186,7 @@ void main() {
     },
   );
 
-  test('rotation preserves recent bounded logs and a single export', () async {
+  test('rotation preserves recent bounded logs', () async {
     await Diagnostics.initialize(directory: directory.path, maxBytes: 700);
     for (var i = 0; i < 30; i++) {
       Diagnostics.event('rotation.event', {'sequence': i});
@@ -195,11 +195,24 @@ void main() {
     final text = await File(path!).readAsString();
     expect(text, contains('"sequence":29'));
     expect(text.length, lessThan(2100));
-    expect(await Diagnostics.exportLogs(), path);
+    expect(await Diagnostics.exportLogs(), isNot(path));
     expect(
-      directory.listSync().where((file) => !file.path.endsWith('.lock')).length,
-      4,
+      directory.listSync().where((file) => file.path.endsWith('.jsonl')).length,
+      3,
     );
+  });
+
+  test('overlapping exports keep independent immutable snapshots', () async {
+    await Diagnostics.initialize(directory: directory.path);
+    Diagnostics.event('export.first');
+    final first = (await Diagnostics.exportLogs())!;
+    final original = await File(first).readAsBytes();
+    Diagnostics.event('export.second');
+    final second = (await Diagnostics.exportLogs())!;
+    expect(second, isNot(first));
+    expect(await File(first).readAsBytes(), original);
+    expect(await File(first).readAsString(), isNot(contains('export.second')));
+    expect(await File(second).readAsString(), contains('export.second'));
   });
 
   test('background worker detects missing UI heartbeat', () async {

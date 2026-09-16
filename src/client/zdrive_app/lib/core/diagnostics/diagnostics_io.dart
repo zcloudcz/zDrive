@@ -186,6 +186,7 @@ void _writeLogs(List<Object> args) {
   }
 
   var failedEvents = 0;
+  var exportSequence = 0;
   void append(Map<String, Object?> record) {
     try {
       locked(() {
@@ -264,7 +265,12 @@ void _writeLogs(List<Object> args) {
       if (failedEvents > 0) append(diagnosticRecord('writer.drop_summary', {}));
       try {
         final exported = locked(() {
-          final file = File(p.join(directory, 'diagnostic-export.log'));
+          final file = File(
+            p.join(
+              directory,
+              'diagnostic-export-$session-${++exportSequence}.log',
+            ),
+          );
           final snapshot = file.openSync(mode: FileMode.write);
           try {
             for (var i = 2; i >= 0; i--) {
