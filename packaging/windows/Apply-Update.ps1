@@ -44,13 +44,15 @@ try {
     $mutex = [Threading.Mutex]::new($false, "Local\zDrive.Update.$sid")
     try { $ownsMutex = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
     if (-not $ownsMutex) { return }
+    $parent = Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue
+    if ($parent -and -not [string]::Equals($parent.Path, (Join-Path $source 'zdrive_app.exe'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Unexpected parent process.'
+    }
     New-Item -ItemType Directory -Path $updates -Force | Out-Null
     $readyJson = @{ version = $Version; processId = $PID } | ConvertTo-Json
     [IO.File]::WriteAllText("$ready.tmp", $readyJson, [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath "$ready.tmp" -Destination $ready -Force
-    $parent = Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue
     if ($parent) {
-        if (-not [string]::Equals($parent.Path, (Join-Path $source 'zdrive_app.exe'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected parent process.' }
         if (-not $parent.WaitForExit(120000)) { throw 'The application did not close in time.' }
     }
     $parentExited = $true
@@ -83,11 +85,10 @@ try {
     if ((Get-Content -LiteralPath (Join-Path $stage 'version.txt') -Raw).Trim() -ne $Version -or
         (Get-Content -LiteralPath (Join-Path $stage 'app/version.txt') -Raw).Trim() -ne $Version) { throw 'Update package version does not match.' }
     & (Join-Path $stage 'Install.ps1')
-    $restartVersion = $Version
+    Start-InstalledApp $Version
     Clear-MatchingPending
     $errorFile = Join-Path $updates 'last-error.json'
     if (Test-Path -LiteralPath $errorFile) { Remove-Item -LiteralPath $errorFile -Force }
-    Start-InstalledApp $restartVersion
 } catch {
     if ($ownsMutex) {
         $message = $_.Exception.Message

@@ -13,6 +13,7 @@ function Get-Process {
         return
     }
     if ($global:parentMode -eq 'gone') { return }
+    if ($global:parentMode -eq 'invalid') { return [pscustomobject]@{ Path = 'C:\unrelated.exe' } }
     $process = [pscustomobject]@{ Path = (Join-Path $source 'zdrive_app.exe') }
     $process | Add-Member ScriptMethod WaitForExit {
         param($timeout)
@@ -23,7 +24,20 @@ function Get-Process {
     $process
 }
 function Get-ItemProperty { param($LiteralPath, $ErrorAction); [pscustomobject]@{ DisplayVersion = $global:installedVersion } }
-function Start-Process { param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle); $global:launched += $FilePath; Assert ($ArgumentList -eq '--skip-auto-update-once') 'Missing restart guard' }
+function Start-Process {
+    param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle)
+    if ($global:injectLaunchFailure -and $FilePath -like '*releases*0.2.2*zdrive_app.exe') { throw 'Injected new executable launch failure' }
+    $global:launched += $FilePath
+    Assert ($ArgumentList -eq '--skip-auto-update-once') 'Missing restart guard'
+}
+function Move-Item {
+    param($LiteralPath, $Destination, [switch]$Force)
+    if ($Destination -like '*.ready') {
+        $global:readinessPublished = $true
+        Assert ($global:parentMode -ne 'invalid') 'Readiness published before parent validation'
+    }
+    Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
+}
 function Remove-Item {
     param($LiteralPath, [switch]$Recurse, [switch]$Force, $ErrorAction)
     if ($global:injectCleanupFailure -and ($LiteralPath -like '*.apply-*' -or $LiteralPath -like '*.ready')) { throw 'Injected cleanup failure' }
@@ -92,10 +106,12 @@ public sealed class UpdateTestLock : IDisposable {
         Assert ($global:launched.Count -eq 0) 'Concurrent helper launched app'
         Assert (-not (Test-Path (Join-Path $updates "handoff-$handoff.ready"))) 'Concurrent helper signaled readiness'
     } finally { $held.Dispose() }
-    foreach ($scenario in @('size', 'hash', 'timeout', 'another', 'older', 'install', 'success')) {
+    foreach ($scenario in @('size', 'hash', 'timeout', 'another', 'invalid', 'older', 'install', 'launch', 'success')) {
         $global:launched = @()
+        $global:readinessPublished = $false
         $global:injectInstallFailure = $scenario -eq 'install'
-        $global:parentMode = if ($scenario -eq 'timeout') { 'running' } elseif ($scenario -eq 'another') { 'another' } else { 'exited' }
+        $global:injectLaunchFailure = $scenario -eq 'launch'
+        $global:parentMode = if ($scenario -eq 'timeout') { 'running' } elseif ($scenario -in @('another', 'invalid')) { $scenario } else { 'exited' }
         $global:installedVersion = if ($scenario -eq 'older') { '0.2.3' } else { '0.2.1' }
         if ($scenario -eq 'older') {
             New-Item -ItemType Directory -Path (Join-Path $root 'releases/0.2.3') -Force | Out-Null
@@ -107,10 +123,11 @@ public sealed class UpdateTestLock : IDisposable {
         & $helper -ParentProcessId 123 -SourceVersion 0.2.1 -Version 0.2.2 -ExpectedSha256 $testHash -ExpectedSize $testSize -HandoffId $handoff
         Assert (-not (Test-Path (Join-Path $updates 'pending.json'))) "$scenario left pending restart loop"
         Assert (-not (Test-Path (Join-Path $updates "handoff-$handoff.ready"))) 'Readiness marker leaked'
+        if ($scenario -eq 'invalid') { Assert (-not $global:readinessPublished) 'Invalid parent received readiness handshake' }
         Assert ((Get-Content $userdata) -eq 'preserve me') "$scenario modified user data"
         Assert ((Get-Content (Join-Path $source 'zdrive_app.exe')) -eq 'old executable') "$scenario damaged old installation"
         Assert (@(Get-ChildItem $updates -Force | Where-Object Name -like '.apply-*').Count -eq 0) 'Extraction directory leaked'
-        if ($scenario -in @('timeout', 'another')) { Assert ($global:launched.Count -eq 0) 'Launched duplicate app while another app still running' }
+        if ($scenario -in @('timeout', 'another', 'invalid')) { Assert ($global:launched.Count -eq 0) 'Launched duplicate app while another app still running' }
         else {
             Assert ($global:launched.Count -eq 1) "$scenario did not restart"
             $expected = switch ($scenario) { 'success' { '0.2.2' } 'older' { '0.2.3' } default { '0.2.1' } }
