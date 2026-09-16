@@ -9,6 +9,23 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get aboutApp => 'About';
+
+  @override
+  String get exitApp => 'Exit';
+
+  @override
+  String get exitFailed => 'Could not exit the app. Please try again.';
+
+  @override
+  String get appVersionFailed => 'Could not load the app version.';
+
+  @override
+  String appVersion(String version) {
+    return 'Version $version';
+  }
+
+  @override
   String get appTitle => 'zDrive';
 
   @override

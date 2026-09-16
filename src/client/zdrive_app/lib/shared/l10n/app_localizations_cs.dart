@@ -9,6 +9,23 @@ class AppLocalizationsCs extends AppLocalizations {
   AppLocalizationsCs([String locale = 'cs']) : super(locale);
 
   @override
+  String get aboutApp => 'O programu';
+
+  @override
+  String get exitApp => 'Ukončit';
+
+  @override
+  String get exitFailed => 'Aplikaci se nepodařilo ukončit. Zkuste to znovu.';
+
+  @override
+  String get appVersionFailed => 'Verzi aplikace se nepodařilo načíst.';
+
+  @override
+  String appVersion(String version) {
+    return 'Verze $version';
+  }
+
+  @override
   String get appTitle => 'zDrive';
 
   @override

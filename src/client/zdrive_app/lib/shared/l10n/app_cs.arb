@@ -1,5 +1,11 @@
 {
   "@@locale": "cs",
+  "aboutApp": "O programu",
+  "exitApp": "Ukončit",
+  "exitFailed": "Aplikaci se nepodařilo ukončit. Zkuste to znovu.",
+  "appVersionFailed": "Verzi aplikace se nepodařilo načíst.",
+  "appVersion": "Verze {version}",
+  "@appVersion": { "placeholders": { "version": { "type": "String" } } },
   "appTitle": "zDrive",
   "downloadForWindows": "Stáhnout pro Windows",
   "login": "Přihlášení",

@@ -11,26 +11,6 @@ TrayWindow::~TrayWindow() {
 }
 
 bool TrayWindow::Initialize() {
-  HMENU menu = CreateMenu();
-  HMENU actions = CreatePopupMenu();
-  if (!menu || !actions) {
-    if (menu) DestroyMenu(menu);
-    if (actions) DestroyMenu(actions);
-    return false;
-  }
-  if (!AppendMenuW(actions, MF_STRING, kExitCommand, L"&Ukon\u010dit") ||
-      !AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(actions),
-                   L"&Menu")) {
-    DestroyMenu(actions);
-    DestroyMenu(menu);
-    return false;
-  }
-  if (!SetMenu(window_, menu)) {
-    DestroyMenu(menu);
-    return false;
-  }
-  DrawMenuBar(window_);
-
   taskbar_created_ = RegisterWindowMessageW(L"TaskbarCreated");
   icon_.cbSize = sizeof(icon_);
   icon_.hWnd = window_;

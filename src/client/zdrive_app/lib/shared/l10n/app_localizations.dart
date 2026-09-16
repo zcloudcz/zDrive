@@ -98,6 +98,36 @@ abstract class AppLocalizations {
     Locale('en'),
   ];
 
+  /// No description provided for @aboutApp.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get aboutApp;
+
+  /// No description provided for @exitApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Exit'**
+  String get exitApp;
+
+  /// No description provided for @exitFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not exit the app. Please try again.'**
+  String get exitFailed;
+
+  /// No description provided for @appVersionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load the app version.'**
+  String get appVersionFailed;
+
+  /// No description provided for @appVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}'**
+  String appVersion(String version);
+
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
