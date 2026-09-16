@@ -38,6 +38,7 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
         {
             session.Status = UploadSessionStatus.Expired;
             await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             throw new ConflictException($"Upload session '{request.SessionId}' has expired.");
         }
 

@@ -3,6 +3,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Azure.Storage.Blobs;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using ZDrive.StorageService.Domain.Enums;
+using ZDrive.StorageService.Infrastructure.Persistence;
 using Xunit;
 using ZDrive.Shared.DTOs;
 using ZDrive.StorageService.Application.DTOs;
@@ -98,6 +102,29 @@ public sealed class AbortUploadTests : IClassFixture<StorageServiceFactory>
         var manifest = (await response.Content.ReadFromJsonAsync<ApiResponse<ManifestDto>>())!.Data!;
         var chunk = await _client.GetAsync($"/api/v1/storage/download/{fileId}/chunk/{manifest.Chunks[0].Hash}/bytes");
         (await chunk.Content.ReadAsByteArrayAsync()).Should().Equal(new byte[] { 1, 2, 3 });
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_ExpiredSession_PersistsExpiredStatusBeforeReturningConflict(bool complete)
+    {
+        var sessionId = await Init();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StorageDbContext>();
+            var session = await db.UploadSessions.SingleAsync(s => s.Id == sessionId);
+            session.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
+        }
+
+        var response = complete ? await Complete(sessionId) : await Put(sessionId);
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        using var readScope = _factory.Services.CreateScope();
+        var readDb = readScope.ServiceProvider.GetRequiredService<StorageDbContext>();
+        var status = await readDb.UploadSessions.AsNoTracking()
+            .Where(s => s.Id == sessionId).Select(s => s.Status).SingleAsync();
+        status.Should().Be(UploadSessionStatus.Expired);
     }
     private HttpClient Client(Guid user, Guid tenant)
     {
