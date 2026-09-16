@@ -104,6 +104,25 @@ void main() {
     expect(find.text('Known items: 0 / 4 completed · 4 remaining'), findsOneWidget);
   });
 
+  testWidgets('large failed list is lazy while active progress remains visible', (tester) async {
+    final bloc = MockSyncBloc();
+    final failures = List.generate(5000, (index) => SyncFailedEvent(
+      fileId: 'failed-$index', eventId: index, reason: 'conflict', failedAt: DateTime.utc(2026)));
+    when(() => bloc.state).thenReturn(SyncLoaded(devices: const [], syncFolderPath: '/sync', isPulling: true,
+      failedEvents: failures, progress: SyncProgress(phase: SyncPhase.uploading, totalFiles: 10,
+        activeFiles: const [SyncFileProgress(key: 'a', path: 'photo.jpg', transferredBytes: 100, totalBytes: 200)])));
+    await tester.pumpWidget(MaterialApp(localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales, locale: const Locale('en'),
+      home: BlocProvider<SyncBloc>.value(value: bloc, child: const SyncPage())));
+    expect(find.text('Uploading'), findsOneWidget);
+    expect(find.text('photo.jpg'), findsOneWidget);
+    final list = tester.widget<ListView>(find.byType(ListView));
+    expect(list.childrenDelegate, isA<SliverChildBuilderDelegate>());
+    expect(find.text('failed-4999'), findsNothing);
+    expect(find.byType(ListTile).evaluate().length, lessThan(30));
+    expect(tester.takeException(), isNull);
+  });
+
   group('SyncPage', () {
     testWidgets('shows the registered devices', (tester) async {
       when(() => mockDataSource.getDevices()).thenAnswer((_) async => [

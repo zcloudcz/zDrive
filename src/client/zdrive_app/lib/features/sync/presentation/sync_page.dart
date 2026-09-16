@@ -100,32 +100,36 @@ class _SyncLoadedBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
-    return ListView(
-      children: [
-        _FolderStatusTile(state: state),
-        if (state.isPulling && state.progress != null)
-          _SyncProgressView(progress: state.progress!),
-        if (state.failedFiles > 0)
-          ListTile(
-            leading: Icon(
-              Icons.warning_amber,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            title: Text(l10n.syncProgressFailures(state.failedFiles)),
-          ),
-        if (state.devices.isEmpty)
-          ListTile(
-            leading: const Icon(Icons.devices_other),
-            title: Text(l10n.syncNoDevices),
-          ),
-        if (state.failedEvents.isNotEmpty) ...[
-          _SectionHeader(title: l10n.syncSkippedItems),
-          for (final failed in state.failedEvents)
-            _FailedEventTile(failed: failed),
-        ],
-        _SectionHeader(title: l10n.syncDevices),
-        for (final device in state.devices) _DeviceTile(device: device),
-      ],
+    final header = <Widget>[
+      _FolderStatusTile(state: state),
+      if (state.isPulling && state.progress != null)
+        _SyncProgressView(progress: state.progress!),
+      if (state.failedFiles > 0)
+        ListTile(
+          leading: Icon(Icons.warning_amber,
+              color: Theme.of(context).colorScheme.error),
+          title: Text(l10n.syncProgressFailures(state.failedFiles)),
+        ),
+      if (state.devices.isEmpty)
+        ListTile(
+          leading: const Icon(Icons.devices_other),
+          title: Text(l10n.syncNoDevices),
+        ),
+      if (state.failedEvents.isNotEmpty)
+        _SectionHeader(title: l10n.syncSkippedItems),
+    ];
+    return ListView.builder(
+      itemCount: header.length + state.failedEvents.length + 1 + state.devices.length,
+      itemBuilder: (context, index) {
+        if (index < header.length) return header[index];
+        final row = index - header.length;
+        if (row < state.failedEvents.length) {
+          return _FailedEventTile(failed: state.failedEvents[row]);
+        }
+        final deviceRow = row - state.failedEvents.length;
+        if (deviceRow == 0) return _SectionHeader(title: l10n.syncDevices);
+        return _DeviceTile(device: state.devices[deviceRow - 1]);
+      },
     );
   }
 }
