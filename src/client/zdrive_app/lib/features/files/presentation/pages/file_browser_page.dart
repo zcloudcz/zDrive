@@ -340,18 +340,25 @@ class _FileBrowserView extends StatelessWidget {
 
   Future<void> _showDeleteConfirm(BuildContext context, FileItem file) async {
     final l10n = AppLocalizations.of(context)!;
+    var dialogClosed = false;
+    void closeDialog(BuildContext dialogContext, bool confirmed) {
+      if (dialogClosed) return;
+      dialogClosed = true;
+      Navigator.of(dialogContext).pop(confirmed);
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(l10n.confirmDelete),
         content: Text(file.name),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => closeDialog(dialogContext, false),
             child: Text(l10n.cancel),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => closeDialog(dialogContext, true),
             child: Text(l10n.delete),
           ),
         ],
