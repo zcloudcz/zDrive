@@ -1,7 +1,6 @@
 import 'dart:developer';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:injectable/injectable.dart';
 import 'package:path/path.dart' as p;
@@ -12,7 +11,9 @@ import '../../files/domain/file_item.dart';
 import '../../files/domain/file_repository.dart';
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
+import '../domain/sync_progress.dart';
 import 'device_registration_service.dart';
+import 'file_hash.dart';
 import 'sync_name_rules.dart';
 
 /// Thrown when a server-supplied name cannot become a safe local path —
@@ -47,29 +48,26 @@ class LocalConflictException implements Exception {
 
 /// Applies remote sync events into the designated local folder.
 ///
-/// Ordering guarantee: events are applied one at a time, strictly in the
-/// order the server returned them (already ascending by id). The mirror
-/// cursor for this device only advances to an event's id *after* that
-/// event's disk write and mirror-row update both complete — so if the app
-/// dies mid-[pullOnce], the persisted cursor never points past work that
-/// did not land. The event that was in flight (and everything after it)
-/// will be re-delivered on the next pull. [_applyUpsert] installs the verified
-/// download, then deletes the stale path before committing the mirror row.
-/// Disk and mirror writes are not one transaction: interruption between
-/// them can leave content that a later pull reports as a local conflict.
+/// New, untracked file creates may run concurrently, with at most three
+/// workers. Updates, deletes, folder events and creates for existing files
+/// act as serial barriers: all active workers finish before they run.
+/// Bootstrap also limits file downloads to three and processes folders
+/// serially.
 ///
-/// A *permanent* failure (an unsafe name, or a local file pull refuses to
-/// overwrite) does not get the "block until it succeeds" treatment above:
-/// it is quarantined instead — recorded via
-/// [SyncMirrorRepository.recordFailedEvent], with the cursor still advancing
-/// past it — because retrying it immediately would fail the same way and
-/// block every event behind it. It is not abandoned, though: [pullOnce]
-/// retries every quarantined entry on each call, before draining the event
-/// log (see the retry loop there) — so a cause that clears up on its own
-/// (a locked file gets closed, a removable drive comes back) recovers on
-/// the next poll instead of staying stuck forever. Anything else (a network
-/// error, an exception we don't recognise) still blocks the cursor, since
-/// those usually do resolve on a later retry.
+/// Cursor writes follow server event order and advance only through the
+/// contiguous prefix of successfully handled events. All started workers
+/// are awaited, including after a failure. Later workers may finish, but
+/// the cursor never skips a failed event; unacknowledged events are
+/// delivered again on the next pull.
+///
+/// Disk installation and mirror updates are not one transaction.
+/// Interruption between them can leave content that a later pull reports
+/// as a local conflict.
+///
+/// Unsafe names and local conflicts are recorded through
+/// [SyncMirrorRepository.recordFailedEvent]. Successfully quarantined
+/// events allow cursor advancement; [pullOnce] retries quarantined entries
+/// before processing new events. Other failures stop cursor advancement.
 @lazySingleton
 class PullSyncService {
   final FileRemoteDataSource _filesDataSource;
@@ -104,6 +102,8 @@ class PullSyncService {
   // second caller await the first call's result instead of starting its own
   // (see PR #12 review round 2, R6/F4).
   Future<int>? _inFlight;
+  SyncProgressTracker? _progress;
+  int _plannedItems = 0;
 
   /// Pulls and applies everything pending for this device, draining
   /// multiple pages if the server reports more than fit in one. On this
@@ -113,8 +113,14 @@ class PullSyncService {
   /// raised for them, so a file nobody has touched since before this
   /// feature shipped would otherwise never arrive. Returns the number of
   /// events applied (the backfill is not counted — it is not an event).
-  Future<int> pullOnce(String syncFolderPath) {
-    return _inFlight ??= _pullOnce(syncFolderPath).whenComplete(() => _inFlight = null);
+  Future<int> pullOnce(String syncFolderPath, {SyncProgressTracker? progress}) {
+    if (_inFlight != null) return _inFlight!;
+    _progress = progress;
+    _plannedItems = 0;
+    return _inFlight = _pullOnce(syncFolderPath).whenComplete(() {
+      _progress = null;
+      _inFlight = null;
+    });
   }
 
   /// Caps how many quarantined rows a single poll retries. Without this, a
@@ -136,6 +142,7 @@ class PullSyncService {
 
   Future<int> _pullOnce(String syncFolderPath) async {
     final deviceId = await _deviceRegistration.ensureRegistered();
+    _progress?.beginPhase(SyncPhase.downloading, discovering: true);
 
     // Runs before the drain below so a fix picked up here does not race a
     // fresh failure for the same file later in this same call.
@@ -144,12 +151,15 @@ class PullSyncService {
     var applied = 0;
     while (true) {
       final cursor = await _mirror.getCursor(deviceId);
-      final page = await _filesDataSource.getChanges(cursor, deviceId: deviceId);
+      final page = await _filesDataSource.getChanges(
+        cursor,
+        deviceId: deviceId,
+      );
 
-      for (final change in page.changes) {
-        await _applyEvent(change, deviceId, syncFolderPath);
-        applied++;
-      }
+      _plannedItems += page.changes.length;
+      _progress?.setTotalFiles(_plannedItems);
+      await _applyChangePage(page.changes, deviceId, syncFolderPath);
+      applied += page.changes.length;
 
       // The server drops this device's own writes from the page *after*
       // fixing nextCursor, so nextCursor can lie beyond the last item here —
@@ -179,6 +189,79 @@ class PullSyncService {
     return applied;
   }
 
+  // Only untracked creations can overlap. Updates, deletes and folder changes
+  // are barriers; cursor commits remain in feed order after all workers drain.
+  Future<void> _applyChangePage(
+    List<ChangeFeedItemDto> changes,
+    String deviceId,
+    String root,
+  ) async {
+    final batch = <({ChangeFeedItemDto change, FileItem remote})>[];
+    final destinations = <String>{};
+    Future<void> flush() async {
+      if (batch.isEmpty) return;
+      final results = await Future.wait(
+        batch.map((entry) async {
+          try {
+            await _applyEvent(
+              entry.change,
+              deviceId,
+              root,
+              remote: entry.remote,
+              advanceCursor: false,
+            );
+            return null;
+          } catch (error, stack) {
+            return (error: error, stack: stack);
+          }
+        }),
+      );
+      for (var index = 0; index < batch.length; index++) {
+        final failure = results[index];
+        if (failure != null) {
+          Error.throwWithStackTrace(failure.error, failure.stack);
+        }
+        await _mirror.setCursor(deviceId, batch[index].change.id);
+      }
+      batch.clear();
+      destinations.clear();
+    }
+
+    for (final change in changes) {
+      FileItem? candidate;
+      var independent = false;
+      if (change.type == 'Create') {
+        try {
+          final remote = await _fileRepository.getFile(change.fileId);
+          candidate = remote;
+          if (!remote.isFolder &&
+              await _mirror.getByServerId(change.fileId) == null) {
+            independent = true;
+          }
+        } catch (_) {
+          // The ordinary ordered path below owns errors and quarantine.
+        }
+      }
+      if (!independent || candidate == null) {
+        await flush();
+        await _applyEvent(change, deviceId, root, remote: candidate);
+        continue;
+      }
+      final destination = '${candidate.parentId}/${candidate.name}'
+          .toLowerCase();
+      if (destinations.contains(destination) ||
+          batch.any((entry) => entry.change.fileId == change.fileId)) {
+        await flush();
+        await _applyEvent(change, deviceId, root);
+        continue;
+      }
+      batch.add((change: change, remote: candidate));
+      destinations.add(destination);
+      if (batch.length == 3) await flush();
+    }
+    await flush();
+  }
+
   /// Events pull could not apply for a permanent reason — see the class doc
   /// comment. A thin passthrough so the presentation layer can surface them
   /// without depending on [SyncMirrorRepository] directly.
@@ -197,16 +280,20 @@ class PullSyncService {
   /// this call even runs.
   Future<void> _retryQuarantined(String syncFolderPath) async {
     final now = DateTime.now();
-    final due = (await _mirror.getFailedEvents())
-        .where((f) => now.difference(f.failedAt) >= _retryBackoff)
-        .toList()
-      // Oldest-failed first: whatever gets retried below has its failedAt
-      // re-stamped to now, sorting it to the back for the next poll — so a
-      // quarantine larger than the per-poll budget still gets worked
-      // through over time instead of the same rows winning every time.
-      ..sort((a, b) => a.failedAt.compareTo(b.failedAt));
+    final due =
+        (await _mirror.getFailedEvents())
+            .where((f) => now.difference(f.failedAt) >= _retryBackoff)
+            .toList()
+          // Oldest-failed first: whatever gets retried below has its failedAt
+          // re-stamped to now, sorting it to the back for the next poll — so a
+          // quarantine larger than the per-poll budget still gets worked
+          // through over time instead of the same rows winning every time.
+          ..sort((a, b) => a.failedAt.compareTo(b.failedAt));
 
-    for (final failed in due.take(_maxRetriesPerPoll)) {
+    final retryItems = due.take(_maxRetriesPerPoll).toList();
+    _plannedItems += retryItems.length;
+    _progress?.setTotalFiles(_plannedItems);
+    for (final failed in retryItems) {
       try {
         await _applyUpsert(failed.fileId, syncFolderPath);
         await _mirror.clearFailedEvent(failed.fileId);
@@ -218,8 +305,17 @@ class PullSyncService {
         // logged and its own reason recorded, not the stale reason from the
         // first attempt, so a later different failure is visible instead of
         // silently hiding behind whatever tripped first.
-        log('quarantine retry failed for ${failed.fileId}', error: e, stackTrace: st, name: 'PullSyncService');
-        await _mirror.recordFailedEvent(failed.fileId, failed.eventId, e.toString());
+        log(
+          'quarantine retry failed for ${failed.fileId}',
+          error: e,
+          stackTrace: st,
+          name: 'PullSyncService',
+        );
+        await _mirror.recordFailedEvent(
+          failed.fileId,
+          failed.eventId,
+          e.toString(),
+        );
       }
     }
   }
@@ -227,8 +323,10 @@ class PullSyncService {
   Future<void> _applyEvent(
     ChangeFeedItemDto change,
     String deviceId,
-    String syncFolderPath,
-  ) async {
+    String syncFolderPath, {
+    FileItem? remote,
+    bool advanceCursor = true,
+  }) async {
     final eventId = change.id;
     final fileId = change.fileId;
 
@@ -242,7 +340,7 @@ class PullSyncService {
       // also covers move/rename without a separate code path — the mirror
       // lookup inside finds the entry's previous local path (if any) and
       // relocates it when the resolved path has changed.
-      await _applyUpsert(fileId, syncFolderPath);
+      await _applyUpsert(fileId, syncFolderPath, remote: remote);
       // A previous failure for this file, if any, no longer applies now
       // that a later event for it has gone through cleanly.
       await _mirror.clearFailedEvent(fileId);
@@ -261,7 +359,7 @@ class PullSyncService {
       await _mirror.recordFailedEvent(fileId, eventId, e.message);
     }
 
-    await _mirror.setCursor(deviceId, eventId);
+    if (advanceCursor) await _mirror.setCursor(deviceId, eventId);
   }
 
   Future<void> _applyDelete(String fileId, String syncFolderPath) async {
@@ -281,7 +379,8 @@ class PullSyncService {
         // into this same method and tries again — finishing the job on its
         // own once whatever is left resolves (PR #12 review round 3, B1).
         throw LocalConflictException(
-            'folder still holds untracked or locally modified content, not removed: ${entry.localPath}');
+          'folder still holds untracked or locally modified content, not removed: ${entry.localPath}',
+        );
       }
     } else {
       // Pull runs before the scan (SyncCoordinator.syncOnce), so a local
@@ -295,7 +394,8 @@ class PullSyncService {
       // review round 1, F1).
       if (await _wouldOverwriteLocalChange(entry.localPath, entry)) {
         throw LocalConflictException(
-            'file has local changes not yet synced, not removed: ${entry.localPath}');
+          'file has local changes not yet synced, not removed: ${entry.localPath}',
+        );
       }
       await _deleteLocal(syncFolderPath, entry.localPath);
     }
@@ -303,10 +403,33 @@ class PullSyncService {
     await _mirror.deleteByServerId(fileId);
   }
 
-  Future<void> _applyUpsert(String fileId, String syncFolderPath) async {
+  Future<void> _applyUpsert(
+    String fileId,
+    String syncFolderPath, {
+    FileItem? remote,
+  }) async {
+    _progress?.startFile(
+      fileId,
+      remote?.name ?? fileId,
+      totalBytes: remote?.sizeBytes,
+    );
+    try {
+      await _applyUpsertCore(fileId, syncFolderPath, prefetched: remote);
+      _progress?.finishFile(fileId);
+    } catch (_) {
+      _progress?.finishFile(fileId, failed: true);
+      rethrow;
+    }
+  }
+
+  Future<void> _applyUpsertCore(
+    String fileId,
+    String syncFolderPath, {
+    FileItem? prefetched,
+  }) async {
     final FileItem remote;
     try {
-      remote = await _fileRepository.getFile(fileId);
+      remote = prefetched ?? await _fileRepository.getFile(fileId);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
         // The file is gone by the time we looked it up (e.g. a Create
@@ -320,7 +443,17 @@ class PullSyncService {
 
     final previous = await _mirror.getByServerId(fileId);
     final dirPath = await _resolveLocalDirPath(remote.parentId, syncFolderPath);
-    final localPath = _safeChildPath(syncFolderPath, dirPath, remote.name, _isWindows);
+    final localPath = _safeChildPath(
+      syncFolderPath,
+      dirPath,
+      remote.name,
+      _isWindows,
+    );
+    _progress?.startFile(
+      fileId,
+      p.relative(localPath, from: syncFolderPath),
+      totalBytes: remote.isFolder ? null : remote.sizeBytes,
+    );
     final moved = previous != null && previous.localPath != localPath;
     await _assertNoLinks(syncFolderPath, localPath);
     if (moved) await _assertNoLinks(syncFolderPath, previous.localPath);
@@ -351,12 +484,21 @@ class PullSyncService {
       // deleted "moved from" copy with nothing written at the new path.
       if (await _wouldOverwriteLocalChange(localPath, previous)) {
         throw LocalConflictException(
-            'local file differs from what was last synced: $localPath');
+          'local file differs from what was last synced: $localPath',
+        );
       }
-      if (moved && await _wouldOverwriteLocalChange(previous.localPath, previous)) {
-        throw LocalConflictException('moved file has local changes: ${previous.localPath}');
+      if (moved &&
+          await _wouldOverwriteLocalChange(previous.localPath, previous)) {
+        throw LocalConflictException(
+          'moved file has local changes: ${previous.localPath}',
+        );
       }
-      contentHash = await _downloadToFile(fileId, localPath, syncFolderPath, previous);
+      contentHash = await _downloadToFile(
+        fileId,
+        localPath,
+        syncFolderPath,
+        previous,
+      );
       if (moved) {
         await _assertNoLinks(syncFolderPath, previous.localPath);
         // Case-only renames can still resolve the old path to the installed
@@ -365,22 +507,26 @@ class PullSyncService {
         if (await File(previous.localPath).exists() &&
             !await FileSystemEntity.identical(previous.localPath, localPath)) {
           if (await _wouldOverwriteLocalChange(previous.localPath, previous)) {
-            throw LocalConflictException('moved file has local changes: ${previous.localPath}');
+            throw LocalConflictException(
+              'moved file has local changes: ${previous.localPath}',
+            );
           }
           await _deleteLocal(syncFolderPath, previous.localPath);
         }
       }
     }
 
-    await _mirror.upsert(SyncMirrorEntry(
-      serverId: remote.id,
-      localPath: localPath,
-      isFolder: remote.isFolder,
-      sizeBytes: remote.sizeBytes,
-      contentHash: contentHash,
-      updatedAt: remote.updatedAt,
-      syncedAt: DateTime.now(),
-    ));
+    await _mirror.upsert(
+      SyncMirrorEntry(
+        serverId: remote.id,
+        localPath: localPath,
+        isFolder: remote.isFolder,
+        sizeBytes: remote.sizeBytes,
+        contentHash: contentHash,
+        updatedAt: remote.updatedAt,
+        syncedAt: DateTime.now(),
+      ),
+    );
   }
 
   /// True if writing to [localPath] would clobber something pull did not
@@ -395,12 +541,16 @@ class PullSyncService {
     final file = File(localPath);
     if (!await file.exists()) return false;
     if (previous == null) return true;
-    final onDiskHash = (await sha256.bind(file.openRead()).first).toString();
+    final onDiskHash = (await hashFileInBackground(localPath)).hash;
     return onDiskHash != previous.contentHash;
   }
 
-  Future<String> _downloadToFile(String fileId, String localPath,
-      String syncFolderPath, SyncMirrorEntry? previous) async {
+  Future<String> _downloadToFile(
+    String fileId,
+    String localPath,
+    String syncFolderPath,
+    SyncMirrorEntry? previous,
+  ) async {
     await _assertNoLinks(syncFolderPath, localPath);
     final target = File(localPath);
     await target.parent.create(recursive: true);
@@ -410,19 +560,24 @@ class PullSyncService {
     final temporary = File(p.join(staging.path, 'content'));
     try {
       final output = await temporary.open(mode: FileMode.write);
+      var received = 0;
       try {
         await for (final chunk in _fileRepository.downloadFileStream(fileId)) {
           await output.writeFrom(chunk);
+          received += chunk.length;
+          _progress?.updateFile(fileId, received);
         }
         await output.flush();
       } finally {
         await output.close();
       }
-      final hash = (await sha256.bind(temporary.openRead()).first).toString();
+      final hash = (await hashFileInBackground(temporary.path)).hash;
       await _assertNoLinks(syncFolderPath, localPath);
       if (await _wouldOverwriteLocalChange(localPath, previous)) {
         // Recheck after network I/O: a local edit may have arrived meanwhile.
-        throw LocalConflictException('local file changed during download: $localPath');
+        throw LocalConflictException(
+          'local file changed during download: $localPath',
+        );
       }
       // Same-filesystem rename. Replacement semantics depend on the OS;
       // never delete the destination ourselves to make a failed rename work.
@@ -438,25 +593,38 @@ class PullSyncService {
   /// walking the parentId chain as needed and caching each folder it visits
   /// as a mirror row — so later files under the same folder resolve from
   /// the mirror instead of re-walking the chain.
-  Future<String> _resolveLocalDirPath(String? folderId, String syncFolderPath) async {
+  Future<String> _resolveLocalDirPath(
+    String? folderId,
+    String syncFolderPath,
+  ) async {
     if (folderId == null) return syncFolderPath;
 
     final cached = await _mirror.getByServerId(folderId);
     if (cached != null) return cached.localPath;
 
     final folder = await _fileRepository.getFile(folderId);
-    final parentPath = await _resolveLocalDirPath(folder.parentId, syncFolderPath);
-    final dirPath = _safeChildPath(syncFolderPath, parentPath, folder.name, _isWindows);
+    final parentPath = await _resolveLocalDirPath(
+      folder.parentId,
+      syncFolderPath,
+    );
+    final dirPath = _safeChildPath(
+      syncFolderPath,
+      parentPath,
+      folder.name,
+      _isWindows,
+    );
 
     await _assertNoLinks(syncFolderPath, dirPath);
     await Directory(dirPath).create(recursive: true);
-    await _mirror.upsert(SyncMirrorEntry(
-      serverId: folder.id,
-      localPath: dirPath,
-      isFolder: true,
-      updatedAt: folder.updatedAt,
-      syncedAt: DateTime.now(),
-    ));
+    await _mirror.upsert(
+      SyncMirrorEntry(
+        serverId: folder.id,
+        localPath: dirPath,
+        isFolder: true,
+        updatedAt: folder.updatedAt,
+        syncedAt: DateTime.now(),
+      ),
+    );
 
     return dirPath;
   }
@@ -616,16 +784,64 @@ class PullSyncService {
     var page = 1;
     while (true) {
       final result = await _fileRepository.listChildren(folderId, page: page);
+      _plannedItems += result.items
+          .where((item) => !item.isDeleted && !item.isFolder)
+          .length;
+      _progress?.setTotalFiles(_plannedItems);
+      final pending = <FileItem>[];
+      Future<void> flush() async {
+        if (pending.isEmpty) return;
+        await Future.wait(
+          pending.map((item) => _bootstrapItem(item, dirPath, syncFolderPath)),
+        );
+        pending.clear();
+      }
+
       for (final item in result.items) {
         if (item.isDeleted) continue;
-        await _bootstrapItem(item, dirPath, syncFolderPath);
+        if (item.isFolder) {
+          await flush();
+          await _bootstrapItem(item, dirPath, syncFolderPath);
+        } else {
+          if (pending.any(
+            (other) =>
+                other.id == item.id ||
+                other.name.toLowerCase() == item.name.toLowerCase(),
+          )) {
+            await flush();
+          }
+          pending.add(item);
+          if (pending.length == 3) await flush();
+        }
       }
+      await flush();
       if (!result.hasMore) break;
       page++;
     }
   }
 
   Future<void> _bootstrapItem(
+    FileItem item,
+    String dirPath,
+    String syncFolderPath,
+  ) async {
+    if (!item.isFolder) {
+      _progress?.startFile(
+        item.id,
+        p.relative(p.join(dirPath, item.name), from: syncFolderPath),
+        totalBytes: item.sizeBytes,
+      );
+    }
+    try {
+      await _bootstrapItemCore(item, dirPath, syncFolderPath);
+      if (!item.isFolder) _progress?.finishFile(item.id);
+    } catch (_) {
+      if (!item.isFolder) _progress?.finishFile(item.id, failed: true);
+      rethrow;
+    }
+  }
+
+  Future<void> _bootstrapItemCore(
     FileItem item,
     String dirPath,
     String syncFolderPath,
@@ -638,21 +854,32 @@ class PullSyncService {
         localPath = existing.localPath;
       } else {
         try {
-          localPath = _safeChildPath(syncFolderPath, dirPath, item.name, _isWindows);
+          localPath = _safeChildPath(
+            syncFolderPath,
+            dirPath,
+            item.name,
+            _isWindows,
+          );
           await _assertNoLinks(syncFolderPath, localPath);
           await Directory(localPath).create(recursive: true);
-          await _mirror.upsert(SyncMirrorEntry(
-            serverId: item.id,
-            localPath: localPath,
-            isFolder: true,
-            updatedAt: item.updatedAt,
-            syncedAt: DateTime.now(),
-          ));
+          await _mirror.upsert(
+            SyncMirrorEntry(
+              serverId: item.id,
+              localPath: localPath,
+              isFolder: true,
+              updatedAt: item.updatedAt,
+              syncedAt: DateTime.now(),
+            ),
+          );
         } on UnsafeRemoteNameException catch (e) {
           // The whole subtree under an unsafe folder name would otherwise be
           // invisible: not synced, not listed, and never revisited (siblings
           // still need walking, so this returns rather than rethrows).
-          await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
+          await _mirror.recordFailedEvent(
+            item.id,
+            _bootstrapEventId,
+            e.toString(),
+          );
           return;
         } on FileSystemException catch (e) {
           // The OS refused to create the directory for a reason no name
@@ -662,7 +889,11 @@ class PullSyncService {
           // into _pullOnce, markBootstrapped never ran, and every later
           // poll re-walked the whole tree only to fail here again, forever
           // (PR #12 review round 3, B3).
-          await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.message);
+          await _mirror.recordFailedEvent(
+            item.id,
+            _bootstrapEventId,
+            e.message,
+          );
           return;
         }
       }
@@ -670,13 +901,20 @@ class PullSyncService {
       return;
     }
 
-    if (existing != null) return; // Already delivered by the drain above, or a previous run.
+    if (existing != null)
+      return; // Already delivered by the drain above, or a previous run.
 
     try {
-      final localPath = _safeChildPath(syncFolderPath, dirPath, item.name, _isWindows);
+      final localPath = _safeChildPath(
+        syncFolderPath,
+        dirPath,
+        item.name,
+        _isWindows,
+      );
       // Same untracked-file guard as delta apply (F3): backfill must not
       // clobber a file the user already has.
       if (await File(localPath).exists()) {
+        _progress?.finishFile(item.id, failed: true);
         await _mirror.recordFailedEvent(
           item.id,
           _bootstrapEventId,
@@ -685,19 +923,28 @@ class PullSyncService {
         return;
       }
 
-      final contentHash = await _downloadToFile(item.id, localPath, syncFolderPath, null);
-      await _mirror.upsert(SyncMirrorEntry(
-        serverId: item.id,
-        localPath: localPath,
-        isFolder: false,
-        sizeBytes: item.sizeBytes,
-        contentHash: contentHash,
-        updatedAt: item.updatedAt,
-        syncedAt: DateTime.now(),
-      ));
+      final contentHash = await _downloadToFile(
+        item.id,
+        localPath,
+        syncFolderPath,
+        null,
+      );
+      await _mirror.upsert(
+        SyncMirrorEntry(
+          serverId: item.id,
+          localPath: localPath,
+          isFolder: false,
+          sizeBytes: item.sizeBytes,
+          contentHash: contentHash,
+          updatedAt: item.updatedAt,
+          syncedAt: DateTime.now(),
+        ),
+      );
     } on UnsafeRemoteNameException catch (e) {
+      _progress?.finishFile(item.id, failed: true);
       await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
     } on FileSystemException catch (e) {
+      _progress?.finishFile(item.id, failed: true);
       await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.message);
     }
   }
@@ -712,7 +959,12 @@ class PullSyncService {
 /// on Windows, `p.canonicalize` lowercases the whole path, and that is not
 /// the path this app should be writing to, storing in the mirror, or
 /// showing the user.
-String _safeChildPath(String syncFolderPath, String dirPath, String name, bool isWindows) {
+String _safeChildPath(
+  String syncFolderPath,
+  String dirPath,
+  String name,
+  bool isWindows,
+) {
   if (!isSyncableName(name, isWindows: isWindows)) {
     throw UnsafeRemoteNameException(name);
   }
@@ -725,7 +977,9 @@ void _assertWithinSyncFolder(String syncFolderPath, String path) {
   final root = p.canonicalize(syncFolderPath);
   final resolved = p.canonicalize(path);
   if (!p.isWithin(root, resolved)) {
-    throw UnsafeRemoteNameException('resolved path escapes the sync folder: $path');
+    throw UnsafeRemoteNameException(
+      'resolved path escapes the sync folder: $path',
+    );
   }
 }
 
@@ -734,9 +988,13 @@ void _assertWithinSyncFolder(String syncFolderPath, String path) {
 Future<void> _assertNoLinks(String syncFolderPath, String path) async {
   _assertWithinSyncFolder(syncFolderPath, path);
   var current = p.absolute(syncFolderPath);
-  for (final segment in ['', ...p.split(p.relative(path, from: syncFolderPath))]) {
+  for (final segment in [
+    '',
+    ...p.split(p.relative(path, from: syncFolderPath)),
+  ]) {
     if (segment.isNotEmpty) current = p.join(current, segment);
-    if (await FileSystemEntity.type(current, followLinks: false) == FileSystemEntityType.link) {
+    if (await FileSystemEntity.type(current, followLinks: false) ==
+        FileSystemEntityType.link) {
       throw UnsafeRemoteNameException('local path contains a link: $current');
     }
   }

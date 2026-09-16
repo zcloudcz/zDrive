@@ -12,6 +12,7 @@ import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart';
+import 'package:zdrive_app/features/sync/domain/sync_progress.dart';
 
 class MockPullSyncService extends Mock implements PullSyncService {}
 
@@ -38,6 +39,8 @@ void main() {
   late SyncCoordinator coordinator;
   late Directory tempDir;
   late String syncPath;
+
+  setUpAll(() => registerFallbackValue(SyncProgressTracker((_) {})));
 
   setUp(() {
     mockPull = MockPullSyncService();
@@ -104,6 +107,38 @@ void main() {
     expect(callOrder, ['pull', 'scan']);
     expect(result.pulled, 3);
     expect(result.pushed, 2);
+  });
+
+  test('progress callback observes connecting, pull and scan in order', () async {
+    final snapshots = <SyncProgress>[];
+    SyncProgressTracker? pullTracker;
+    when(() => mockPull.pullOnce(syncPath, progress: any(named: 'progress')))
+        .thenAnswer((invocation) async {
+      pullTracker = invocation.namedArguments[#progress] as SyncProgressTracker;
+      pullTracker!.beginPhase(SyncPhase.downloading, totalFiles: 1);
+      pullTracker!.startFile('remote', 'remote.txt', totalBytes: 10);
+      pullTracker!.finishFile('remote');
+      return 1;
+    });
+    when(() => mockScanner.scanOnce(syncPath, progress: any(named: 'progress')))
+        .thenAnswer((invocation) async {
+      final tracker = invocation.namedArguments[#progress] as SyncProgressTracker;
+      expect(identical(tracker, pullTracker), isTrue);
+      expect(tracker.snapshot.completedFiles, 1);
+      tracker.beginPhase(SyncPhase.uploading, totalFiles: 1);
+      tracker.startFile('local', 'local.txt', totalBytes: 20);
+      tracker.finishFile('local');
+      return 1;
+    });
+
+    await coordinator.syncOnce(syncPath, onProgress: snapshots.add);
+
+    expect(snapshots.first.phase, SyncPhase.connecting);
+    expect(snapshots.map((s) => s.phase).toSet(), {
+      SyncPhase.connecting, SyncPhase.downloading, SyncPhase.uploading,
+    });
+    expect(snapshots.last.completedFiles, 1);
+    expect(snapshots.last.remainingFiles, 0);
   });
 
   test('two concurrent syncOnce calls run pull and scan exactly once — the '
