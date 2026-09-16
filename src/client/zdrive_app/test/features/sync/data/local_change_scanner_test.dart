@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,6 +12,7 @@ import 'package:zdrive_app/features/files/domain/file_repository.dart';
 import 'package:zdrive_app/features/sync/data/device_registration_service.dart';
 import 'package:zdrive_app/features/sync/data/local_change_scanner.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_entry.dart';
+import 'package:zdrive_app/features/sync/domain/sync_progress.dart';
 import 'package:zdrive_app/features/sync/domain/sync_mirror_repository.dart';
 
 class MockSyncMirrorRepository extends Mock implements SyncMirrorRepository {}
@@ -171,6 +173,56 @@ void main() {
 
   tearDown(() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+  });
+
+  test('parallel uploads cap concurrency and drain after an error before deleting', () async {
+    for (var i = 0; i < 5; i++) {
+      File(p.join(tempDir.path, '$i.txt')).writeAsStringSync('new-$i');
+    }
+    final mirror = stateful([
+      SyncMirrorEntry(serverId: 'missing', localPath: p.join(tempDir.path, 'gone.txt'),
+        isFolder: false, sizeBytes: 100, contentHash: 'unrelated', updatedAt: past, syncedAt: past),
+    ]);
+    final startedThree = Completer<void>();
+    final release = Completer<void>();
+    var active = 0;
+    var peak = 0;
+    var started = 0;
+    var scanCompleted = false;
+    var deleted = false;
+    final snapshots = <SyncProgress>[];
+    when(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(),
+      originDeviceId: any(named: 'originDeviceId'))).thenAnswer((inv) async {
+      active++;
+      started++;
+      if (active > peak) peak = active;
+      if (started == 3) startedThree.complete();
+      await release.future;
+      active--;
+      final name = inv.positionalArguments[1] as String;
+      if (name == '0.txt') throw StateError('upload failed');
+      return name;
+    });
+    when(() => mockFileRepository.deleteFile('missing', originDeviceId: any(named: 'originDeviceId')))
+      .thenAnswer((_) async { expect(active, 0); deleted = true; });
+    final scan = scanner.scanOnce(tempDir.path, progress: SyncProgressTracker(snapshots.add))
+      .then((value) { scanCompleted = true; return value; });
+    await startedThree.future.timeout(const Duration(seconds: 10));
+    expect(active, 3);
+    expect(started, 3);
+    expect(scanCompleted, isFalse);
+    expect(deleted, isFalse);
+    release.complete();
+    expect(await scan, 5); // Four uploads and one deletion.
+    expect(peak, 3);
+    expect(active, 0);
+    expect(started, 5);
+    expect(mirror.rows.length, 4);
+    final uploaded = snapshots.lastWhere((s) => s.phase == SyncPhase.uploading);
+    expect(uploaded.completedFiles, 4);
+    expect(uploaded.failedFiles, 1);
+    expect(uploaded.activeFiles, isEmpty);
+    expect(deleted, isTrue);
   });
 
   test('new file at root: uploads tagged with this device\'s id, commits '
