@@ -20,6 +20,8 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
 
     public async Task<ChunkUploadResultDto> Handle(UploadChunkCommand request, CancellationToken cancellationToken)
     {
+        await using var transaction = await _db.LockUploadSessionAsync(request.SessionId, cancellationToken);
+
         var session = await _db.UploadSessions
             .FirstOrDefaultAsync(s => s.Id == request.SessionId, cancellationToken)
             ?? throw new NotFoundException("UploadSession", request.SessionId);
@@ -41,6 +43,8 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
 
         session.UploadedChunks++;
         await _db.SaveChangesAsync(cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         return new ChunkUploadResultDto(session.Id, request.ChunkIndex, request.ChunkHash, Accepted: true);
     }
