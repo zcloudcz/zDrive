@@ -184,6 +184,7 @@ class FileRemoteDataSource {
     required String manifestHash,
     String? comment,
     String? originDeviceId,
+    CancelToken? cancelToken,
   }) async {
     final response = await _dio.post(
       '${ApiConstants.files}/$fileId/versions',
@@ -193,6 +194,7 @@ class FileRemoteDataSource {
         'manifestHash': manifestHash,
         if (comment != null) 'comment': comment,
       },
+      cancelToken: cancelToken,
       options: _deviceIdOptions(originDeviceId),
     );
     return unwrapMap(response);

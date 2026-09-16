@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/auth_bloc.dart';
 import '../../../shared/widgets/windows_download_button.dart';
+import '../../../shared/widgets/app_settings_menu.dart';
 import '../../photos/photos_support.dart';
 
 class HomePage extends StatelessWidget {
@@ -23,6 +24,7 @@ class HomePage extends StatelessWidget {
           WindowsDownloadButton(
             compact: MediaQuery.sizeOf(context).width < 600,
           ),
+          const AppSettingsMenu(),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: l10n.logout,

@@ -25,6 +25,8 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
 
     public async Task<UploadCompleteDto> Handle(CompleteUploadCommand request, CancellationToken cancellationToken)
     {
+        await using var transaction = await _db.LockUploadSessionAsync(request.SessionId, cancellationToken);
+
         var session = await _db.UploadSessions
             .FirstOrDefaultAsync(s => s.Id == request.SessionId, cancellationToken)
             ?? throw new NotFoundException("UploadSession", request.SessionId);
@@ -36,6 +38,7 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
         {
             session.Status = UploadSessionStatus.Expired;
             await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             throw new ConflictException($"Upload session '{request.SessionId}' has expired.");
         }
 
@@ -113,6 +116,8 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
 
         session.Status = UploadSessionStatus.Completed;
         await _db.SaveChangesAsync(cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         var basePath = $"{session.TenantId}/{session.UserId}/files/{session.FileId}";
         return new UploadCompleteDto(basePath, manifestHash, totalSize);

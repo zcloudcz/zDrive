@@ -33,10 +33,8 @@ void TestCloseRestoreAndExit() {
   HWND window = CreateTestWindow();
   TrayWindow tray(window);
   active_tray = &tray;
-  Check(tray.Initialize(), "initialize tray and window menu");
-  HMENU menu = GetSubMenu(GetMenu(window), 0);
-  Check(menu && GetMenuItemID(menu, 0) == TrayWindow::kExitCommand,
-        "window Menu contains explicit Exit command");
+  Check(tray.Initialize(), "initialize tray");
+  Check(GetMenu(window) == nullptr, "native menu bar is replaced by Flutter settings");
 
   ShowWindow(window, SW_SHOWNOACTIVATE);
   SendMessageW(window, WM_CLOSE, 0, 0);
@@ -99,7 +97,7 @@ void TestMissingIcon() {
   HWND window = CreateTestWindow();
   TrayWindow tray(window);
   active_tray = &tray;
-  Check(tray.Initialize(), "menu is available even without tray icon");
+  Check(tray.Initialize(), "initialization succeeds even without tray icon");
   SendMessageW(window, WM_CLOSE, 0, 0);
   Check(IsWindow(window) && IsWindowVisible(window),
         "failed tray creation keeps window accessible");

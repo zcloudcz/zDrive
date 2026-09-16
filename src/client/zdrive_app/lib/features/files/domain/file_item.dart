@@ -10,6 +10,7 @@ class FileItem extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool isDeleted;
+  final bool isContentReady;
 
   const FileItem({
     required this.id,
@@ -21,6 +22,7 @@ class FileItem extends Equatable {
     required this.createdAt,
     required this.updatedAt,
     this.isDeleted = false,
+    this.isContentReady = true,
   });
 
   @override
@@ -34,6 +36,7 @@ class FileItem extends Equatable {
         createdAt,
         updatedAt,
         isDeleted,
+        isContentReady,
       ];
 }
 

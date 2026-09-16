@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using ZDrive.Shared.Auth;
 using ZDrive.Shared.DTOs;
 using ZDrive.StorageService.Application.Commands.CompleteUpload;
+using ZDrive.StorageService.Application.Commands.AbortUpload;
 using ZDrive.StorageService.Application.Commands.DeleteBlob;
 using ZDrive.StorageService.Application.Commands.InitUpload;
 using ZDrive.StorageService.Application.Commands.RestoreManifest;
@@ -53,6 +54,16 @@ public sealed class StorageController : ControllerBase
         return Ok(ApiResponse<ChunkUploadResultDto>.Ok(result));
     }
 
+    [HttpDelete("upload/{sessionId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AbortUpload(Guid sessionId, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var result = await _mediator.Send(new AbortUploadCommand(sessionId, userId, tenantId), ct);
+        return Ok(ApiResponse<bool>.Ok(result));
+    }
     [HttpPost("upload/{sessionId:guid}/complete")]
     [ProducesResponseType(typeof(ApiResponse<UploadCompleteDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]

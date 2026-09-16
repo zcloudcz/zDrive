@@ -1,5 +1,11 @@
 {
   "@@locale": "en",
+  "aboutApp": "About",
+  "exitApp": "Exit",
+  "exitFailed": "Could not exit the app. Please try again.",
+  "appVersionFailed": "Could not load the app version.",
+  "appVersion": "Version {version}",
+  "@appVersion": { "placeholders": { "version": { "type": "String" } } },
   "appTitle": "zDrive",
   "downloadForWindows": "Download for Windows",
   "login": "Login",

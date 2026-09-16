@@ -247,7 +247,7 @@ class LocalChangeScanner {
       progress?.startFile(path, path, totalBytes: entry.sizeBytes);
       try {
         final stat = await File(path).stat();
-        if (entry.sizeBytes != stat.size || stat.modified.isAfter(entry.syncedAt)) {
+        if (entry.contentHash == null || entry.sizeBytes != stat.size || stat.modified.isAfter(entry.syncedAt)) {
           final checkedAt = DateTime.now().subtract(const Duration(seconds: 2));
           final hs = await hashFileInBackground(path);
           if (hs.hash != entry.contentHash) {
@@ -834,7 +834,9 @@ class LocalChangeScanner {
   Future<int> _uploadInParallel<T>(
     List<T> items,
     String Function(T) pathOf,
-    Future<bool> Function(T, File, ({String hash, int size}), DateTime) upload,
+    Future<bool> Function(T, File, ({String hash, int size}), DateTime, CancelToken) upload,
+    String root,
+    Map<String, SyncMirrorEntry> mirrorByPath,
     SyncProgressTracker? progress,
   ) async {
     var next = 0;
@@ -845,25 +847,81 @@ class LocalChangeScanner {
         final path = pathOf(item);
         progress?.startFile(path, path);
         Directory? staging;
+        final cancellation = CancelToken();
+        var checking = false;
+        Future<void> checkDeleted() async {
+          if (checking || cancellation.isCancelled) return;
+          checking = true;
+          try {
+            // An unavailable sync drive is not a request to delete its cloud copy.
+            if (await Directory(root).exists() && !await File(path).exists()) {
+              cancellation.cancel('Local file removed during upload');
+            }
+          } on FileSystemException {
+            // Let normal filesystem handling report access errors.
+          } finally {
+            checking = false;
+          }
+        }
+        StreamSubscription<FileSystemEvent>? watcher;
+        try {
+          watcher = Directory(root).watch(recursive: true).listen((event) {
+            final changed = _key(event.path);
+            if (changed == _key(path) || p.isWithin(changed, _key(path))) {
+              unawaited(checkDeleted());
+            }
+          }, onError: (Object _) {});
+        } on FileSystemException {
+          // Polling below also supports filesystems without native watchers.
+        }
+        final timer = Timer.periodic(const Duration(milliseconds: 500), (_) => unawaited(checkDeleted()));
+        Future<void> deleteRemovedUpload() async {
+          if (!await Directory(root).exists() || await File(path).exists()) return;
+          final entry = mirrorByPath[path];
+          if (entry != null) {
+            await _deleteMissingEntry(entry);
+            mirrorByPath.remove(path);
+            pushed++;
+          }
+        }
         try {
           staging = await Directory.systemTemp.createTemp('zdrive_sync_upload_');
           // Filesystems may round mtimes to two-second boundaries. Keeping
           // this small overlap makes edits within that boundary re-hash too.
           final snapshotStartedAt = DateTime.now().subtract(const Duration(seconds: 2));
           final snapshot = await File(path).copy(p.join(staging.path, 'content'));
+          await checkDeleted();
+          if (cancellation.isCancelled) throw cancellation.cancelError!;
           final hashSize = await hashFileInBackground(snapshot.path);
           // Hash and every retry read the same private snapshot. The live
           // file can continue changing without corrupting the mirror hash.
-          final uploaded = await upload(item, snapshot, hashSize, snapshotStartedAt);
+          await checkDeleted();
+          if (cancellation.isCancelled) throw cancellation.cancelError!;
+          final uploaded = await upload(item, snapshot, hashSize, snapshotStartedAt, cancellation);
           if (uploaded) {
             pushed++;
             _failedPaths.remove(_key(path));
           }
+          await deleteRemovedUpload();
           progress?.finishFile(path, failed: !uploaded);
         } catch (e, st) {
-          _recordFailure(path, e, st);
-          progress?.finishFile(path, failed: true);
+          await checkDeleted();
+          if (cancellation.isCancelled && await Directory(root).exists() && !await File(path).exists()) {
+            try {
+              await deleteRemovedUpload();
+              _failedPaths.remove(_key(path));
+              progress?.finishFile(path);
+            } catch (cleanupError, cleanupStack) {
+              _recordFailure(path, cleanupError, cleanupStack);
+              progress?.finishFile(path, failed: true);
+            }
+          } else {
+            _recordFailure(path, e, st);
+            progress?.finishFile(path, failed: true);
+          }
         } finally {
+          timer.cancel();
+          await watcher?.cancel();
           if (staging != null) {
             try {
               await staging.delete(recursive: true);
@@ -893,8 +951,10 @@ class LocalChangeScanner {
   ) => _uploadInParallel(
     remainingNewFiles,
     (path) => path,
-    (path, snapshot, hashSize, startedAt) =>
-        _uploadNewFile(path, root, mirrorByPath, snapshot, hashSize, startedAt, progress),
+    (path, snapshot, hashSize, startedAt, cancellation) =>
+        _uploadNewFile(path, root, mirrorByPath, snapshot, hashSize, startedAt, progress, cancellation),
+    root,
+    mirrorByPath,
     progress,
   );
 
@@ -909,6 +969,7 @@ class LocalChangeScanner {
     ({String hash, int size}) hashSize,
     DateTime snapshotStartedAt,
     SyncProgressTracker? progress,
+    CancelToken cancellation,
   ) async {
     final resolution = _resolveParent(filePath, root, mirrorByPath);
     if (!resolution.resolved) return false; // parent folder failed earlier this scan
@@ -924,6 +985,8 @@ class LocalChangeScanner {
         hashSize.size,
         _uploadProgress(progress, filePath, hashSize.size),
         originDeviceId: originDeviceId,
+        cancelToken: cancellation,
+        onNodeCreated: (id) => _trackUpload(id, filePath, mirrorByPath),
       );
       await _finishUpload(id, filePath, hashSize, mirrorByPath, snapshotStartedAt);
       return true;
@@ -934,6 +997,7 @@ class LocalChangeScanner {
       // upload into it as a new version instead of failing.
       final existing = await _findExistingByName(resolution.parentId, name, isFolder: false);
       if (existing == null) rethrow;
+      await _trackUpload(existing.id, filePath, mirrorByPath);
       await _fileRepository.uploadNewVersion(
         existing.id,
         name,
@@ -941,6 +1005,7 @@ class LocalChangeScanner {
         hashSize.size,
         onProgress: _uploadProgress(progress, filePath, hashSize.size),
         originDeviceId: originDeviceId,
+        cancelToken: cancellation,
       );
       await _finishUpload(existing.id, filePath, hashSize, mirrorByPath, snapshotStartedAt);
       return true;
@@ -952,6 +1017,16 @@ class LocalChangeScanner {
   /// after the write either leaves both the server write and the mirror row
   /// in place, or neither (see this class's own doc comment for the one
   /// exception).
+  // Persist ownership before sending content. A null hash marks an unfinished
+  // upload, so restart retries it even when size and mtime did not change.
+  Future<void> _trackUpload(String id, String path, Map<String, SyncMirrorEntry> mirrorByPath) async {
+    final entry = _mirrorRow(
+      serverId: id, localPath: path, isFolder: false, updatedAt: DateTime.now(),
+    );
+    await _mirror.commit(upserts: [entry]);
+    mirrorByPath[path] = entry;
+  }
+
   Future<void> _finishUpload(
     String serverId,
     String filePath,
@@ -1008,8 +1083,10 @@ class LocalChangeScanner {
   ) => _uploadInParallel(
     changeCandidates,
     (entry) => entry.localPath,
-    (entry, snapshot, hashSize, startedAt) =>
-        _uploadChangedFile(entry, root, mirrorByPath, snapshot, hashSize, startedAt, progress),
+    (entry, snapshot, hashSize, startedAt, cancellation) =>
+        _uploadChangedFile(entry, root, mirrorByPath, snapshot, hashSize, startedAt, progress, cancellation),
+    root,
+    mirrorByPath,
     progress,
   );
 
@@ -1024,6 +1101,7 @@ class LocalChangeScanner {
     ({String hash, int size}) hashSize,
     DateTime snapshotStartedAt,
     SyncProgressTracker? progress,
+    CancelToken cancellation,
   ) async {
     final hash = hashSize.hash;
     final originDeviceId = await _originDeviceId();
@@ -1036,6 +1114,7 @@ class LocalChangeScanner {
         hashSize.size,
         onProgress: _uploadProgress(progress, entry.localPath, hashSize.size),
         originDeviceId: originDeviceId,
+        cancelToken: cancellation,
       );
       await _finishUpload(entry.serverId, entry.localPath, hashSize, mirrorByPath, snapshotStartedAt);
       return true;
@@ -1055,6 +1134,12 @@ class LocalChangeScanner {
         hashSize.size,
         _uploadProgress(progress, entry.localPath, hashSize.size),
         originDeviceId: originDeviceId,
+        cancelToken: cancellation,
+        onNodeCreated: (id) async {
+          // Save the replacement before forgetting the deleted server node.
+          await _trackUpload(id, entry.localPath, mirrorByPath);
+          await _mirror.commit(deleteServerIds: [entry.serverId]);
+        },
       );
       final newEntry = _mirrorRow(
         serverId: newId,

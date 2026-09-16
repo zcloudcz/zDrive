@@ -106,6 +106,33 @@ void main() {
         type: DioExceptionType.badResponse,
       );
 
+  test('incomplete upload does not download or block following committed files', () async {
+    final now = DateTime.utc(2026);
+    when(() => mockMirror.getCursor('dev-1')).thenAnswer((_) async => 0);
+    when(() => mockFilesDataSource.getChanges(0, deviceId: 'dev-1')).thenAnswer(
+      (_) async => page([
+        {'id': 1, 'fileId': 'pending', 'type': 'Create'},
+        {'id': 2, 'fileId': 'ready', 'type': 'Create'},
+      ], 2));
+    for (final id in ['pending', 'ready']) {
+      when(() => mockFileRepository.getFile(id)).thenAnswer((_) async => FileItem(
+        id: id, name: '$id.txt', isFolder: false, sizeBytes: 1,
+        isContentReady: id == 'ready', createdAt: now, updatedAt: now));
+      when(() => mockMirror.getByServerId(id)).thenAnswer((_) async => null);
+      when(() => mockMirror.clearFailedEvent(id)).thenAnswer((_) async {});
+    }
+    when(() => mockMirror.setCursor(any(), any())).thenAnswer((_) async {});
+    when(() => mockMirror.upsert(any())).thenAnswer((_) async {});
+    when(() => mockFileRepository.downloadFileStream('ready'))
+      .thenAnswer((_) => Stream.value(Uint8List.fromList([1])));
+    when(() => mockFileRepository.downloadFileStream('pending'))
+      .thenAnswer((_) => Stream.error(StateError('File has no committed content manifest')));
+    expect(await service.pullOnce(tempDir.path), 2);
+    expect(await File(p.join(tempDir.path, 'ready.txt')).readAsBytes(), [1]);
+    expect(await File(p.join(tempDir.path, 'pending.txt')).exists(), isFalse);
+    verifyNever(() => mockFileRepository.downloadFileStream('pending'));
+  });
+
   test(
     'new files download concurrently with a three-file bound and live progress',
     () async {

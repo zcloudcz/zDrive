@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
@@ -52,6 +54,10 @@ class RetryInterceptor extends Interceptor {
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
+    final cancelToken = err.requestOptions.cancelToken;
+    if (err.type == DioExceptionType.cancel || (cancelToken?.isCancelled ?? false)) {
+      return handler.next(cancelToken?.cancelError ?? err);
+    }
     final statusCode = err.response?.statusCode;
     // 429 is retried alongside 5xx: the gateway's rate limiter now rejects
     // per authenticated user rather than globally (see ApiGateway/Program.cs),
@@ -73,7 +79,19 @@ class RetryInterceptor extends Interceptor {
             ? retryAfterDelay(err.response) ??
                 Duration(milliseconds: 200 * (1 << retryCount))
             : Duration(milliseconds: 200 * (1 << retryCount));
-        await Future<void>.delayed(delay);
+        final waiting = Completer<void>();
+        final timer = Timer(delay, waiting.complete);
+        try {
+          await Future.any<void>([
+            waiting.future,
+            if (cancelToken != null) cancelToken.whenCancel.then((_) {}),
+          ]);
+        } finally {
+          timer.cancel();
+        }
+        if (cancelToken?.isCancelled ?? false) {
+          return handler.next(cancelToken!.cancelError!);
+        }
 
         err.requestOptions.extra['retryCount'] = retryCount + 1;
         try {

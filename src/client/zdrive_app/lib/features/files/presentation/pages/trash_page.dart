@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:timeago/timeago.dart' as timeago;
+import 'package:zdrive_app/shared/l10n/relative_time.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
@@ -109,7 +109,9 @@ class _TrashPageState extends State<TrashPage> {
                   key: ValueKey(file.id),
                   leading: FileIcon(file: file),
                   title: Text(file.name),
-                  subtitle: Text(timeago.format(file.updatedAt)),
+                  subtitle: Text(
+                    formatRelativeTime(file.updatedAt, l10n.localeName),
+                  ),
                   trailing: _restoringId == file.id
                       ? SizedBox.square(
                           dimension: 24,

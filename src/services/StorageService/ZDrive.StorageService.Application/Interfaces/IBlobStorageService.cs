@@ -41,6 +41,8 @@ public interface IBlobStorageService
     /// </summary>
     string GenerateChunkDownloadSasUrl(Guid tenantId, Guid userId, Guid fileId, string chunkHash);
 
+    Task DeleteTempUploadAsync(Guid sessionId, CancellationToken ct = default);
+
     /// <summary>
     /// Deletes all blobs (chunks + manifest) for a file.
     /// </summary>

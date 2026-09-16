@@ -124,6 +124,15 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         return GenerateSasUrl(StorageContainer, blobPath, BlobSasPermissions.Read);
     }
 
+    public async Task DeleteTempUploadAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        var container = _blobServiceClient.GetBlobContainerClient(SystemContainer);
+        if (!await container.ExistsAsync(ct))
+            return;
+
+        await foreach (var blob in container.GetBlobsAsync(prefix: $"temp-uploads/{sessionId}/", cancellationToken: ct))
+            await container.DeleteBlobIfExistsAsync(blob.Name, cancellationToken: ct);
+    }
     public async Task DeleteFileAsync(Guid tenantId, Guid userId, Guid fileId, CancellationToken ct = default)
     {
         var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);

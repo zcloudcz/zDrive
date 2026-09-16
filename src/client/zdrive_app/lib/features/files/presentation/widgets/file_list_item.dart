@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:timeago/timeago.dart' as timeago;
+import 'package:zdrive_app/shared/l10n/relative_time.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../domain/file_item.dart';
@@ -32,8 +32,8 @@ class FileListItem extends StatelessWidget {
       title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         file.isFolder
-            ? timeago.format(file.updatedAt)
-            : '${_formatFileSize(file.sizeBytes)} · ${timeago.format(file.updatedAt)}',
+            ? formatRelativeTime(file.updatedAt, l10n.localeName)
+            : '${_formatFileSize(file.sizeBytes)} · ${formatRelativeTime(file.updatedAt, l10n.localeName)}',
         style: Theme.of(context).textTheme.bodySmall,
       ),
       trailing: PopupMenuButton<String>(

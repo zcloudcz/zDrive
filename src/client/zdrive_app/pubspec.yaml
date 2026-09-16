@@ -1,7 +1,7 @@
 name: zdrive_app
 description: "zDrive — cloud storage platform"
 publish_to: 'none'
-version: 0.2.2+4
+version: 0.2.3+5
 
 environment:
   sdk: ^3.11.0
@@ -32,6 +32,7 @@ dependencies:
   sqflite_common_ffi: ^2.3.4+4
   path: ^1.9.1
   path_provider: ^2.1.5
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   flutter_test:

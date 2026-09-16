@@ -10,6 +10,7 @@ import 'features/auth/domain/auth_repository.dart';
 import 'features/sync/data/sync_coordinator.dart';
 import 'features/sync/sync_support.dart';
 import 'shared/router/app_router.dart';
+import 'shared/l10n/app_locale.dart';
 import 'shared/theme/app_theme.dart';
 import 'shared/theme/theme_cubit.dart';
 import 'core/storage/app_preferences.dart';
@@ -83,6 +84,7 @@ class ZDriveApp extends StatelessWidget {
             themeMode: themeMode,
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,
+            localeListResolutionCallback: resolveAppLocale,
             routerConfig: router,
             builder: (context, child) => UpdateBanner(
               controller: updater,

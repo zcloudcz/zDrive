@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -86,10 +87,12 @@ class FileUploadDataSource {
   Future<UploadSessionDto> initUpload(
     String fileId,
     String fileName,
-    int totalChunks,
-  ) async {
+    int totalChunks, {
+    CancelToken? cancelToken,
+  }) async {
     final response = await _dio.post(
       ApiConstants.uploadInit,
+      cancelToken: cancelToken,
       data: {
         'fileId': fileId,
         'fileName': fileName,
@@ -107,6 +110,7 @@ class FileUploadDataSource {
     int chunkIndex,
     Uint8List bytes, {
     void Function(int sent, int total)? onProgress,
+    CancelToken? cancelToken,
   }) async {
     final chunkHash = await compute(_chunkHash, bytes);
     final response = await _dio.put(
@@ -120,13 +124,15 @@ class FileUploadDataSource {
         },
       ),
       onSendProgress: onProgress,
+      cancelToken: cancelToken,
     );
     ensureSuccess(response);
   }
 
-  Future<UploadCompleteDto> completeUpload(String sessionId) async {
+  Future<UploadCompleteDto> completeUpload(String sessionId, {CancelToken? cancelToken}) async {
     final response = await _dio.post(
       '${ApiConstants.storage}/upload/$sessionId/complete',
+      cancelToken: cancelToken,
     );
     return UploadCompleteDto.fromJson(unwrapMap(response));
   }
@@ -151,37 +157,66 @@ class FileUploadDataSource {
     Stream<List<int>> content,
     int sizeBytes, {
     void Function(double progress)? onProgress,
+    CancelToken? cancelToken,
   }) async {
+    if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
     final totalChunks = sizeBytes == 0 ? 1 : (sizeBytes / chunkSize).ceil();
-    final session = await initUpload(fileId, fileName, totalChunks);
+    final session = await initUpload(fileId, fileName, totalChunks, cancelToken: cancelToken);
 
-    var index = 0;
-    var uploadedBytes = 0;
-    await for (final chunk in _splitIntoChunks(content)) {
-      await uploadChunk(
-        session.sessionId,
-        index,
-        chunk,
-        onProgress: onProgress == null
-            ? null
-            : (sent, total) {
-                if (sizeBytes > 0) {
-                  onProgress((uploadedBytes + sent) / sizeBytes);
-                }
-              },
-      );
-      uploadedBytes += chunk.length;
-      if (sizeBytes > 0) {
-        onProgress?.call((uploadedBytes / sizeBytes).clamp(0.0, 1.0));
+    try {
+      if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
+      var index = 0;
+      var uploadedBytes = 0;
+      await for (final chunk in _splitIntoChunks(content)) {
+        if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
+        await uploadChunk(
+          session.sessionId,
+          index,
+          chunk,
+          cancelToken: cancelToken,
+          onProgress: onProgress == null
+              ? null
+              : (sent, total) {
+                  if (sizeBytes > 0) {
+                    onProgress((uploadedBytes + sent) / sizeBytes);
+                  }
+                },
+        );
+        uploadedBytes += chunk.length;
+        if (sizeBytes > 0) {
+          onProgress?.call((uploadedBytes / sizeBytes).clamp(0.0, 1.0));
+        }
+        index++;
       }
-      index++;
-    }
 
-    if (uploadedBytes != sizeBytes) {
-      throw UploadSizeMismatchException(sizeBytes, uploadedBytes);
-    }
+      if (uploadedBytes != sizeBytes) {
+        throw UploadSizeMismatchException(sizeBytes, uploadedBytes);
+      }
 
-    return completeUpload(session.sessionId);
+      if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
+      return await completeUpload(session.sessionId, cancelToken: cancelToken);
+    } catch (_) {
+      await _abortUpload(session.sessionId);
+      rethrow;
+    }
+  }
+
+  Future<void> _abortUpload(String sessionId) async {
+    // Cleanup must outlive the upload token, but must not stall the sync queue.
+    final cleanupToken = CancelToken();
+    final timeout = Timer(const Duration(seconds: 5), () {
+      cleanupToken.cancel('Upload cleanup timed out');
+    });
+    try {
+      await _dio.delete(
+        '${ApiConstants.storage}/upload/$sessionId',
+        cancelToken: cleanupToken,
+      );
+    } catch (_) {
+      // Best effort: preserve the original upload/cancellation failure.
+    } finally {
+      timeout.cancel();
+    }
   }
 
   /// Buffers [source] into exactly [chunkSize]-byte windows (the last one

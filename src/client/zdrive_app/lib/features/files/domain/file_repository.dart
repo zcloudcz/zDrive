@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
+
 import 'file_item.dart';
 import 'file_version.dart';
 
@@ -40,6 +42,9 @@ abstract class FileRepository {
   /// StorageService before any bytes are sent. [content] is streamed rather
   /// than taking the whole file as one [Uint8List] so a multi-gigabyte
   /// upload never has to sit fully in memory.
+  /// [onNodeCreated] is awaited before sending content, including when a node
+  /// is reused. Node creation finishes even if [cancelToken] is cancelled so
+  /// the caller can persist its id and reconcile a local deletion.
   Future<String> uploadFile(
     String? parentId,
     String fileName,
@@ -47,6 +52,8 @@ abstract class FileRepository {
     int sizeBytes,
     void Function(double progress)? onProgress, {
     String? originDeviceId,
+    CancelToken? cancelToken,
+    Future<void> Function(String fileId)? onNodeCreated,
   });
 
   /// Downloads and reassembles a file's complete content from its chunks —
@@ -70,6 +77,7 @@ abstract class FileRepository {
     int sizeBytes, {
     String? originDeviceId,
     void Function(double progress)? onProgress,
+    CancelToken? cancelToken,
   });
 
   /// Lists recorded versions of a file, newest first.

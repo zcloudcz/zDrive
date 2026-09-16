@@ -145,6 +145,8 @@ class FileRepositoryImpl implements FileRepository {
     int sizeBytes,
     void Function(double progress)? onProgress, {
     String? originDeviceId,
+    CancelToken? cancelToken,
+    Future<void> Function(String fileId)? onNodeCreated,
   }) async {
     // Client-orchestrated upload across two services:
     //  1. FileService — create the file node (gives us the id), or reuse one
@@ -152,10 +154,12 @@ class FileRepositoryImpl implements FileRepository {
     //  2. StorageService — open a session, push chunks, complete (returns the
     //     manifest hash that identifies this content).
     //  3. FileService — record the version, binding the manifest to the file.
+    if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
     final node = await _createOrReuseNode(parentId, fileName, sizeBytes, originDeviceId);
 
     try {
-      await _uploadIntoNode(node.id, fileName, content, sizeBytes, onProgress, originDeviceId);
+      await onNodeCreated?.call(node.id);
+      await _uploadIntoNode(node.id, fileName, content, sizeBytes, onProgress, originDeviceId, cancelToken);
       _failedUploadNodeIds.remove(node.id);
       return node.id;
     } catch (_) {
@@ -175,11 +179,12 @@ class FileRepositoryImpl implements FileRepository {
     int sizeBytes, {
     String? originDeviceId,
     void Function(double progress)? onProgress,
+    CancelToken? cancelToken,
   }) {
     // The second half of uploadFile only: no node creation, so this never
     // touches _createOrReuseNode or _failedUploadNodeIds — fileId is already
     // an existing node.
-    return _uploadIntoNode(fileId, fileName, content, sizeBytes, onProgress, originDeviceId);
+    return _uploadIntoNode(fileId, fileName, content, sizeBytes, onProgress, originDeviceId, cancelToken);
   }
 
   /// Chunk-uploads [content] into the already-existing node [nodeId] and
@@ -195,21 +200,26 @@ class FileRepositoryImpl implements FileRepository {
     int sizeBytes,
     void Function(double progress)? onProgress,
     String? originDeviceId,
+    CancelToken? cancelToken,
   ) async {
+    if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
     final complete = await _uploadDataSource.uploadFile(
       nodeId,
       fileName,
       content,
       sizeBytes,
       onProgress: onProgress,
+      cancelToken: cancelToken,
     );
 
+    if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
     await _remoteDataSource.createFileVersion(
       nodeId,
       blobVersionId: complete.manifestHash,
       sizeBytes: complete.totalSize,
       manifestHash: complete.manifestHash,
       originDeviceId: originDeviceId,
+      cancelToken: cancelToken,
     );
   }
 
@@ -343,6 +353,7 @@ class FileRepositoryImpl implements FileRepository {
       createdAt: dto.createdAt,
       updatedAt: dto.updatedAt,
       isDeleted: dto.isDeleted,
+      isContentReady: dto.isFolder || dto.manifestHash != null,
     );
   }
 
