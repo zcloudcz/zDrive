@@ -323,4 +323,27 @@ class AppLocalizationsCs extends AppLocalizations {
   String syncKnownProgressCounts(int completed, int total, int remaining) {
     return 'Známé položky: dokončeno $completed / $total · zbývá $remaining';
   }
+
+  @override
+  String get updateRetry => 'Zkusit aktualizaci znovu';
+
+  @override
+  String get updateRestarting => 'Dokončuji synchronizaci před restartováním…';
+
+  @override
+  String get updateRestart => 'Restartovat a aktualizovat';
+
+  @override
+  String updateDownloading(int percent) {
+    return 'Stahování aktualizace: $percent%';
+  }
+
+  @override
+  String updateReady(String version) {
+    return 'Aktualizace $version je připravena. Nainstaluje se při příštím spuštění.';
+  }
+
+  @override
+  String get updateFailed =>
+      'Automatická aktualizace se nezdařila. zDrive můžete dál používat a zkusit to znovu.';
 }

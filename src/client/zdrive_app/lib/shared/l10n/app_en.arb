@@ -157,5 +157,27 @@
         "type": "int"
       }
     }
-  }
+  },
+
+  "updateRetry": "Retry update",
+  "updateRestarting": "Finishing synchronization before restarting…",
+  "@updateReady": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "updateRestart": "Restart and update",
+  "@updateDownloading": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "updateDownloading": "Downloading update: {percent}%",
+  "updateReady": "Update {version} is ready. It will install on the next start.",
+  "updateFailed": "Automatic update failed. You can keep using zDrive and try again."
+
 }
