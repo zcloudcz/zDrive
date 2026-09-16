@@ -32,3 +32,5 @@ finally {
     }
     Remove-Variable zDriveDownloadTestCalls, zDriveDownloadTestFail -Scope Global
 }
+# The last mocked gh call intentionally fails; do not leak its exit code to CI.
+$global:LASTEXITCODE = 0
