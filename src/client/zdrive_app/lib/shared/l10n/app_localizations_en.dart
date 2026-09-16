@@ -9,6 +9,18 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Export diagnostic log';
+
+  @override
+  String get diagnosticsPreparing => 'Preparing diagnostic log…';
+
+  @override
+  String get diagnosticsSaved => 'Diagnostic log saved.';
+
+  @override
+  String get diagnosticsFailed => 'Could not export the log. Try again.';
+
+  @override
   String get aboutApp => 'About';
 
   @override

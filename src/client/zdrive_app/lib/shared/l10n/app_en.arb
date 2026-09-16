@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Export diagnostic log",
+  "diagnosticsPreparing": "Preparing diagnostic log…",
+  "diagnosticsSaved": "Diagnostic log saved.",
+  "diagnosticsFailed": "Could not export the log. Try again.",
   "@@locale": "en",
   "aboutApp": "About",
   "exitApp": "Exit",

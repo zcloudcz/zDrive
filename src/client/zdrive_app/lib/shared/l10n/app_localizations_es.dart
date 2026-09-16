@@ -9,6 +9,19 @@ class AppLocalizationsEs extends AppLocalizations {
   AppLocalizationsEs([String locale = 'es']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Exportar registro de diagnóstico';
+
+  @override
+  String get diagnosticsPreparing => 'Preparando el registro de diagnóstico…';
+
+  @override
+  String get diagnosticsSaved => 'Registro de diagnóstico guardado.';
+
+  @override
+  String get diagnosticsFailed =>
+      'No se pudo exportar el registro. Inténtalo de nuevo.';
+
+  @override
   String get aboutApp => 'Acerca de';
 
   @override

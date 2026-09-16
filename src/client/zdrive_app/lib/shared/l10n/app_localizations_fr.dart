@@ -9,6 +9,19 @@ class AppLocalizationsFr extends AppLocalizations {
   AppLocalizationsFr([String locale = 'fr']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Exporter le journal de diagnostic';
+
+  @override
+  String get diagnosticsPreparing => 'Préparation du journal de diagnostic…';
+
+  @override
+  String get diagnosticsSaved => 'Journal de diagnostic enregistré.';
+
+  @override
+  String get diagnosticsFailed =>
+      'Exportation du journal impossible. Réessayez.';
+
+  @override
   String get aboutApp => 'À propos';
 
   @override

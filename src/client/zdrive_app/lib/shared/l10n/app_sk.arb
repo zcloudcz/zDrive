@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Exportovať diagnostický log",
+  "diagnosticsPreparing": "Pripravujem diagnostický log…",
+  "diagnosticsSaved": "Diagnostický log bol uložený.",
+  "diagnosticsFailed": "Log sa nepodarilo exportovať. Skúste to znova.",
   "@@locale": "sk",
   "appTitle": "zDrive",
   "downloadForWindows": "Stiahnuť pre Windows",

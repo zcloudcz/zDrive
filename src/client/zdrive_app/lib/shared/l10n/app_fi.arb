@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Vie diagnostiikkaloki",
+  "diagnosticsPreparing": "Valmistellaan diagnostiikkalokia…",
+  "diagnosticsSaved": "Diagnostiikkaloki tallennettu.",
+  "diagnosticsFailed": "Lokin vienti epäonnistui. Yritä uudelleen.",
   "@@locale": "fi",
   "appTitle": "zDrive",
   "downloadForWindows": "Lataa Windowsille",

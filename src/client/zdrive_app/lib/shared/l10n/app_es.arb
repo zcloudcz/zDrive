@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Exportar registro de diagnóstico",
+  "diagnosticsPreparing": "Preparando el registro de diagnóstico…",
+  "diagnosticsSaved": "Registro de diagnóstico guardado.",
+  "diagnosticsFailed": "No se pudo exportar el registro. Inténtalo de nuevo.",
   "@@locale": "es",
   "appTitle": "zDrive",
   "downloadForWindows": "Descargar para Windows",

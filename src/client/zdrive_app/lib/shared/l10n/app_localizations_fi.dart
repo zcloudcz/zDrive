@@ -9,6 +9,18 @@ class AppLocalizationsFi extends AppLocalizations {
   AppLocalizationsFi([String locale = 'fi']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Vie diagnostiikkaloki';
+
+  @override
+  String get diagnosticsPreparing => 'Valmistellaan diagnostiikkalokia…';
+
+  @override
+  String get diagnosticsSaved => 'Diagnostiikkaloki tallennettu.';
+
+  @override
+  String get diagnosticsFailed => 'Lokin vienti epäonnistui. Yritä uudelleen.';
+
+  @override
   String get aboutApp => 'Tietoja sovelluksesta';
 
   @override

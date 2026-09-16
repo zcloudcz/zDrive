@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Exporter le journal de diagnostic",
+  "diagnosticsPreparing": "Préparation du journal de diagnostic…",
+  "diagnosticsSaved": "Journal de diagnostic enregistré.",
+  "diagnosticsFailed": "Exportation du journal impossible. Réessayez.",
   "@@locale": "fr",
   "appTitle": "zDrive",
   "downloadForWindows": "Télécharger pour Windows",

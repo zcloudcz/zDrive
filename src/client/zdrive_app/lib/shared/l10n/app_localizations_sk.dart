@@ -9,6 +9,19 @@ class AppLocalizationsSk extends AppLocalizations {
   AppLocalizationsSk([String locale = 'sk']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Exportovať diagnostický log';
+
+  @override
+  String get diagnosticsPreparing => 'Pripravujem diagnostický log…';
+
+  @override
+  String get diagnosticsSaved => 'Diagnostický log bol uložený.';
+
+  @override
+  String get diagnosticsFailed =>
+      'Log sa nepodarilo exportovať. Skúste to znova.';
+
+  @override
   String get aboutApp => 'O aplikácii';
 
   @override

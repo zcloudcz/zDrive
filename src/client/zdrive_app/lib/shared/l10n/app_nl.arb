@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Diagnoselog exporteren",
+  "diagnosticsPreparing": "Diagnoselog voorbereiden…",
+  "diagnosticsSaved": "Diagnoselog opgeslagen.",
+  "diagnosticsFailed": "Kan het logbestand niet exporteren. Probeer het opnieuw.",
   "@@locale": "nl",
   "appTitle": "zDrive",
   "downloadForWindows": "Downloaden voor Windows",

@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:injectable/injectable.dart';
 
+import '../../../core/diagnostics/diagnostics.dart';
+
 import '../domain/file_item.dart';
 import '../domain/file_repository.dart';
 import '../domain/file_version.dart';
@@ -71,7 +73,21 @@ class FileRepositoryImpl implements FileRepository {
 
   @override
   Future<void> deleteFile(String id, {String? originDeviceId}) async {
-    await _remoteDataSource.deleteFile(id, originDeviceId: originDeviceId);
+    final watch = Stopwatch()..start();
+    Diagnostics.event(
+      originDeviceId == null
+          ? 'file.delete.browser_start'
+          : 'file.delete.sync_start',
+    );
+    try {
+      await _remoteDataSource.deleteFile(id, originDeviceId: originDeviceId);
+      Diagnostics.event('file.delete.complete', {
+        'durationMs': watch.elapsedMilliseconds,
+      });
+    } catch (error, stack) {
+      Diagnostics.error('file.delete.failed', error, stack);
+      rethrow;
+    }
   }
 
   @override

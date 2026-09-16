@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/diagnostics/diagnostics.dart';
 import '../../../../core/events/remote_file_change_notifier.dart';
 import '../../../../core/network/error_message.dart';
 import '../../data/file_saver.dart';
@@ -339,6 +340,7 @@ class _FileBrowserView extends StatelessWidget {
   }
 
   Future<void> _showDeleteConfirm(BuildContext context, FileItem file) async {
+    Diagnostics.event('file.delete.dialog_opened');
     final l10n = AppLocalizations.of(context)!;
     var dialogClosed = false;
     void closeDialog(BuildContext dialogContext, bool confirmed) {
@@ -363,6 +365,11 @@ class _FileBrowserView extends StatelessWidget {
           ),
         ],
       ),
+    );
+    Diagnostics.event(
+      confirmed == true
+          ? 'file.delete.dialog_confirmed'
+          : 'file.delete.dialog_cancelled',
     );
     if (confirmed == true && context.mounted) {
       context.read<FileBrowserBloc>().add(DeleteFile(file.id));

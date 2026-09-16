@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:injectable/injectable.dart';
 
 import '../../../core/storage/app_preferences.dart';
+import '../../../core/diagnostics/diagnostics.dart';
 import '../domain/sync_mirror_repository.dart';
 import '../domain/sync_progress.dart';
 import 'device_id_storage.dart';
@@ -116,7 +117,23 @@ class SyncCoordinator {
     final progress = onProgress == null
         ? null
         : SyncProgressTracker(onProgress);
-    final future = _withLock(() => _syncOnce(syncFolderPath, progress));
+    Diagnostics.event('sync.queued');
+    final future = _withLock(() async {
+      final watch = Stopwatch()..start();
+      Diagnostics.event('sync.start');
+      try {
+        final result = await _syncOnce(syncFolderPath, progress);
+        Diagnostics.event('sync.complete', {
+          'pulled': result.pulled,
+          'pushed': result.pushed,
+          'durationMs': watch.elapsedMilliseconds,
+        });
+        return result;
+      } catch (error, stack) {
+        Diagnostics.error('sync.failed', error, stack);
+        rethrow;
+      }
+    });
     final entry = (path: syncFolderPath, future: future);
     _inFlight = entry;
     // Only clear the slot if it still holds THIS entry — a call for a
@@ -161,6 +178,7 @@ class SyncCoordinator {
       throw SyncFolderMissingException(syncFolderPath);
     }
     progress?.beginPhase(SyncPhase.connecting, discovering: true);
+    Diagnostics.event('sync.pull.start');
     final pulled = progress == null
         ? await _pull.pullOnce(syncFolderPath)
         : await _pull.pullOnce(syncFolderPath, progress: progress);
@@ -181,10 +199,13 @@ class SyncCoordinator {
     // poll ticks that arrive meanwhile. Nothing in the run needs the
     // result, and _sendHeartbeat catches everything internally, so the
     // dangling future can never surface as an unhandled async error.
+    Diagnostics.event('sync.pull.complete', {'count': pulled});
     unawaited(_sendHeartbeat());
+    Diagnostics.event('sync.scan.start');
     final pushed = progress == null
         ? await _scanner.scanOnce(syncFolderPath)
         : await _scanner.scanOnce(syncFolderPath, progress: progress);
+    Diagnostics.event('sync.scan.complete', {'count': pushed});
     return SyncRunResult(pulled: pulled, pushed: pushed);
   }
 

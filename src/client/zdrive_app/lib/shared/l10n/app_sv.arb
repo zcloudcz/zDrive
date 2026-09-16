@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Exportera diagnostiklogg",
+  "diagnosticsPreparing": "Förbereder diagnostikloggen…",
+  "diagnosticsSaved": "Diagnostikloggen har sparats.",
+  "diagnosticsFailed": "Kunde inte exportera loggen. Försök igen.",
   "@@locale": "sv",
   "appTitle": "zDrive",
   "downloadForWindows": "Ladda ned för Windows",
