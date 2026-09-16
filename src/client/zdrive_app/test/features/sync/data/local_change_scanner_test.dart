@@ -175,6 +175,29 @@ void main() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
+  test('backed-off file remains visible as a failure without retrying upload', () async {
+    final file = File(p.join(tempDir.path, 'retry.txt'))..writeAsStringSync('retry');
+    stateful([]);
+    scanner.debugBackOff(file.path);
+    final snapshots = <SyncProgress>[];
+    expect(await scanner.scanOnce(tempDir.path, progress: SyncProgressTracker(snapshots.add)), 0);
+    expect(snapshots.any((s) => s.failedFiles > 0), isTrue);
+    expect(snapshots.any((s) => s.activeFiles.any((f) => f.path == syncPathKey(file.path))), isTrue);
+    verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(),
+      originDeviceId: any(named: 'originDeviceId')));
+  });
+
+  test('folder creation failure is reported by this run tracker', () async {
+    final dir = Directory(p.join(tempDir.path, 'folder'))..createSync();
+    stateful([]);
+    when(() => mockFileRepository.createFolder(any(), 'folder', originDeviceId: any(named: 'originDeviceId')))
+      .thenThrow(StateError('folder failed'));
+    final snapshots = <SyncProgress>[];
+    expect(await scanner.scanOnce(tempDir.path, progress: SyncProgressTracker(snapshots.add)), 0);
+    expect(snapshots.any((s) => s.failedFiles > 0), isTrue);
+    expect(snapshots.any((s) => s.activeFiles.any((f) => f.path == dir.path)), isTrue);
+  });
+
   test('parallel uploads cap concurrency and drain after an error before deleting', () async {
     for (var i = 0; i < 5; i++) {
       File(p.join(tempDir.path, '$i.txt')).writeAsStringSync('new-$i');

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer';
 import 'dart:io';
 
@@ -113,9 +114,23 @@ class LocalChangeScanner {
     return failedAt != null && DateTime.now().difference(failedAt) < _retryBackoff;
   }
 
+  // A zone keeps callbacks scoped to this run, including its async workers.
+  static final _progressZoneKey = Object();
+
+  void _reportPendingFailure(String path) {
+    final progress = Zone.current[_progressZoneKey] as SyncProgressTracker?;
+    if (progress == null) return;
+    if (!progress.snapshot.activeFiles.any((file) => file.key == path)) {
+      progress.setTotalFiles(progress.snapshot.totalFiles + 1);
+      progress.startFile(path, path);
+    }
+    progress.finishFile(path, failed: true);
+  }
+
   void _recordFailure(String path, Object error, StackTrace stackTrace) {
     log('scan failed for $path', error: error, stackTrace: stackTrace, name: 'LocalChangeScanner');
     _failedPaths[_key(path)] = DateTime.now();
+    _reportPendingFailure(path);
   }
 
   /// Clears every path's backoff — called by [SyncCoordinator.startSession]
@@ -184,9 +199,17 @@ class LocalChangeScanner {
   /// device fetches a file's parent folder directly by id rather than
   /// reading it off the change feed, so counting one here would be
   /// meaningless).
-  Future<int> scanOnce(String syncFolderPath, {SyncProgressTracker? progress}) async {
+  Future<int> scanOnce(String syncFolderPath, {SyncProgressTracker? progress}) => runZoned(
+        () => _scanOnce(syncFolderPath, progress),
+        zoneValues: {_progressZoneKey: progress},
+      );
+
+  Future<int> _scanOnce(String syncFolderPath, SyncProgressTracker? progress) async {
     progress?.beginPhase(SyncPhase.scanning, discovering: true);
     final root = syncFolderPath;
+    for (final path in _failedPaths.keys.toList()) {
+      if (p.isWithin(_key(root), path) && _isBackedOff(path)) _reportPendingFailure(path);
+    }
 
     final mirrorEntries = await _mirror.getChildrenUnder(root);
     final mirrorByPath = <String, SyncMirrorEntry>{for (final e in mirrorEntries) e.localPath: e};
@@ -228,6 +251,7 @@ class LocalChangeScanner {
           final hs = await hashFileInBackground(path);
           if (hs.hash != entry.contentHash) changedHashes[path] = hs;
         }
+        if (!changedHashes.containsKey(path)) _failedPaths.remove(_key(path));
         progress?.finishFile(path);
       } catch (e, st) {
         _recordFailure(path, e, st);
@@ -445,6 +469,7 @@ class LocalChangeScanner {
       if (_isBackedOff(candidate.entry.localPath)) continue;
       try {
         await _renameFolderCase(candidate.entry, candidate.diskPath, mirrorByPath);
+        _failedPaths.remove(_key(candidate.entry.localPath));
         return 1;
       } catch (e, st) {
         _recordFailure(candidate.entry.localPath, e, st);
@@ -454,6 +479,7 @@ class LocalChangeScanner {
       if (_isBackedOff(candidate.entry.localPath)) continue;
       try {
         await _renameFileCase(candidate.entry, candidate.diskPath, mirrorByPath);
+        _failedPaths.remove(_key(candidate.entry.localPath));
         return 1;
       } catch (e, st) {
         _recordFailure(candidate.entry.localPath, e, st);
@@ -576,6 +602,7 @@ class LocalChangeScanner {
       // Not reported (see scanOnce's doc comment) — a plain upsert, not
       // commit, is enough.
       await _mirror.upsert(entry);
+      _failedPaths.remove(_key(dirPath));
       mirrorByPath[dirPath] = entry; // so a child under it resolves within this same scan
     } on DioException catch (e) {
       if (e.response?.statusCode == 409) {
@@ -594,6 +621,7 @@ class LocalChangeScanner {
             updatedAt: existing.updatedAt,
           );
           await _mirror.upsert(entry);
+          _failedPaths.remove(_key(dirPath));
           mirrorByPath[dirPath] = entry;
           return;
         }
@@ -672,6 +700,7 @@ class LocalChangeScanner {
           missingFiles.remove(missing);
           try {
             if (await _applyMove(filePath, missing, root, mirrorByPath, hs)) pushed++;
+            _failedPaths.remove(_key(filePath));
           } catch (e, st) {
             _recordFailure(filePath, e, st);
             protectedMissingFiles.add(missing);
@@ -799,7 +828,10 @@ class LocalChangeScanner {
         progress?.startFile(path, path);
         try {
           final uploaded = await upload(item);
-          if (uploaded) pushed++;
+          if (uploaded) {
+            pushed++;
+            _failedPaths.remove(_key(path));
+          }
           progress?.finishFile(path, failed: !uploaded);
         } catch (e, st) {
           _recordFailure(path, e, st);
@@ -1079,6 +1111,10 @@ class LocalChangeScanner {
       deleteServerIds: [entry.serverId],
       deleteUnderPath: entry.isFolder ? entry.localPath : null,
     );
+    _failedPaths.remove(_key(entry.localPath));
+    if (entry.isFolder) {
+      _failedPaths.removeWhere((path, _) => p.isWithin(_key(entry.localPath), path));
+    }
     return actuallyDeleted;
   }
 
