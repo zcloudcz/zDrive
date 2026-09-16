@@ -66,19 +66,17 @@ jobs:
 
       # The repository is private; publish only the distributable binaries
       # alongside the public web app so the small installer needs no token.
+      # Retain historical payloads so already-downloaded installers keep working.
       # A release must be packaged before its web version can be deployed.
       - name: Include Windows release downloads
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+        shell: pwsh
         run: |
-          set -euo pipefail
-          version=$(sed -n 's/^version: \([0-9][0-9.]*\)+.*$/\1/p' src/client/zdrive_app/pubspec.yaml)
-          test -n "$version"
-          gh release download "v$version" \
-            --pattern "zDrive-$version-windows-x64.zip" \
-            --pattern "zDrive-$version-Setup.exe" \
-            --dir src/client/zdrive_app/build/web/downloads
+          $versionLine = Get-Content src/client/zdrive_app/pubspec.yaml | Where-Object { $_ -match '^version:' }
+          $version = ($versionLine -replace '^version:\s*', '').Split('+')[0]
+          ./scripts/Include-WindowsDownloads.ps1 -Repository $env:GH_REPO -Version $version -OutputDirectory src/client/zdrive_app/build/web/downloads
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
