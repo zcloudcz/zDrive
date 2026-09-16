@@ -248,8 +248,25 @@ class LocalChangeScanner {
       try {
         final stat = await File(path).stat();
         if (entry.sizeBytes != stat.size || stat.modified.isAfter(entry.syncedAt)) {
+          final checkedAt = DateTime.now().subtract(const Duration(seconds: 2));
           final hs = await hashFileInBackground(path);
-          if (hs.hash != entry.contentHash) changedHashes[path] = hs;
+          if (hs.hash != entry.contentHash) {
+            changedHashes[path] = hs;
+          } else {
+            // Advance the check watermark so the precision overlap does not
+            // force this unchanged file to be hashed on every future poll.
+            final checked = _mirrorRow(
+              serverId: entry.serverId,
+              localPath: path,
+              isFolder: false,
+              sizeBytes: hs.size,
+              contentHash: hs.hash,
+              updatedAt: entry.updatedAt,
+              syncedAt: checkedAt,
+            );
+            await _mirror.commit(upserts: [checked]);
+            mirrorByPath[path] = checked;
+          }
         }
         if (!changedHashes.containsKey(path)) _failedPaths.remove(_key(path));
         progress?.finishFile(path);
@@ -265,10 +282,10 @@ class LocalChangeScanner {
     );
 
     // --- 3. Upload new files (whatever step 2 did not claim as a move) ---
-    pushed += await _uploadNewFiles(moves.remainingNewFiles, moves.hashes, root, mirrorByPath, progress);
+    pushed += await _uploadNewFiles(moves.remainingNewFiles, root, mirrorByPath, progress);
 
     // --- 4. Upload changed files ---
-    pushed += await _uploadChangedFiles(changedFiles, changedHashes, root, mirrorByPath, progress);
+    pushed += await _uploadChangedFiles(changedFiles, root, mirrorByPath, progress);
 
     // --- 5 & 6. Delete missing files, then missing folders (top-most only) ---
     pushed += await _deleteMissing(
@@ -813,10 +830,11 @@ class LocalChangeScanner {
 
   // Each worker claims one item synchronously before awaiting. Future.wait
   // drains every worker even if one fails, before the delete phase can start.
+  // At most three temporary copies exist, and every copy is removed in finally.
   Future<int> _uploadInParallel<T>(
     List<T> items,
     String Function(T) pathOf,
-    Future<bool> Function(T) upload,
+    Future<bool> Function(T, File, ({String hash, int size}), DateTime) upload,
     SyncProgressTracker? progress,
   ) async {
     var next = 0;
@@ -826,8 +844,17 @@ class LocalChangeScanner {
         final item = items[next++];
         final path = pathOf(item);
         progress?.startFile(path, path);
+        Directory? staging;
         try {
-          final uploaded = await upload(item);
+          staging = await Directory.systemTemp.createTemp('zdrive_sync_upload_');
+          // Filesystems may round mtimes to two-second boundaries. Keeping
+          // this small overlap makes edits within that boundary re-hash too.
+          final snapshotStartedAt = DateTime.now().subtract(const Duration(seconds: 2));
+          final snapshot = await File(path).copy(p.join(staging.path, 'content'));
+          final hashSize = await hashFileInBackground(snapshot.path);
+          // Hash and every retry read the same private snapshot. The live
+          // file can continue changing without corrupting the mirror hash.
+          final uploaded = await upload(item, snapshot, hashSize, snapshotStartedAt);
           if (uploaded) {
             pushed++;
             _failedPaths.remove(_key(path));
@@ -836,6 +863,8 @@ class LocalChangeScanner {
         } catch (e, st) {
           _recordFailure(path, e, st);
           progress?.finishFile(path, failed: true);
+        } finally {
+          if (staging != null) await staging.delete(recursive: true);
         }
       }
     }
@@ -851,14 +880,14 @@ class LocalChangeScanner {
 
   Future<int> _uploadNewFiles(
     List<String> remainingNewFiles,
-    Map<String, ({String hash, int size})> hashes,
     String root,
     Map<String, SyncMirrorEntry> mirrorByPath,
     SyncProgressTracker? progress,
   ) => _uploadInParallel(
     remainingNewFiles,
     (path) => path,
-    (path) => _uploadNewFile(path, root, mirrorByPath, hashes[path]!, progress),
+    (path, snapshot, hashSize, startedAt) =>
+        _uploadNewFile(path, root, mirrorByPath, snapshot, hashSize, startedAt, progress),
     progress,
   );
 
@@ -869,14 +898,15 @@ class LocalChangeScanner {
     String filePath,
     String root,
     Map<String, SyncMirrorEntry> mirrorByPath,
+    File file,
     ({String hash, int size}) hashSize,
+    DateTime snapshotStartedAt,
     SyncProgressTracker? progress,
   ) async {
     final resolution = _resolveParent(filePath, root, mirrorByPath);
     if (!resolution.resolved) return false; // parent folder failed earlier this scan
 
     final name = p.basename(filePath);
-    final file = File(filePath);
     final originDeviceId = await _originDeviceId();
 
     try {
@@ -888,7 +918,7 @@ class LocalChangeScanner {
         _uploadProgress(progress, filePath, hashSize.size),
         originDeviceId: originDeviceId,
       );
-      await _finishUpload(id, filePath, hashSize, mirrorByPath);
+      await _finishUpload(id, filePath, hashSize, mirrorByPath, snapshotStartedAt);
       return true;
     } on DioException catch (e) {
       if (e.response?.statusCode != 409) rethrow;
@@ -905,7 +935,7 @@ class LocalChangeScanner {
         onProgress: _uploadProgress(progress, filePath, hashSize.size),
         originDeviceId: originDeviceId,
       );
-      await _finishUpload(existing.id, filePath, hashSize, mirrorByPath);
+      await _finishUpload(existing.id, filePath, hashSize, mirrorByPath, snapshotStartedAt);
       return true;
     }
   }
@@ -920,6 +950,7 @@ class LocalChangeScanner {
     String filePath,
     ({String hash, int size}) hashSize,
     Map<String, SyncMirrorEntry> mirrorByPath,
+    DateTime snapshotStartedAt,
   ) async {
     final entry = _mirrorRow(
       serverId: serverId,
@@ -928,6 +959,7 @@ class LocalChangeScanner {
       sizeBytes: hashSize.size,
       contentHash: hashSize.hash,
       updatedAt: DateTime.now(),
+      syncedAt: snapshotStartedAt,
     );
     await _mirror.commit(upserts: [entry]);
     mirrorByPath[filePath] = entry;
@@ -963,14 +995,14 @@ class LocalChangeScanner {
 
   Future<int> _uploadChangedFiles(
     List<SyncMirrorEntry> changeCandidates,
-    Map<String, ({String hash, int size})> hashes,
     String root,
     Map<String, SyncMirrorEntry> mirrorByPath,
     SyncProgressTracker? progress,
   ) => _uploadInParallel(
     changeCandidates,
     (entry) => entry.localPath,
-    (entry) => _uploadChangedFile(entry, root, mirrorByPath, hashes[entry.localPath]!, progress),
+    (entry, snapshot, hashSize, startedAt) =>
+        _uploadChangedFile(entry, root, mirrorByPath, snapshot, hashSize, startedAt, progress),
     progress,
   );
 
@@ -981,10 +1013,11 @@ class LocalChangeScanner {
     SyncMirrorEntry entry,
     String root,
     Map<String, SyncMirrorEntry> mirrorByPath,
+    File file,
     ({String hash, int size}) hashSize,
+    DateTime snapshotStartedAt,
     SyncProgressTracker? progress,
   ) async {
-    final file = File(entry.localPath);
     final hash = hashSize.hash;
     final originDeviceId = await _originDeviceId();
 
@@ -997,7 +1030,7 @@ class LocalChangeScanner {
         onProgress: _uploadProgress(progress, entry.localPath, hashSize.size),
         originDeviceId: originDeviceId,
       );
-      await _finishUpload(entry.serverId, entry.localPath, (hash: hash, size: hashSize.size), mirrorByPath);
+      await _finishUpload(entry.serverId, entry.localPath, hashSize, mirrorByPath, snapshotStartedAt);
       return true;
     } on DioException catch (e) {
       if (e.response?.statusCode != 404) rethrow;
@@ -1023,6 +1056,7 @@ class LocalChangeScanner {
         sizeBytes: hashSize.size,
         contentHash: hash,
         updatedAt: DateTime.now(),
+        syncedAt: snapshotStartedAt,
       );
       await _mirror.commit(deleteServerIds: [entry.serverId], upserts: [newEntry]);
       mirrorByPath[entry.localPath] = newEntry;
@@ -1118,11 +1152,9 @@ class LocalChangeScanner {
     return actuallyDeleted;
   }
 
-  /// Builds a mirror row stamped with the current time as [SyncMirrorEntry
-  /// .syncedAt] — every call site below reaches this only right after its
-  /// own write to the server succeeded, so "now" is accurate for all of
-  /// them. One small helper instead of the same seven-field constructor
-  /// repeated at every write site (PR #12 review, F9).
+  /// Uploads use the snapshot start (with an mtime precision overlap), so
+  /// edits during transfer remain candidates for the next scan. Other writes
+  /// use the current time.
   SyncMirrorEntry _mirrorRow({
     required String serverId,
     required String localPath,
@@ -1130,6 +1162,7 @@ class LocalChangeScanner {
     int? sizeBytes,
     String? contentHash,
     required DateTime updatedAt,
+    DateTime? syncedAt,
   }) =>
       SyncMirrorEntry(
         serverId: serverId,
@@ -1138,6 +1171,6 @@ class LocalChangeScanner {
         sizeBytes: sizeBytes,
         contentHash: contentHash,
         updatedAt: updatedAt,
-        syncedAt: DateTime.now(),
+        syncedAt: syncedAt ?? DateTime.now(),
       );
 }

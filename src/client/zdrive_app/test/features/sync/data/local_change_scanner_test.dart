@@ -175,6 +175,57 @@ void main() {
     if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
   });
 
+  test('unchanged content advances the check timestamp beyond the precision overlap', () async {
+    final file = File(p.join(tempDir.path, 'same.txt'))..writeAsStringSync('same');
+    await file.setLastModified(DateTime.now().subtract(const Duration(seconds: 10)));
+    final mirror = stateful([
+      SyncMirrorEntry(serverId: 'same', localPath: file.path, isFolder: false,
+        sizeBytes: 4, contentHash: hashOf('same'), updatedAt: past, syncedAt: past),
+    ]);
+    expect(await scanner.scanOnce(tempDir.path), 0);
+    final checkedAt = mirror.row('same')!.syncedAt;
+    expect(checkedAt.isAfter((await file.stat()).modified), isTrue);
+    expect(await scanner.scanOnce(tempDir.path), 0);
+    expect(mirror.row('same')!.syncedAt, checkedAt); // Stat prefilter now skips hashing.
+  });
+
+  test('upload snapshot matches mirror despite edits before and during transfer', () async {
+    final changed = File(p.join(tempDir.path, 'changed.txt'))..writeAsStringSync('1111');
+    File(p.join(tempDir.path, 'new.txt')).writeAsStringSync('new');
+    final mirror = stateful([
+      SyncMirrorEntry(serverId: 'changed', localPath: changed.path, isFolder: false,
+        sizeBytes: 4, contentHash: hashOf('0000'), updatedAt: past, syncedAt: past),
+    ]);
+    when(() => mockFileRepository.uploadFile(any(), 'new.txt', any(), 3, any(),
+      originDeviceId: any(named: 'originDeviceId'))).thenAnswer((_) async {
+        // Existing-file prehash has finished, but its upload has not begun.
+        await changed.writeAsString('2222');
+        return 'new';
+      });
+    final uploaded = <String>[];
+    when(() => mockFileRepository.uploadNewVersion('changed', 'changed.txt', any(), 4,
+      originDeviceId: any(named: 'originDeviceId'))).thenAnswer((inv) async {
+        final stream = inv.positionalArguments[2] as Stream<List<int>>;
+        if (uploaded.isEmpty) {
+          // The transfer must keep reading its snapshot, including if the
+          // live file is replaced before the stream is even consumed.
+          await changed.writeAsString('3333');
+          final nowMs = DateTime.now().millisecondsSinceEpoch;
+          await changed.setLastModified(DateTime.fromMillisecondsSinceEpoch(nowMs ~/ 2000 * 2000));
+        }
+        uploaded.add(utf8.decode(await stream.expand((chunk) => chunk).toList()));
+      });
+    expect(await scanner.scanOnce(tempDir.path), 2);
+    expect(uploaded, ['2222']);
+    expect(mirror.row('changed')!.contentHash, hashOf('2222'));
+    expect(mirror.row('changed')!.sizeBytes, 4);
+    expect(mirror.row('changed')!.localPath, changed.path);
+    expect((await changed.stat()).modified.isAfter(mirror.row('changed')!.syncedAt), isTrue);
+    expect(await scanner.scanOnce(tempDir.path), 1);
+    expect(uploaded, ['2222', '3333']);
+    expect(mirror.row('changed')!.contentHash, hashOf('3333'));
+  });
+
   test('backed-off file remains visible as a failure without retrying upload', () async {
     final file = File(p.join(tempDir.path, 'retry.txt'))..writeAsStringSync('retry');
     stateful([]);
