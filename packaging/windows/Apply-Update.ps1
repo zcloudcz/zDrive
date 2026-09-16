@@ -18,13 +18,13 @@ $ownsMutex = $false
 $mutex = $null
 $ready = Join-Path $updates "handoff-$HandoffId.ready"
 function Clear-MatchingPending {
-    if (Test-Path -LiteralPath $pending) {
-        try {
+    try {
+        if (Test-Path -LiteralPath $pending) {
             if ((Get-Content -LiteralPath $pending -Raw | ConvertFrom-Json).version -eq $Version) {
                 Remove-Item -LiteralPath $pending -Force
             }
-        } catch { }
-    }
+        }
+    } catch { }
 }
 function Start-InstalledApp([string] $releaseVersion) {
     $installBoundary = $root.TrimEnd('\') + '\'
@@ -90,20 +90,29 @@ try {
     Start-InstalledApp $restartVersion
 } catch {
     if ($ownsMutex) {
-        New-Item -ItemType Directory -Path $updates -Force | Out-Null
         $message = $_.Exception.Message
-        if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
-        $errorJson = @{ version = $Version; message = $message } | ConvertTo-Json
-        [IO.File]::WriteAllText((Join-Path $updates 'last-error.json'), $errorJson, [Text.UTF8Encoding]::new($false))
+        try {
+            New-Item -ItemType Directory -Path $updates -Force | Out-Null
+            if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
+            $errorJson = @{ version = $Version; message = $message } | ConvertTo-Json
+            [IO.File]::WriteAllText((Join-Path $updates 'last-error.json'), $errorJson, [Text.UTF8Encoding]::new($false))
+        } catch { }
         Clear-MatchingPending
         if ($parentExited) { Start-InstalledApp $restartVersion }
     }
 } finally {
-    if ($ownsMutex -and (Test-Path -LiteralPath $ready)) { Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue }
-    $boundary = [IO.Path]::GetFullPath($updates).TrimEnd('\') + '\'
-    if ([IO.Path]::GetFullPath($stage).StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $stage)) {
-        Remove-Item -LiteralPath $stage -Recurse -Force
+    try {
+        try {
+            if ($ownsMutex -and (Test-Path -LiteralPath $ready)) { Remove-Item -LiteralPath $ready -Force }
+        } catch { }
+        try {
+            $boundary = [IO.Path]::GetFullPath($updates).TrimEnd('\') + '\'
+            if ([IO.Path]::GetFullPath($stage).StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $stage)) {
+                Remove-Item -LiteralPath $stage -Recurse -Force
+            }
+        } catch { }
+    } finally {
+        try { if ($ownsMutex) { $mutex.ReleaseMutex() } }
+        finally { if ($mutex) { $mutex.Dispose() } }
     }
-    if ($ownsMutex) { $mutex.ReleaseMutex() }
-    if ($mutex) { $mutex.Dispose() }
 }

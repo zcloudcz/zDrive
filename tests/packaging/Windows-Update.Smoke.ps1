@@ -24,6 +24,11 @@ function Get-Process {
 }
 function Get-ItemProperty { param($LiteralPath, $ErrorAction); [pscustomobject]@{ DisplayVersion = $global:installedVersion } }
 function Start-Process { param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle); $global:launched += $FilePath; Assert ($ArgumentList -eq '--skip-auto-update-once') 'Missing restart guard' }
+function Remove-Item {
+    param($LiteralPath, [switch]$Recurse, [switch]$Force, $ErrorAction)
+    if ($global:injectCleanupFailure -and ($LiteralPath -like '*.apply-*' -or $LiteralPath -like '*.ready')) { throw 'Injected cleanup failure' }
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Recurse:$Recurse -Force:$Force -ErrorAction Stop
+}
 try {
     $env:LOCALAPPDATA = Join-Path $fixture 'profile'
     $root = Join-Path $env:LOCALAPPDATA 'Programs/zDrive'
@@ -66,6 +71,16 @@ public sealed class UpdateTestLock : IDisposable {
         thread.Start(); ready.WaitOne();
     }
     public void Dispose() { release.Set(); thread.Join(); ready.Dispose(); release.Dispose(); }
+    public static bool Available(string name) {
+        bool available = false;
+        var probe = new Thread(() => {
+            using (var mutex = new Mutex(false, name)) {
+                available = mutex.WaitOne(0);
+                if (available) mutex.ReleaseMutex();
+            }
+        });
+        probe.Start(); probe.Join(); return available;
+    }
 }
 '@
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -105,6 +120,29 @@ public sealed class UpdateTestLock : IDisposable {
         else {
             Assert (Test-Path (Join-Path $updates 'last-error.json')) "$scenario did not record error"
             Assert ([IO.File]::ReadAllBytes((Join-Path $updates 'last-error.json'))[0] -eq 123) 'Error JSON has UTF-8 BOM'
+        }
+    }
+    # Failure reporting and cleanup cannot prevent restarting the usable release.
+    $errorPath = Join-Path $updates 'last-error.json'
+    New-Item -ItemType Directory -Path $errorPath -Force | Out-Null
+    $global:injectCleanupFailure = $true
+    $global:injectInstallFailure = $true
+    $global:launched = @()
+    Set-Content (Join-Path $updates 'pending.json') '{"version":"0.2.2"}'
+    try {
+        & $helper -ParentProcessId 123 -SourceVersion 0.2.1 -Version 0.2.2 -ExpectedSha256 $hash -ExpectedSize $size -HandoffId $handoff
+        Assert ($global:launched.Count -eq 1 -and $global:launched[0] -like '*releases*0.2.1*zdrive_app.exe') 'Log/cleanup failure prevented fallback restart'
+        Assert (-not (Test-Path (Join-Path $updates 'pending.json'))) 'Log failure left restart loop'
+        Assert ([UpdateTestLock]::Available("Local\zDrive.Update.$sid")) 'Cleanup failure leaked update mutex'
+        Assert ((Get-Content $userdata) -eq 'preserve me') 'Recovery failure damaged user data'
+    } finally {
+        $global:injectCleanupFailure = $false
+        $global:injectInstallFailure = $false
+        Remove-Item -LiteralPath $errorPath -Recurse -Force
+        foreach ($remaining in Get-ChildItem $updates -Force | Where-Object { $_.Name -like '.apply-*' -or $_.Name -like '*.ready' }) {
+            $resolved = [IO.Path]::GetFullPath($remaining.FullName)
+            Assert ($resolved.StartsWith([IO.Path]::GetFullPath($updates).TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) 'Unsafe fixture cleanup'
+            Remove-Item -LiteralPath $resolved -Recurse -Force
         }
     }
     # A valid checksum does not make path traversal safe to extract.
