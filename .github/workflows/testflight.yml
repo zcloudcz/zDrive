@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Check signing and upload scripts
         run: |
           bash -n scripts/Build-IosRelease.sh
@@ -41,7 +41,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       API_BASE_URL: https://zdrive-gateway.azurewebsites.net/api/v1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Select reviewed published source
@@ -80,7 +80,7 @@ jobs:
           files=(src/client/zdrive_app/build/ios/ipa/*.ipa)
           [[ ${#files[@]} == 1 && -f "${files[0]}" ]]
           cp "${files[0]}" dist/zDrive-ios.ipa
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: testflight-ipa
           path: dist/*.ipa
