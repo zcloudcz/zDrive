@@ -1,0 +1,262 @@
+name: Release clients
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'src/client/**'
+      - 'scripts/*Android*'
+      - 'scripts/*Ios*'
+      - 'scripts/*TestFlight*'
+      - 'scripts/Read-ClientRelease.ps1'
+      - '.github/workflows/release-clients.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-clients-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: '3.41.2'
+  API_BASE_URL: https://zdrive-gateway.azurewebsites.net/api/v1
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      publish: ${{ steps.release.outputs.publish }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release version and trusted history
+        id: release
+        shell: pwsh
+        run: ./scripts/Read-ClientRelease.ps1
+      - name: Verify signing preparation and download retention
+        shell: pwsh
+        run: |
+          ./scripts/Test-AndroidSigning.ps1
+          ./scripts/Test-WindowsDownloadRetention.ps1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve pinned dependencies
+        working-directory: src/client/zdrive_app
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze and test
+        working-directory: src/client/zdrive_app
+        run: |
+          flutter analyze --fatal-infos
+          flutter test
+
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve pinned dependencies
+        working-directory: src/client/zdrive_app
+        run: flutter pub get --enforce-lockfile
+      - name: Build preview without production credentials
+        if: needs.validate.outputs.publish != 'true'
+        working-directory: src/client/zdrive_app
+        run: flutter build apk --debug --dart-define=API_BASE_URL="$API_BASE_URL"
+      - name: Prepare production signing
+        if: needs.validate.outputs.publish == 'true' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./scripts/Prepare-AndroidSigning.ps1
+      - name: Build signed APK and Play bundle
+        if: needs.validate.outputs.publish == 'true' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: src/client/zdrive_app
+        env:
+          ZDRIVE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ZDRIVE_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ZDRIVE_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
+          flutter build appbundle --release --dart-define=API_BASE_URL="$API_BASE_URL"
+      - name: Collect Android packages
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          PUBLISH: ${{ needs.validate.outputs.publish }}
+        run: |
+          mkdir -p dist
+          if [[ "$PUBLISH" == true ]]; then
+            cp src/client/zdrive_app/build/app/outputs/flutter-apk/app-release.apk "dist/zDrive-$VERSION-android.apk"
+            cp src/client/zdrive_app/build/app/outputs/bundle/release/app-release.aab "dist/zDrive-$VERSION-android.aab"
+          else
+            cp src/client/zdrive_app/build/app/outputs/flutter-apk/app-debug.apk "dist/zDrive-$VERSION-android-preview.apk"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-packages
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove signing material
+        if: always()
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP 'zdrive-signing/upload.jks'
+          if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+
+  ios:
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      IOS_SIGNED: ${{ needs.validate.outputs.publish == 'true' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v') && vars.IOS_SIGNING_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve pinned dependencies
+        working-directory: src/client/zdrive_app
+        run: flutter pub get --enforce-lockfile
+      - name: Build unsigned iOS validation bundle
+        if: env.IOS_SIGNED != 'true'
+        run: bash scripts/Build-IosRelease.sh
+      - name: Build signed iOS distribution package
+        if: env.IOS_SIGNED == 'true'
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+        run: bash scripts/Build-IosRelease.sh
+      - name: Collect iOS package
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          mkdir -p dist
+          if [[ "$IOS_SIGNED" == true ]]; then
+            files=(src/client/zdrive_app/build/ios/ipa/*.ipa)
+            [[ ${#files[@]} == 1 && -f "${files[0]}" ]]
+            cp "${files[0]}" "dist/zDrive-$VERSION-ios.ipa"
+          else
+            ditto -c -k --keepParent src/client/zdrive_app/build/ios/iphoneos/Runner.app "dist/zDrive-$VERSION-ios-unsigned.zip"
+            echo 'iOS compiled without signing. This bundle cannot be installed on an iPhone; configure Apple credentials for IPA/TestFlight.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-packages
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Resolve pinned dependencies
+        working-directory: src/client/zdrive_app
+        run: flutter pub get --enforce-lockfile
+      - name: Verify Windows diagnostics
+        working-directory: src/client/zdrive_app
+        run: flutter test test/diagnostics_test.dart
+      - name: Build Windows release
+        working-directory: src/client/zdrive_app
+        run: flutter build windows --release --dart-define=API_BASE_URL=$env:API_BASE_URL
+      - name: Package Windows installer
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -property installationPath
+          $runtime = Get-ChildItem "$vs/VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT" -Directory | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$runtime) { throw 'Visual C++ runtime not found' }
+          ./scripts/Package-Windows.ps1 -ReleaseDirectory ./src/client/zdrive_app/build/windows/x64/runner/Release -RuntimeDirectory $runtime.FullName -Version $env:VERSION -PayloadUrl "https://drive.zcloud.cz/downloads/zDrive-$env:VERSION-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: build/windows-installer/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [validate, android, ios, windows]
+    if: needs.validate.outputs.publish == 'true' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: client-release
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify tag still identifies this build
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          git fetch origin "refs/tags/$RELEASE_TAG"
+          [[ $(git rev-parse 'FETCH_HEAD^{commit}') == "$GITHUB_SHA" ]]
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-packages'
+          path: dist
+          merge-multiple: true
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          # Unsigned iOS bundles are validation artifacts, never distribution packages.
+          rm -f dist/*-ios-unsigned.zip
+          gh release create "$RELEASE_TAG" dist/* --verify-tag --title "zDrive ${RELEASE_TAG#v}" --generate-notes
+          gh workflow run deploy-web.yml --ref master -f release_tag="$RELEASE_TAG"
+
+  testflight:
+    needs: [validate, publish]
+    if: needs.validate.outputs.publish == 'true' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v') && vars.IOS_SIGNING_ENABLED == 'true' && vars.TESTFLIGHT_ENABLED == 'true'
+    runs-on: macos-15
+    timeout-minutes: 15
+    environment: client-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-packages
+          path: dist
+      - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+        run: bash scripts/Upload-TestFlight.sh

@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('zDrive-Downloads-Test-' + [guid]::NewGuid().ToString('N'))
 $global:zDriveDownloadTestCalls = @()
+$global:zDriveDownloadTestWindowsCalls = @()
 $global:zDriveDownloadTestFail = $false
 $global:zDriveDownloadTestPartial = $false
 function gh {
@@ -9,17 +10,26 @@ function gh {
         if ($global:zDriveDownloadTestPartial) {
             return '[[{"tag_name":"v0.1.0","draft":false,"assets":[{"name":"zDrive-0.1.0-windows-x64.zip"}]}]]'
         }
-        return '[[{"tag_name":"v0.1.0","draft":false,"assets":[{"name":"zDrive-0.1.0-windows-x64.zip"},{"name":"zDrive-0.1.0-Setup.exe"}]}],[{"tag_name":"v0.2.0","draft":false,"assets":[{"name":"zDrive-0.2.0-windows-x64.zip"},{"name":"zDrive-0.2.0-Setup.exe"}]},{"tag_name":"v0.3.0","draft":true,"assets":[{"name":"zDrive-0.3.0-windows-x64.zip"},{"name":"zDrive-0.3.0-Setup.exe"}]},{"tag_name":"v0.4.0","prerelease":true,"assets":[{"name":"zDrive-0.4.0-windows-x64.zip"},{"name":"zDrive-0.4.0-Setup.exe"}]},{"tag_name":"v0.5.0","assets":[]}]]'
+        return '[[{"tag_name":"v0.1.0","draft":false,"assets":[{"name":"zDrive-0.1.0-windows-x64.zip"},{"name":"zDrive-0.1.0-Setup.exe"}]}],[{"tag_name":"v0.2.0","draft":false,"assets":[{"name":"zDrive-0.2.0-windows-x64.zip"},{"name":"zDrive-0.2.0-Setup.exe"},{"name":"zDrive-0.2.0-android.apk"}]},{"tag_name":"v0.3.0","draft":true,"assets":[{"name":"zDrive-0.3.0-windows-x64.zip"},{"name":"zDrive-0.3.0-Setup.exe"}]},{"tag_name":"v0.4.0","prerelease":true,"assets":[{"name":"zDrive-0.4.0-windows-x64.zip"},{"name":"zDrive-0.4.0-Setup.exe"}]},{"tag_name":"v0.5.0","assets":[]}]]'
     }
-    $global:zDriveDownloadTestCalls += $args[2]
     $releaseVersion = $args[2].TrimStart('v')
-    [IO.File]::WriteAllText((Join-Path $fixture "zDrive-$releaseVersion-windows-x64.zip"), 'fixture payload')
+    $apkName = "zDrive-$releaseVersion-android.apk"
+    if ($args -contains $apkName) {
+        [IO.File]::WriteAllText((Join-Path $fixture "zDrive-$releaseVersion-android.apk"), 'fixture apk payload')
+    } else {
+        $global:zDriveDownloadTestCalls += $args[2]
+        $global:zDriveDownloadTestWindowsCalls += $args[2]
+        [IO.File]::WriteAllText((Join-Path $fixture "zDrive-$releaseVersion-windows-x64.zip"), 'fixture payload')
+    }
     if ($global:zDriveDownloadTestFail) { $global:LASTEXITCODE = 1 }
 }
 try {
     $include = Join-Path $PSScriptRoot 'Include-WindowsDownloads.ps1'
     & $include -Repository zcloudcz/zDrive -Version 0.2.0 -OutputDirectory $fixture
-    if (($global:zDriveDownloadTestCalls -join ',') -ne 'v0.1.0,v0.2.0') { throw 'Historical versions were not retained or a draft/prerelease was included.' }
+    if (($global:zDriveDownloadTestWindowsCalls -join ',') -ne 'v0.1.0,v0.2.0') { throw 'Historical versions were not retained or a draft/prerelease was included.' }
+    $apk = Join-Path $fixture 'zDrive-0.2.0-android.apk'
+    if (-not (Test-Path -LiteralPath $apk -PathType Leaf) -or (Get-Content -Raw -LiteralPath $apk) -ne 'fixture apk payload') { throw 'Published Android APK was not downloaded.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $fixture 'zDrive-0.1.0-windows-x64.zip') -PathType Leaf)) { throw 'Historical Windows download was not retained.' }
     $feed = Get-Content -LiteralPath (Join-Path $fixture 'windows-latest.json') -Raw | ConvertFrom-Json
     if ($feed.version -ne '0.2.0' -or $feed.schemaVersion -ne 1 -or $feed.sizeBytes -ne 15 -or $feed.sha256 -ne (Get-FileHash (Join-Path $fixture 'zDrive-0.2.0-windows-x64.zip')).Hash.ToLowerInvariant()) { throw 'Invalid update feed.' }
     $rejected = $false
@@ -44,7 +54,7 @@ finally {
     if ([IO.Path]::GetFullPath($fixture).StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $fixture)) {
         Remove-Item -LiteralPath $fixture -Recurse -Force
     }
-    Remove-Variable zDriveDownloadTestCalls, zDriveDownloadTestFail, zDriveDownloadTestPartial -Scope Global
+    Remove-Variable zDriveDownloadTestCalls, zDriveDownloadTestWindowsCalls, zDriveDownloadTestFail, zDriveDownloadTestPartial -Scope Global
 }
 # The last mocked gh call intentionally fails; do not leak its exit code to CI.
 $global:LASTEXITCODE = 0
