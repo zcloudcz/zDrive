@@ -1,7 +1,7 @@
 name: zdrive_app
 description: "zDrive — cloud storage platform"
 publish_to: 'none'
-version: 0.2.7+9
+version: 0.2.8+10
 
 environment:
   sdk: ^3.11.0
