@@ -1,5 +1,5 @@
 # CocoaPods configuration for the zDrive Flutter application.
-platform :ios, '13.0'
+platform :ios, '15.0'
 
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 

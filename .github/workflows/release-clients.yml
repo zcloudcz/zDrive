@@ -44,6 +44,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/Test-AndroidSigning.ps1
+          ./scripts/Test-IosSubmissionMetadata.ps1
           ./scripts/Test-WindowsDownloadRetention.ps1
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
