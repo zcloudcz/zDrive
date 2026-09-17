@@ -40,6 +40,9 @@ void main() {
 
   test(
     'concurrent writers retain independent sessions and can both export',
+    skip: !Platform.isWindows
+        ? 'File locks are process-wide on POSIX, so isolates cannot model separate writers.'
+        : null,
     () async {
       await Diagnostics.initialize(directory: directory.path);
       final path = directory.path;
