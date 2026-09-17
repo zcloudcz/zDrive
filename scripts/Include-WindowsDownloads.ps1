@@ -22,6 +22,11 @@ foreach ($page in $pages) {
         }
         & gh release download $release.tag_name --repo $Repository --pattern $zip --pattern $setup --dir $OutputDirectory
         if ($LASTEXITCODE -ne 0) { throw "Could not download Windows release $releaseVersion." }
+        $apk = "zDrive-$releaseVersion-android.apk"
+        if ($apk -in $names) {
+            & gh release download $release.tag_name --repo $Repository --pattern $apk --dir $OutputDirectory
+            if ($LASTEXITCODE -ne 0) { throw "Could not download Android release $releaseVersion." }
+        }
         if ($releaseVersion -eq $Version) { $currentIncluded = $true }
     }
 }

@@ -30,11 +30,42 @@ android {
         versionName = flutter.versionName
     }
 
+    val releaseSigningValues = mapOf(
+        "ZDRIVE_ANDROID_KEYSTORE_PATH" to System.getenv("ZDRIVE_ANDROID_KEYSTORE_PATH"),
+        "ZDRIVE_ANDROID_KEYSTORE_PASSWORD" to System.getenv("ZDRIVE_ANDROID_KEYSTORE_PASSWORD"),
+        "ZDRIVE_ANDROID_KEY_ALIAS" to System.getenv("ZDRIVE_ANDROID_KEY_ALIAS"),
+        "ZDRIVE_ANDROID_KEY_PASSWORD" to System.getenv("ZDRIVE_ANDROID_KEY_PASSWORD"),
+    )
+    val missingReleaseSigningValues = releaseSigningValues
+        .filterValues { it.isNullOrBlank() }
+        .keys
+    val releaseTaskRequested = gradle.startParameter.taskNames.any {
+        it.contains("release", ignoreCase = true)
+    }
+
+    if (releaseTaskRequested && missingReleaseSigningValues.isNotEmpty()) {
+        throw GradleException(
+            "Android release signing is not configured. Set: " +
+                missingReleaseSigningValues.joinToString(", "),
+        )
+    }
+
+    if (missingReleaseSigningValues.isEmpty()) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseSigningValues.getValue("ZDRIVE_ANDROID_KEYSTORE_PATH"))
+                storePassword = releaseSigningValues.getValue("ZDRIVE_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = releaseSigningValues.getValue("ZDRIVE_ANDROID_KEY_ALIAS")
+                keyPassword = releaseSigningValues.getValue("ZDRIVE_ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (missingReleaseSigningValues.isEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }
