@@ -212,6 +212,7 @@ class WindowsUpdateBackend implements UpdateBackend {
     final marker = File(p.join(_updates, 'handoff-$handoff.ready'));
     final process = await Process.start('powershell.exe', [
       '-NoProfile',
+      '-NonInteractive',
       '-WindowStyle',
       'Hidden',
       '-ExecutionPolicy',
@@ -230,7 +231,12 @@ class WindowsUpdateBackend implements UpdateBackend {
       '${manifest.sizeBytes}',
       '-HandoffId',
       handoff,
-    ], mode: ProcessStartMode.detached);
+    ]);
+    // Windows PowerShell does not initialize reliably without standard handles.
+    // A normal child survives our exit; drain its pipes while we await handoff.
+    unawaited(process.stdout.drain<void>());
+    unawaited(process.stderr.drain<void>());
+    await process.stdin.close();
     final deadline = Stopwatch()..start();
     while (!_closed && deadline.elapsed < const Duration(seconds: 15)) {
       if (await marker.exists()) {

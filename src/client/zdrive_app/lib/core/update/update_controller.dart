@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'update_manifest.dart';
+import '../diagnostics/diagnostics.dart';
 
 abstract interface class UpdateBackend {
   String get currentVersion;
@@ -50,7 +51,8 @@ class UpdateController extends ChangeNotifier {
             ? UpdatePhase.ready
             : UpdatePhase.idle,
       );
-    } catch (_) {
+    } catch (error, stack) {
+      Diagnostics.error('update.initialize_failed', error, stack);
       _publish(UpdatePhase.error);
     }
     return false;
@@ -87,7 +89,8 @@ class UpdateController extends ChangeNotifier {
       if (_disposed) return;
       pending = manifest;
       _publish(UpdatePhase.ready);
-    } catch (_) {
+    } catch (error, stack) {
+      Diagnostics.error('update.check_failed', error, stack);
       _publish(UpdatePhase.error);
     } finally {
       _busy = false;
@@ -106,7 +109,8 @@ class UpdateController extends ChangeNotifier {
       if (_disposed) return false;
       await backend.quit();
       return true;
-    } catch (_) {
+    } catch (error, stack) {
+      Diagnostics.error('update.apply_failed', error, stack);
       if (drainFirst && !_disposed) {
         try {
           await resume();

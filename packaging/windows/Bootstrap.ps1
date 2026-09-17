@@ -19,7 +19,22 @@ $close.Text = 'Close'
 $close.SetBounds(350, 108, 90, 27)
 $close.Enabled = $false
 $close.Add_Click({ $form.Close() })
-$form.Controls.AddRange(@($label, $progress, $close))
+$launch = New-Object Windows.Forms.Button
+$launch.Text = if ([Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName -in @('cs', 'sk')) { 'Spustit zDrive' } else { 'Launch zDrive' }
+$launch.SetBounds(205, 108, 135, 27)
+$launch.Visible = $false
+$launch.Add_Click({
+    $launch.Enabled = $false
+    try {
+        Start-Process -FilePath $launch.Tag -WorkingDirectory (Split-Path -Parent $launch.Tag) -WindowStyle Normal -ErrorAction Stop
+        $form.Close()
+    }
+    catch {
+        $label.Text = "zDrive is installed, but could not start: $($_.Exception.GetBaseException().Message). Open it from the Start menu."
+        $launch.Enabled = $true
+    }
+})
+$form.Controls.AddRange(@($label, $progress, $launch, $close))
 $form.Show()
 [Windows.Forms.Application]::DoEvents()
 $work = Join-Path ([IO.Path]::GetTempPath()) ('zDrive-Setup-' + [guid]::NewGuid().ToString('N'))
@@ -55,6 +70,10 @@ try {
     $label.Text = 'Installing zDrive and creating shortcuts...'
     [Windows.Forms.Application]::DoEvents()
     & (Join-Path $work 'payload/Install.ps1')
+    $installedVersion = (Get-Content -LiteralPath (Join-Path $work 'payload/version.txt') -Raw).Trim()
+    if ($installedVersion -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') { throw 'Invalid installed version.' }
+    $launch.Tag = Join-Path $env:LOCALAPPDATA "Programs/zDrive/releases/$installedVersion/zdrive_app.exe"
+    $launch.Visible = $true
     $label.Text = 'zDrive is installed. Open zDrive from the Start menu.'
 }
 catch {

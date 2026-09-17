@@ -188,7 +188,7 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Verify Windows diagnostics
         working-directory: src/client/zdrive_app
-        run: flutter test test/diagnostics_test.dart
+        run: flutter test test/diagnostics_test.dart test/windows_update_launch_test.dart
       - name: Build Windows release
         working-directory: src/client/zdrive_app
         run: flutter build windows --release --dart-define=API_BASE_URL=$env:API_BASE_URL
