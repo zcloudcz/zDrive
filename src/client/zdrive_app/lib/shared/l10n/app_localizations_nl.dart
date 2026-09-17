@@ -9,6 +9,19 @@ class AppLocalizationsNl extends AppLocalizations {
   AppLocalizationsNl([String locale = 'nl']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Diagnoselog exporteren';
+
+  @override
+  String get diagnosticsPreparing => 'Diagnoselog voorbereiden…';
+
+  @override
+  String get diagnosticsSaved => 'Diagnoselog opgeslagen.';
+
+  @override
+  String get diagnosticsFailed =>
+      'Kan het logbestand niet exporteren. Probeer het opnieuw.';
+
+  @override
   String get aboutApp => 'Over de app';
 
   @override

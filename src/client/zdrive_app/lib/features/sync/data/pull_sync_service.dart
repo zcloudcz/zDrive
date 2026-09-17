@@ -15,6 +15,7 @@ import '../domain/sync_progress.dart';
 import 'device_registration_service.dart';
 import 'file_hash.dart';
 import 'sync_name_rules.dart';
+import '../../../core/diagnostics/diagnostics.dart';
 
 /// Thrown when a server-supplied name cannot become a safe local path —
 /// either it is not a single plain path segment (a drive letter, a UNC
@@ -363,6 +364,7 @@ class PullSyncService {
   }
 
   Future<void> _applyDelete(String fileId, String syncFolderPath) async {
+    Diagnostics.event('sync.remote_delete.start');
     final entry = await _mirror.getByServerId(fileId);
     if (entry == null) return; // Never pulled locally — nothing to remove.
 
@@ -401,6 +403,7 @@ class PullSyncService {
     }
 
     await _mirror.deleteByServerId(fileId);
+    Diagnostics.event('sync.remote_delete.complete');
   }
 
   Future<void> _applyUpsert(

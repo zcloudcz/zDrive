@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 
 import 'update_controller.dart';
 import 'update_manifest.dart';
+import '../diagnostics/diagnostics.dart';
 
 Future<UpdateController?> createAutoUpdater({
   required Future<void> Function() drain,
@@ -254,9 +255,13 @@ class WindowsUpdateBackend implements UpdateBackend {
   }
 
   @override
-  Future<void> quit() => const MethodChannel(
-    'zdrive/windows_lifecycle',
-  ).invokeMethod<void>('quit');
+  Future<void> quit() async {
+    Diagnostics.event('app.update.restart');
+    await Diagnostics.flush();
+    await const MethodChannel(
+      'zdrive/windows_lifecycle',
+    ).invokeMethod<void>('quit');
+  }
 
   @override
   void close() {

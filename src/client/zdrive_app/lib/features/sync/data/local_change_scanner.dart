@@ -15,6 +15,7 @@ import '../domain/sync_progress.dart';
 import 'device_registration_service.dart';
 import 'file_hash.dart';
 import 'sync_name_rules.dart';
+import '../../../core/diagnostics/diagnostics.dart';
 
 /// The one definition of "the same name" for sync: names are
 /// case-insensitive end to end, so every comparison the scanner makes —
@@ -128,6 +129,7 @@ class LocalChangeScanner {
   }
 
   void _recordFailure(String path, Object error, StackTrace stackTrace) {
+    Diagnostics.error('sync.scan.file_failed', error, stackTrace);
     log('scan failed for $path', error: error, stackTrace: stackTrace, name: 'LocalChangeScanner');
     _failedPaths[_key(path)] = DateTime.now();
     _reportPendingFailure(path);
@@ -846,6 +848,7 @@ class LocalChangeScanner {
         final item = items[next++];
         final path = pathOf(item);
         progress?.startFile(path, path);
+        Diagnostics.event('sync.upload.start');
         Directory? staging;
         final cancellation = CancelToken();
         var checking = false;
@@ -856,6 +859,7 @@ class LocalChangeScanner {
             // An unavailable sync drive is not a request to delete its cloud copy.
             if (await Directory(root).exists() && !await File(path).exists()) {
               cancellation.cancel('Local file removed during upload');
+              Diagnostics.event('sync.upload.local_deleted');
             }
           } on FileSystemException {
             // Let normal filesystem handling report access errors.
@@ -890,9 +894,11 @@ class LocalChangeScanner {
           // this small overlap makes edits within that boundary re-hash too.
           final snapshotStartedAt = DateTime.now().subtract(const Duration(seconds: 2));
           final snapshot = await File(path).copy(p.join(staging.path, 'content'));
+          Diagnostics.event('sync.upload.snapshot_ready');
           await checkDeleted();
           if (cancellation.isCancelled) throw cancellation.cancelError!;
           final hashSize = await hashFileInBackground(snapshot.path);
+          Diagnostics.event('sync.upload.hashed', {'sizeBytes': hashSize.size});
           // Hash and every retry read the same private snapshot. The live
           // file can continue changing without corrupting the mirror hash.
           await checkDeleted();
@@ -903,12 +909,14 @@ class LocalChangeScanner {
             _failedPaths.remove(_key(path));
           }
           await deleteRemovedUpload();
+          Diagnostics.event('sync.upload.complete', {'uploaded': uploaded});
           progress?.finishFile(path, failed: !uploaded);
         } catch (e, st) {
           await checkDeleted();
           if (cancellation.isCancelled && await Directory(root).exists() && !await File(path).exists()) {
             try {
               await deleteRemovedUpload();
+              Diagnostics.event('sync.upload.cancelled_cleaned');
               _failedPaths.remove(_key(path));
               progress?.finishFile(path);
             } catch (cleanupError, cleanupStack) {

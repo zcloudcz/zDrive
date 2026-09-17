@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -92,5 +94,64 @@ void main() {
     await pumpMenu(tester, 'en');
     expect(find.text('Exit'), findsNothing);
     expect(find.text('About'), findsOneWidget);
+  });
+
+  testWidgets('Export_Log_ShowsProgressAndKeepsUiResponsive', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    final done = Completer<bool>();
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('cs'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          appBar: AppBar(
+            actions: [AppSettingsMenu(exportDiagnostics: () => done.future)],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Exportovat diagnostický log'));
+    await tester.pumpAndSettle();
+    expect(find.text('Připravuji diagnostický log…'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+    final item = tester.widget<PopupMenuItem<String>>(
+      find.widgetWithText(PopupMenuItem<String>, 'Exportovat diagnostický log'),
+    );
+    expect(item.enabled, isFalse);
+    done.complete(true);
+    await tester.pumpAndSettle();
+    expect(find.text('Diagnostický log byl uložen.'), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Export_Failure_ShowsErrorWithoutQuitting', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          appBar: AppBar(
+            actions: [
+              AppSettingsMenu(
+                exportDiagnostics: () async => throw StateError('test'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Export diagnostic log'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not export the log. Try again.'), findsOneWidget);
+    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
   });
 }

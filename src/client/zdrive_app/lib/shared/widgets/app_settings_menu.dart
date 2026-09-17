@@ -4,9 +4,22 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../l10n/app_localizations.dart';
+import 'diagnostic_export.dart';
+import '../../core/diagnostics/diagnostics.dart';
 
-class AppSettingsMenu extends StatelessWidget {
-  const AppSettingsMenu({super.key});
+class AppSettingsMenu extends StatefulWidget {
+  const AppSettingsMenu({
+    super.key,
+    this.exportDiagnostics = exportDiagnosticFile,
+  });
+  final Future<bool> Function() exportDiagnostics;
+
+  @override
+  State<AppSettingsMenu> createState() => _AppSettingsMenuState();
+}
+
+class _AppSettingsMenuState extends State<AppSettingsMenu> {
+  bool _exporting = false;
 
   @override
   Widget build(BuildContext context) {
@@ -20,8 +33,36 @@ class AppSettingsMenu extends StatelessWidget {
             context: context,
             builder: (_) => const _AppAboutDialog(),
           );
-        } else {
+        } else if (action == 'logs') {
+          if (_exporting) return;
+          setState(() => _exporting = true);
+          final messenger = ScaffoldMessenger.of(context);
+          messenger.showSnackBar(
+            SnackBar(content: Text(l10n.diagnosticsPreparing)),
+          );
           try {
+            final saved = await widget.exportDiagnostics();
+            if (!mounted) return;
+            messenger.hideCurrentSnackBar();
+            if (saved) {
+              messenger.showSnackBar(
+                SnackBar(content: Text(l10n.diagnosticsSaved)),
+              );
+            }
+          } catch (error, stack) {
+            Diagnostics.error('diagnostics.export.failed', error, stack);
+            if (!mounted) return;
+            messenger.hideCurrentSnackBar();
+            messenger.showSnackBar(
+              SnackBar(content: Text(l10n.diagnosticsFailed)),
+            );
+          } finally {
+            if (mounted) setState(() => _exporting = false);
+          }
+        } else {
+          Diagnostics.event('app.exit.requested');
+          try {
+            await Diagnostics.flush();
             await const MethodChannel(
               'zdrive/windows_lifecycle',
             ).invokeMethod<void>('quit');
@@ -36,6 +77,12 @@ class AppSettingsMenu extends StatelessWidget {
       },
       itemBuilder: (_) => [
         PopupMenuItem(value: 'about', child: Text(l10n.aboutApp)),
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+          PopupMenuItem(
+            value: 'logs',
+            enabled: !_exporting,
+            child: Text(l10n.exportDiagnostics),
+          ),
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
           PopupMenuItem(value: 'exit', child: Text(l10n.exitApp)),
       ],

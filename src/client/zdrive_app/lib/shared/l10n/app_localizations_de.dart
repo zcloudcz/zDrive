@@ -9,6 +9,19 @@ class AppLocalizationsDe extends AppLocalizations {
   AppLocalizationsDe([String locale = 'de']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Diagnoseprotokoll exportieren';
+
+  @override
+  String get diagnosticsPreparing => 'Diagnoseprotokoll wird vorbereitet…';
+
+  @override
+  String get diagnosticsSaved => 'Diagnoseprotokoll gespeichert.';
+
+  @override
+  String get diagnosticsFailed =>
+      'Das Protokoll konnte nicht exportiert werden. Bitte erneut versuchen.';
+
+  @override
   String get aboutApp => 'Über die App';
 
   @override

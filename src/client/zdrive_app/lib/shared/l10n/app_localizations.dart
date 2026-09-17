@@ -116,6 +116,30 @@ abstract class AppLocalizations {
     Locale('zh'),
   ];
 
+  /// No description provided for @exportDiagnostics.
+  ///
+  /// In en, this message translates to:
+  /// **'Export diagnostic log'**
+  String get exportDiagnostics;
+
+  /// No description provided for @diagnosticsPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing diagnostic log…'**
+  String get diagnosticsPreparing;
+
+  /// No description provided for @diagnosticsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostic log saved.'**
+  String get diagnosticsSaved;
+
+  /// No description provided for @diagnosticsFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not export the log. Try again.'**
+  String get diagnosticsFailed;
+
   /// No description provided for @aboutApp.
   ///
   /// In en, this message translates to:

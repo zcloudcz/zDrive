@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 
+import '../diagnostics/diagnostics.dart';
+import '../diagnostics/network_diagnostics.dart';
 import 'api_constants.dart';
 import 'auth_interceptor.dart';
 
@@ -20,13 +22,8 @@ abstract class NetworkModule {
       ),
     );
 
+    dio.interceptors.add(NetworkDiagnostics());
     dio.interceptors.add(authInterceptor);
-
-    if (kDebugMode) {
-      dio.interceptors.add(
-        LogInterceptor(requestBody: true, responseBody: true),
-      );
-    }
 
     dio.interceptors.add(RetryInterceptor(dio: dio));
 
@@ -55,7 +52,8 @@ class RetryInterceptor extends Interceptor {
     ErrorInterceptorHandler handler,
   ) async {
     final cancelToken = err.requestOptions.cancelToken;
-    if (err.type == DioExceptionType.cancel || (cancelToken?.isCancelled ?? false)) {
+    if (err.type == DioExceptionType.cancel ||
+        (cancelToken?.isCancelled ?? false)) {
       return handler.next(cancelToken?.cancelError ?? err);
     }
     final statusCode = err.response?.statusCode;
@@ -77,8 +75,13 @@ class RetryInterceptor extends Interceptor {
         // unconditionally for 5xx.
         final delay = statusCode == 429
             ? retryAfterDelay(err.response) ??
-                Duration(milliseconds: 200 * (1 << retryCount))
+                  Duration(milliseconds: 200 * (1 << retryCount))
             : Duration(milliseconds: 200 * (1 << retryCount));
+        Diagnostics.event('http.retry', {
+          'requestId': extra['_diagnosticId'],
+          'retry': retryCount + 1,
+          'delayMs': delay.inMilliseconds,
+        });
         final waiting = Completer<void>();
         final timer = Timer(delay, waiting.complete);
         try {

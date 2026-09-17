@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Exportovat diagnostický log",
+  "diagnosticsPreparing": "Připravuji diagnostický log…",
+  "diagnosticsSaved": "Diagnostický log byl uložen.",
+  "diagnosticsFailed": "Log se nepodařilo vyexportovat. Zkuste to znovu.",
   "@@locale": "cs",
   "aboutApp": "O programu",
   "exitApp": "Ukončit",

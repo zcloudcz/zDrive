@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "导出诊断日志",
+  "diagnosticsPreparing": "正在准备诊断日志…",
+  "diagnosticsSaved": "诊断日志已保存。",
+  "diagnosticsFailed": "无法导出日志，请重试。",
   "@@locale": "zh",
   "appTitle": "zDrive",
   "downloadForWindows": "下载 Windows 版",

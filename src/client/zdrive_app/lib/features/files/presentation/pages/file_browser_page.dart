@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/diagnostics/diagnostics.dart';
 import '../../../../core/events/remote_file_change_notifier.dart';
 import '../../../../core/network/error_message.dart';
 import '../../data/file_saver.dart';
@@ -339,23 +340,36 @@ class _FileBrowserView extends StatelessWidget {
   }
 
   Future<void> _showDeleteConfirm(BuildContext context, FileItem file) async {
+    Diagnostics.event('file.delete.dialog_opened');
     final l10n = AppLocalizations.of(context)!;
+    var dialogClosed = false;
+    void closeDialog(BuildContext dialogContext, bool confirmed) {
+      if (dialogClosed) return;
+      dialogClosed = true;
+      Navigator.of(dialogContext).pop(confirmed);
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(l10n.confirmDelete),
         content: Text(file.name),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => closeDialog(dialogContext, false),
             child: Text(l10n.cancel),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => closeDialog(dialogContext, true),
             child: Text(l10n.delete),
           ),
         ],
       ),
+    );
+    Diagnostics.event(
+      confirmed == true
+          ? 'file.delete.dialog_confirmed'
+          : 'file.delete.dialog_cancelled',
     );
     if (confirmed == true && context.mounted) {
       context.read<FileBrowserBloc>().add(DeleteFile(file.id));

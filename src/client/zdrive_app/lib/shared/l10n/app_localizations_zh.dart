@@ -9,6 +9,18 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get exportDiagnostics => '导出诊断日志';
+
+  @override
+  String get diagnosticsPreparing => '正在准备诊断日志…';
+
+  @override
+  String get diagnosticsSaved => '诊断日志已保存。';
+
+  @override
+  String get diagnosticsFailed => '无法导出日志，请重试。';
+
+  @override
   String get aboutApp => '关于';
 
   @override

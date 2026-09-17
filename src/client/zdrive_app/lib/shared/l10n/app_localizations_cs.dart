@@ -9,6 +9,19 @@ class AppLocalizationsCs extends AppLocalizations {
   AppLocalizationsCs([String locale = 'cs']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Exportovat diagnostický log';
+
+  @override
+  String get diagnosticsPreparing => 'Připravuji diagnostický log…';
+
+  @override
+  String get diagnosticsSaved => 'Diagnostický log byl uložen.';
+
+  @override
+  String get diagnosticsFailed =>
+      'Log se nepodařilo vyexportovat. Zkuste to znovu.';
+
+  @override
   String get aboutApp => 'O programu';
 
   @override

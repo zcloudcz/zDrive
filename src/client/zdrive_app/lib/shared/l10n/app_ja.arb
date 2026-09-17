@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "診断ログをエクスポート",
+  "diagnosticsPreparing": "診断ログを準備しています…",
+  "diagnosticsSaved": "診断ログを保存しました。",
+  "diagnosticsFailed": "ログをエクスポートできませんでした。もう一度お試しください。",
   "@@locale": "ja",
   "appTitle": "zDrive",
   "downloadForWindows": "Windows版をダウンロード",

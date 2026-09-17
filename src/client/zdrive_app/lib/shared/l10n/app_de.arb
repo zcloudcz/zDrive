@@ -1,4 +1,8 @@
 {
+  "exportDiagnostics": "Diagnoseprotokoll exportieren",
+  "diagnosticsPreparing": "Diagnoseprotokoll wird vorbereitet…",
+  "diagnosticsSaved": "Diagnoseprotokoll gespeichert.",
+  "diagnosticsFailed": "Das Protokoll konnte nicht exportiert werden. Bitte erneut versuchen.",
   "@@locale": "de",
   "appTitle": "zDrive",
   "downloadForWindows": "Für Windows herunterladen",

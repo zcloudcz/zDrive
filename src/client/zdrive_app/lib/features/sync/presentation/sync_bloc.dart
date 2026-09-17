@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../../core/diagnostics/diagnostics.dart';
 import 'dart:developer';
 import 'dart:io';
 
@@ -231,7 +232,8 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         _startWatching(loaded.syncFolderPath!);
         add(const PullRequested());
       }
-    } catch (e) {
+    } catch (e, stack) {
+      Diagnostics.error('sync.status.failed', e, stack);
       emit(SyncError(e.toString()));
     }
   }
@@ -330,7 +332,8 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       // and pull.
       _syncRequestedWhileRunning = false;
       await _runSync(emit);
-    } catch (e) {
+    } catch (e, stack) {
+      Diagnostics.error('sync.bloc.failed', e, stack);
       // Mirrors _onLoadSyncStatus's try/catch (PR #16 review round 4, R1): an
       // uncaught throw here — e.g. resetForNewFolder's sqflite clearAll, or a
       // SharedPreferences write failure in setSyncFolderPath — used to escape
@@ -398,7 +401,8 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
           if (generation != _syncGeneration || emit.isDone || isClosed) return;
           final latest = state;
           if (latest is! SyncLoaded || latest.syncFolderPath != path) return;
-          phaseFailures[(progress.phase, progress.phaseSequence)] = progress.failedFiles;
+          phaseFailures[(progress.phase, progress.phaseSequence)] =
+              progress.failedFiles;
           emit(
             latest.copyWith(
               progress: () => progress,
@@ -462,7 +466,8 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, stack) {
+      Diagnostics.error('sync.bloc.failed', e, stack);
       if (generation != _syncGeneration || emit.isDone || isClosed) {
         log(
           'stale sync run for $path failed after folder change; dropping error',
@@ -544,7 +549,8 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         onError: (Object e) =>
             log('sync folder watch failed: $path', error: e, name: 'SyncBloc'),
       );
-    } catch (e) {
+    } catch (e, stack) {
+      Diagnostics.error('sync.bloc.failed', e, stack);
       log('failed to watch sync folder: $path', error: e, name: 'SyncBloc');
     }
   }

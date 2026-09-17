@@ -9,6 +9,18 @@ class AppLocalizationsSv extends AppLocalizations {
   AppLocalizationsSv([String locale = 'sv']) : super(locale);
 
   @override
+  String get exportDiagnostics => 'Exportera diagnostiklogg';
+
+  @override
+  String get diagnosticsPreparing => 'Förbereder diagnostikloggen…';
+
+  @override
+  String get diagnosticsSaved => 'Diagnostikloggen har sparats.';
+
+  @override
+  String get diagnosticsFailed => 'Kunde inte exportera loggen. Försök igen.';
+
+  @override
   String get aboutApp => 'Om appen';
 
   @override
