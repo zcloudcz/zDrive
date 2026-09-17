@@ -258,8 +258,11 @@ void _writeLogs(List<Object> args) {
       }
       stalled = false;
       lastHeartbeat = clock.elapsedMilliseconds;
-    } else if (message is Map<String, Object?>) {
-      append(message);
+    } else if (message is Map) {
+      // Generic map type arguments are not preserved consistently when a
+      // message crosses an isolate boundary on Windows. The record originates
+      // from diagnosticRecord, so normalizing its string keys is sufficient.
+      append(Map<String, Object?>.from(message));
       ack.send(null);
     } else if (message is SendPort) {
       if (failedEvents > 0) append(diagnosticRecord('writer.drop_summary', {}));
