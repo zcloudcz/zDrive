@@ -1,0 +1,21 @@
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$plistPath = Join-Path $root 'src/client/zdrive_app/ios/Runner/Info.plist'
+$projectPath = Join-Path $root 'src/client/zdrive_app/ios/Runner.xcodeproj/project.pbxproj'
+$podfilePath = Join-Path $root 'src/client/zdrive_app/ios/Podfile'
+
+[xml]$plist = Get-Content -LiteralPath $plistPath -Raw
+$dictionary = $plist.plist.dict
+$purposeNode = $dictionary.SelectSingleNode("key[text()='NSPhotoLibraryUsageDescription']/following-sibling::*[1]")
+if ($null -eq $purposeNode) { throw 'NSPhotoLibraryUsageDescription is required for the photo picker dependency.' }
+$purpose = $purposeNode.InnerText.Trim()
+if ($purpose.Length -lt 20) { throw 'NSPhotoLibraryUsageDescription must clearly explain the user-facing purpose.' }
+
+$project = Get-Content -LiteralPath $projectPath -Raw
+if (($project | Select-String -AllMatches 'IPHONEOS_DEPLOYMENT_TARGET = 15\.0;').Matches.Count -ne 3) {
+    throw 'Every Runner configuration must use iOS 15.0.'
+}
+$podfile = Get-Content -LiteralPath $podfilePath -Raw
+if ($podfile -notmatch "platform :ios, '15\.0'") { throw 'Podfile must use iOS 15.0.' }
+
+Write-Output 'PASS: iOS photo permission text and minimum iOS 15.0 are configured.'
