@@ -27,7 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check signing and upload scripts
-        run: bash -n scripts/Build-IosRelease.sh scripts/Upload-TestFlight.sh
+        run: |
+          bash -n scripts/Build-IosRelease.sh
+          bash -n scripts/Upload-TestFlight.sh
 
   upload:
     needs: validate
