@@ -215,7 +215,6 @@ jobs:
     environment: client-release
     permissions:
       contents: write
-      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -240,6 +239,20 @@ jobs:
           # Unsigned iOS bundles are validation artifacts, never distribution packages.
           rm -f dist/*-ios-unsigned.zip
           gh release create "$RELEASE_TAG" dist/* --verify-tag --title "zDrive ${RELEASE_TAG#v}" --generate-notes
+
+  deploy-web:
+    needs: [validate, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch web deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
           gh workflow run deploy-web.yml --ref master -f release_tag="$RELEASE_TAG"
 
   testflight:
