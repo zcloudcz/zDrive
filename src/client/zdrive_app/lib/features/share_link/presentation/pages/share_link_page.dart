@@ -15,6 +15,14 @@ import '../../../files/presentation/widgets/file_size_format.dart';
 import '../../data/share_link_data_source.dart';
 import '../share_link_cubit.dart';
 
+/// `ShareDto.expiresAt` is a UTC instant (the wire format's trailing `Z`) —
+/// formatting it directly would print UTC calendar fields, which is the
+/// wrong day for any visitor east/west of Greenwich. `.toLocal()` first.
+/// Top-level (not private) so a unit test can call it directly instead of
+/// only exercising it through the widget tree.
+String formatShareExpiryDate(DateTime expiresAt, String locale) =>
+    DateFormat.yMMMd(locale).format(expiresAt.toLocal());
+
 /// Public, unauthenticated page behind `/s/:token` — shows the file or
 /// folder a share link points at and lets a visitor without an account
 /// download it. Reachable while logged in too (the router does not gate
@@ -51,82 +59,91 @@ class ShareLinkView extends StatelessWidget {
     // AppPreferences.themeMode as before.
     return Theme(
       data: AppTheme.light,
-      child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: AppTheme.brandPetrol,
-          foregroundColor: Colors.white,
-          title: const BrandLockup(monochrome: true),
-        ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 720),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: BlocListener<ShareLinkCubit, ShareLinkState>(
-                        // Only when navigationError actually became non-null: the
-                        // cubit clears it (sets it back to null) on every successful
-                        // navigation, and that clearing state change must not itself
-                        // pop a SnackBar.
-                        listenWhen: (previous, current) =>
-                            current is ShareLinkLoaded &&
-                            current.navigationError != null &&
-                            (previous is! ShareLinkLoaded ||
-                                previous.navigationError != current.navigationError),
-                        listener: (context, state) {
-                          final error = (state as ShareLinkLoaded).navigationError!;
-                          ScaffoldMessenger.of(context)
-                            ..hideCurrentSnackBar()
-                            ..showSnackBar(SnackBar(content: Text(describeError(error, l10n))));
-                        },
-                        child: BlocBuilder<ShareLinkCubit, ShareLinkState>(
-                          builder: (context, state) {
-                            final content = switch (state) {
-                              ShareLinkLoading() => const _ShareLoadingSkeleton(),
-                              ShareLinkNotFound() => _StatusMessage(
-                                  icon: Icons.link_off,
-                                  title: l10n.shareNotFoundTitle,
-                                  message: l10n.shareNotFoundMessage,
-                                ),
-                              ShareLinkPasswordProtected() => _StatusMessage(
-                                  icon: Icons.lock_outline,
-                                  title: l10n.sharePasswordProtectedTitle,
-                                  message: l10n.sharePasswordProtectedMessage,
-                                ),
-                              ShareLinkFailure() => _StatusMessage(
-                                  icon: Icons.error_outline,
-                                  title: describeError(state.error, l10n),
-                                  onRetry: () => context.read<ShareLinkCubit>().load(),
-                                ),
-                              ShareLinkLoaded(children: null) => _SingleFileCard(
-                                  file: state.root,
-                                  expiresAt: state.expiresAt,
-                                  progress: state.downloadProgress[state.root.id],
-                                  error: state.downloadErrors[state.root.id],
-                                ),
-                              ShareLinkLoaded() => _FolderView(state: state),
-                            };
-                            // The folder view manages its own scrolling (an
-                            // Expanded ListView) and needs the bounded height
-                            // this Center already provides; every other state
-                            // is a fixed-size card that must scroll instead of
-                            // overflow when text is scaled up (see 4.6).
-                            final isFolder = state is ShareLinkLoaded && state.children != null;
-                            return isFolder
-                                ? content
-                                : SingleChildScrollView(child: content);
-                          },
+      // ScaffoldMessenger.of(context) below would otherwise resolve to the
+      // MaterialApp-level messenger, whose overlay lives OUTSIDE this forced
+      // light Theme — its SnackBar then rendered with the app's ambient
+      // (possibly dark) theme. A local ScaffoldMessenger keeps the SnackBar
+      // inside the light subtree.
+      child: ScaffoldMessenger(
+        child: Builder(
+          builder: (context) => Scaffold(
+            appBar: AppBar(
+              backgroundColor: AppTheme.brandPetrol,
+              foregroundColor: Colors.white,
+              title: const BrandLockup(monochrome: true),
+            ),
+            body: SafeArea(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 720),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: BlocListener<ShareLinkCubit, ShareLinkState>(
+                            // Only when navigationError actually became non-null: the
+                            // cubit clears it (sets it back to null) on every successful
+                            // navigation, and that clearing state change must not itself
+                            // pop a SnackBar.
+                            listenWhen: (previous, current) =>
+                                current is ShareLinkLoaded &&
+                                current.navigationError != null &&
+                                (previous is! ShareLinkLoaded ||
+                                    previous.navigationError != current.navigationError),
+                            listener: (context, state) {
+                              final error = (state as ShareLinkLoaded).navigationError!;
+                              ScaffoldMessenger.of(context)
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(SnackBar(content: Text(describeError(error, l10n))));
+                            },
+                            child: BlocBuilder<ShareLinkCubit, ShareLinkState>(
+                              builder: (context, state) {
+                                final content = switch (state) {
+                                  ShareLinkLoading() => const _ShareLoadingSkeleton(),
+                                  ShareLinkNotFound() => _StatusMessage(
+                                      icon: Icons.link_off,
+                                      title: l10n.shareNotFoundTitle,
+                                      message: l10n.shareNotFoundMessage,
+                                    ),
+                                  ShareLinkPasswordProtected() => _StatusMessage(
+                                      icon: Icons.lock_outline,
+                                      title: l10n.sharePasswordProtectedTitle,
+                                      message: l10n.sharePasswordProtectedMessage,
+                                    ),
+                                  ShareLinkFailure() => _StatusMessage(
+                                      icon: Icons.error_outline,
+                                      title: describeError(state.error, l10n),
+                                      onRetry: () => context.read<ShareLinkCubit>().load(),
+                                    ),
+                                  ShareLinkLoaded(children: null) => _SingleFileCard(
+                                      file: state.root,
+                                      expiresAt: state.expiresAt,
+                                      progress: state.downloadProgress[state.root.id],
+                                      error: state.downloadErrors[state.root.id],
+                                    ),
+                                  ShareLinkLoaded() => _FolderView(state: state),
+                                };
+                                // The folder view manages its own scrolling (an
+                                // Expanded ListView) and needs the bounded height
+                                // this Center already provides; every other state
+                                // is a fixed-size card that must scroll instead of
+                                // overflow when text is scaled up (see 4.6).
+                                final isFolder = state is ShareLinkLoaded && state.children != null;
+                                return isFolder
+                                    ? content
+                                    : SingleChildScrollView(child: content);
+                              },
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
+                  const _ShareFooter(),
+                ],
               ),
-              const _ShareFooter(),
-            ],
+            ),
           ),
         ),
       ),
@@ -235,12 +252,31 @@ class _SkeletonBlock extends StatefulWidget {
 
 class _SkeletonBlockState extends State<_SkeletonBlock> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  bool _animating = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+  }
+
+  // MediaQuery isn't available in initState, and disableAnimations can also
+  // change while this widget is alive (a user flips the OS setting). Only
+  // running/stopping the controller here — never creating a second one —
+  // means a `pumpAndSettle` on the loading state actually settles instead of
+  // hanging on a ticker that repeats forever (4.6).
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shouldAnimate = !MediaQuery.disableAnimationsOf(context);
+    if (shouldAnimate == _animating) return;
+    _animating = shouldAnimate;
+    if (shouldAnimate) {
+      _controller.repeat(reverse: true);
+    } else {
+      _controller.stop();
+      _controller.value = 0;
+    }
   }
 
   @override
@@ -264,7 +300,7 @@ class _SkeletonBlockState extends State<_SkeletonBlock> with SingleTickerProvide
             ),
           ),
         );
-    if (MediaQuery.disableAnimationsOf(context)) return block(1);
+    if (!_animating) return block(1);
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) => block(0.4 + _controller.value * 0.6),
@@ -415,7 +451,7 @@ class _SingleFileCard extends StatelessWidget {
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(
-                      l10n.shareAvailableUntil(DateFormat.yMMMd(l10n.localeName).format(expiresAt!)),
+                      l10n.shareAvailableUntil(formatShareExpiryDate(expiresAt!, l10n.localeName)),
                       textAlign: TextAlign.center,
                       style: Theme.of(context)
                           .textTheme
@@ -431,19 +467,29 @@ class _SingleFileCard extends StatelessWidget {
               Text(describeError(error!, l10n), style: TextStyle(color: scheme.error)),
               const SizedBox(height: 8),
             ],
-            FilledButton.icon(
-              onPressed: progress != null
-                  ? null
-                  : () => context.read<ShareLinkCubit>().download(file),
-              icon: progress != null
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, value: progress == 0 ? null : progress),
-                    )
-                  : const Icon(Icons.download),
-              label: Text(l10n.download),
-            ),
+            if (progress != null)
+              // Determinate, never the button's indeterminate spinner this
+              // replaced: an indeterminate animation never settles, which
+              // hangs any pumpAndSettle on this state (4.6/teeth check).
+              SizedBox(
+                width: 200,
+                child: Column(
+                  children: [
+                    LinearProgressIndicator(value: progress == 0 ? 0.0 : progress),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${(progress! * 100).clamp(0, 100).round()}%',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              )
+            else
+              FilledButton.icon(
+                onPressed: () => context.read<ShareLinkCubit>().download(file),
+                icon: const Icon(Icons.download),
+                label: Text(l10n.download),
+              ),
           ],
         ),
       ),
@@ -477,10 +523,15 @@ class _ShareChildRow extends StatelessWidget {
       trailing: file.isFolder
           ? null
           : progress != null
+              // A percentage, not an indeterminate spinner (4.6/teeth
+              // check): fits a list row better than a progress ring anyway.
               ? SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2, value: progress == 0 ? null : progress),
+                  width: 40,
+                  child: Text(
+                    '${(progress! * 100).clamp(0, 100).round()}%',
+                    textAlign: TextAlign.end,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 )
               : IconButton(
                   icon: const Icon(Icons.download),

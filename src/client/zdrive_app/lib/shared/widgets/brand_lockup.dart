@@ -21,8 +21,16 @@ class BrandLockup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // titleLarge carries Typography.material2021's own explicit text colour
+    // (Colors.black87 by default), which wins over any inherited
+    // DefaultTextStyle/AppBar foreground colour — so the wordmark must be
+    // coloured explicitly here rather than relying on what wraps this
+    // widget. monochrome (on-dark placements, e.g. the petrol header) is
+    // always white; the default (on-light) variant follows onSurface so it
+    // still adapts to light/dark ColorSchemes.
     final titleStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
           fontWeight: FontWeight.w600,
+          color: monochrome ? Colors.white : Theme.of(context).colorScheme.onSurface,
         );
     return Semantics(
       label: 'zDrive',
