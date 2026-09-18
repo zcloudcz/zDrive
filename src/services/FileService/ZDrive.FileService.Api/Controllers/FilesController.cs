@@ -14,6 +14,7 @@ using ZDrive.FileService.Application.Interfaces;
 using ZDrive.FileService.Application.Queries.GetFile;
 using ZDrive.FileService.Application.Queries.GetFileChanges;
 using ZDrive.FileService.Application.Queries.GetFileVersions;
+using ZDrive.FileService.Application.Queries.GetStorageUsage;
 using ZDrive.FileService.Application.Queries.ListChildren;
 using ZDrive.FileService.Application.Queries.ListTrash;
 using ZDrive.FileService.Application.Queries.SearchFiles;
@@ -88,7 +89,8 @@ public sealed class FilesController : ControllerBase
         var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
         var command = new CreateFileCommand(
             userId, tenantId, request.ParentId, request.Name, request.IsFolder,
-            request.SizeBytes, request.MimeType, request.BlobPath, request.ManifestHash);
+            request.SizeBytes, request.MimeType, request.BlobPath, request.ManifestHash,
+            User.GetQuotaBytes());
         var result = await _mediator.Send(command, ct);
         return CreatedAtAction(nameof(GetFile), new { id = result.Id }, ApiResponse<FileDto>.Ok(result));
     }
@@ -189,7 +191,8 @@ public sealed class FilesController : ControllerBase
         var userId = User.GetUserId();
         var tenantId = User.GetTenantId() ?? userId;
         var result = await _mediator.Send(new CreateFileVersionCommand(
-            tenantId, userId, id, request.BlobVersionId, request.SizeBytes, request.ManifestHash, request.Comment), ct);
+            tenantId, userId, id, request.BlobVersionId, request.SizeBytes, request.ManifestHash, request.Comment,
+            User.GetQuotaBytes()), ct);
         return Ok(ApiResponse<FileVersionDto>.Ok(result));
     }
 
@@ -204,7 +207,8 @@ public sealed class FilesController : ControllerBase
     {
         var userId = User.GetUserId();
         var tenantId = User.GetTenantId() ?? userId;
-        var result = await _mediator.Send(new RestoreFileVersionCommand(tenantId, userId, id, versionId), ct);
+        var result = await _mediator.Send(
+            new RestoreFileVersionCommand(tenantId, userId, id, versionId, User.GetQuotaBytes()), ct);
         return Ok(ApiResponse<FileVersionDto>.Ok(result));
     }
 
@@ -217,6 +221,20 @@ public sealed class FilesController : ControllerBase
         var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
         var result = await _mediator.Send(new GetFileVersionsQuery(userId, tenantId, id), ct);
         return Ok(ApiResponse<List<FileVersionDto>>.Ok(result));
+    }
+
+    /// <summary>
+    /// Current per-user storage usage against the quota (JWT quota_bytes
+    /// claim, else the configured default).
+    /// </summary>
+    [HttpGet("usage")]
+    [ProducesResponseType(typeof(ApiResponse<StorageUsage>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetStorageUsage(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? throw new InvalidOperationException("Tenant ID claim is missing.");
+        var result = await _mediator.Send(new GetStorageUsageQuery(tenantId, userId, User.GetQuotaBytes()), ct);
+        return Ok(ApiResponse<StorageUsage>.Ok(result));
     }
 
     /// <summary>

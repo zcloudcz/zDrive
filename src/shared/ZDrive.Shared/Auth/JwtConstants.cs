@@ -10,4 +10,5 @@ public static class JwtConstants
     public const string UserIdClaim = "sub";
     public const string RoleClaim = "role";
     public const string DisplayNameClaim = "display_name";
+    public const string QuotaBytesClaim = "quota_bytes";
 }

@@ -13,11 +13,13 @@ public sealed class RestoreFileVersionCommandHandler : IRequestHandler<RestoreFi
 {
     private readonly IFileDbContext _db;
     private readonly VersioningOptions _options;
+    private readonly IStorageQuota _quota;
 
-    public RestoreFileVersionCommandHandler(IFileDbContext db, IOptions<VersioningOptions> options)
+    public RestoreFileVersionCommandHandler(IFileDbContext db, IOptions<VersioningOptions> options, IStorageQuota quota)
     {
         _db = db;
         _options = options.Value;
+        _quota = quota;
     }
 
     public async Task<FileVersionDto> Handle(RestoreFileVersionCommand request, CancellationToken cancellationToken)
@@ -36,6 +38,13 @@ public sealed class RestoreFileVersionCommandHandler : IRequestHandler<RestoreFi
             .AsNoTracking()
             .FirstOrDefaultAsync(v => v.Id == request.VersionId && v.FileId == request.FileId, cancellationToken)
             ?? throw new NotFoundException("FileVersion", request.VersionId);
+
+        // Restore records a NEW file_versions row carrying the source's
+        // SizeBytes (see CLAUDE.md "Blob versioning" — restore-as-new-version).
+        // That row is counted by the usage SUM the same as any other version,
+        // so it must clear the same quota check a fresh upload would.
+        await _quota.EnsureCanStoreAsync(
+            request.TenantId, request.UserId, request.ClaimQuotaBytes, source.SizeBytes, cancellationToken);
 
         var maxVersion = await _db.FileVersions
             .Where(v => v.FileId == request.FileId)

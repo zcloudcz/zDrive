@@ -27,4 +27,15 @@ public static class ClaimsHelper
     {
         return principal.FindFirstValue(JwtConstants.DisplayNameClaim) ?? string.Empty;
     }
+
+    /// <summary>
+    /// Per-user storage quota override carried on the JWT. Absent for most
+    /// users today (subscription plans will start setting it later) — a null
+    /// return means "fall back to the configured default", not "unlimited".
+    /// </summary>
+    public static long? GetQuotaBytes(this ClaimsPrincipal principal)
+    {
+        var value = principal.FindFirstValue(JwtConstants.QuotaBytesClaim);
+        return value is null ? null : long.Parse(value);
+    }
 }

@@ -10,11 +10,25 @@ namespace ZDrive.FileService.Application.Commands.CreateFile;
 public sealed class CreateFileCommandHandler : IRequestHandler<CreateFileCommand, FileDto>
 {
     private readonly IFileDbContext _db;
+    private readonly IStorageQuota _quota;
 
-    public CreateFileCommandHandler(IFileDbContext db) => _db = db;
+    public CreateFileCommandHandler(IFileDbContext db, IStorageQuota quota)
+    {
+        _db = db;
+        _quota = quota;
+    }
 
     public async Task<FileDto> Handle(CreateFileCommand request, CancellationToken cancellationToken)
     {
+        // Cheap pre-check so a client that declares a size up front is
+        // refused before any bytes move. The real (authoritative) check
+        // happens where the version is actually recorded.
+        if (request.SizeBytes is > 0)
+        {
+            await _quota.EnsureCanStoreAsync(
+                request.TenantId, request.UserId, request.ClaimQuotaBytes, request.SizeBytes.Value, cancellationToken);
+        }
+
         // If a parent is specified, verify it exists and belongs to the same tenant.
         if (request.ParentId.HasValue)
         {

@@ -13,11 +13,13 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
 {
     private readonly IFileDbContext _db;
     private readonly VersioningOptions _options;
+    private readonly IStorageQuota _quota;
 
-    public CreateFileVersionCommandHandler(IFileDbContext db, IOptions<VersioningOptions> options)
+    public CreateFileVersionCommandHandler(IFileDbContext db, IOptions<VersioningOptions> options, IStorageQuota quota)
     {
         _db = db;
         _options = options.Value;
+        _quota = quota;
     }
 
     public async Task<FileVersionDto> Handle(CreateFileVersionCommand request, CancellationToken cancellationToken)
@@ -31,6 +33,11 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
                 && !f.IsFolder,
                 cancellationToken)
             ?? throw new NotFoundException("FileNode", request.FileId);
+
+        // Single enforcement point for the quota check — both the authenticated
+        // and the link-driven upload flow (package A) go through this handler.
+        await _quota.EnsureCanStoreAsync(
+            request.TenantId, request.UserId, request.ClaimQuotaBytes, request.SizeBytes, cancellationToken);
 
         var maxVersion = await _db.FileVersions
             .Where(v => v.FileId == request.FileId)
