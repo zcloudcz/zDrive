@@ -41,6 +41,10 @@ public static class DependencyInjection
         services.Configure<ZDrive.FileService.Application.Options.VersioningOptions>(
             configuration.GetSection(ZDrive.FileService.Application.Options.VersioningOptions.SectionName));
 
+        // Per-user storage quota fallback (defaults apply when the section is missing)
+        services.Configure<ZDrive.FileService.Application.Options.StorageOptions>(
+            configuration.GetSection(ZDrive.FileService.Application.Options.StorageOptions.SectionName));
+
         // Public share download grants (defaults to an empty key — see
         // ShareDownloadGrantOptions.TryGetKey for the fail-closed behavior).
         // In Development only, an empty key falls back to the same per-machine

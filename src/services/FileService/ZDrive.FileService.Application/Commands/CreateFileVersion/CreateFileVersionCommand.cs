@@ -10,4 +10,5 @@ public sealed record CreateFileVersionCommand(
     string BlobVersionId,
     long SizeBytes,
     string? ManifestHash,
-    string? Comment) : IRequest<FileVersionDto>;
+    string? Comment,
+    long? ClaimQuotaBytes = null) : IRequest<FileVersionDto>;
