@@ -350,7 +350,7 @@ public sealed class ShareWriteFlowTests : IClassFixture<FileServiceFactory>
             services.PostConfigure<StorageOptions>(options => options.DefaultUserQuotaBytes = 10)));
 
         var owner = quotaFactory.CreateClient();
-        owner.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid()));
+        owner.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _factory.CreateTestToken(Guid.NewGuid(), Guid.NewGuid()));
         var anon = quotaFactory.CreateClient();
 
         var rootResponse = await owner.PostAsJsonAsync("/api/v1/files", new { name = "quota-root", isFolder = true });
