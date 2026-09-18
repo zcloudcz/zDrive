@@ -21,6 +21,7 @@ import '../../core/storage/app_preferences.dart';
 import '../../features/sync/presentation/sync_bloc.dart';
 import '../../features/sync/presentation/sync_page.dart';
 import '../../features/sync/sync_support.dart';
+import '../../features/share_link/presentation/pages/share_link_page.dart';
 
 GoRouter createRouter(AuthBloc authBloc) {
   return GoRouter(
@@ -32,14 +33,22 @@ GoRouter createRouter(AuthBloc authBloc) {
       final isAuthRoute =
           state.matchedLocation == '/login' ||
           state.matchedLocation == '/register';
+      // A share link is public: it must render for both an anonymous visitor
+      // and a logged-in user, so it is exempt from the auth redirect exactly
+      // like the auth routes themselves.
+      final isShareLinkRoute = state.matchedLocation.startsWith('/s/');
 
-      if (!isAuthenticated && !isAuthRoute) return '/login';
+      if (!isAuthenticated && !isAuthRoute && !isShareLinkRoute) return '/login';
       if (isAuthenticated && isAuthRoute) return '/home/files';
       return null;
     },
     routes: [
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
       GoRoute(path: '/register', builder: (_, _) => const RegisterPage()),
+      GoRoute(
+        path: '/s/:token',
+        builder: (_, state) => ShareLinkPage(token: state.pathParameters['token']!),
+      ),
       StatefulShellRoute.indexedStack(
         // SyncBloc lives here, not inside SyncPage: sync then runs for the
         // whole authenticated session (from login, via LoadSyncStatus)

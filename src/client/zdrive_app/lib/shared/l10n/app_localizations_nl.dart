@@ -389,4 +389,24 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get updateFailed =>
       'De automatische update is mislukt. Je kunt zDrive blijven gebruiken en het opnieuw proberen.';
+
+  @override
+  String get shareNotFoundTitle => 'Link niet gevonden';
+
+  @override
+  String get shareNotFoundMessage =>
+      'Deze deellink is ongeldig, verlopen of verwijderd.';
+
+  @override
+  String get sharePasswordProtectedTitle => 'Wachtwoord vereist';
+
+  @override
+  String get sharePasswordProtectedMessage =>
+      'Deze deellink is met een wachtwoord beveiligd, wat nog niet wordt ondersteund.';
+
+  @override
+  String get openZDrive => 'zDrive openen';
+
+  @override
+  String get download => 'Downloaden';
 }

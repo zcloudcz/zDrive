@@ -115,5 +115,12 @@
   "exitApp": "Salir",
   "exitFailed": "No se pudo cerrar la aplicación. Inténtalo de nuevo.",
   "appVersionFailed": "No se pudo cargar la versión de la aplicación.",
-  "appVersion": "Versión {version}"
+  "appVersion": "Versión {version}",
+
+  "shareNotFoundTitle": "Enlace no encontrado",
+  "shareNotFoundMessage": "Este enlace para compartir no es válido, ha caducado o se ha eliminado.",
+  "sharePasswordProtectedTitle": "Se requiere contraseña",
+  "sharePasswordProtectedMessage": "Este enlace está protegido con contraseña, algo que aún no es compatible.",
+  "openZDrive": "Abrir zDrive",
+  "download": "Descargar"
 }

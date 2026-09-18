@@ -389,4 +389,24 @@ class AppLocalizationsFi extends AppLocalizations {
   @override
   String get updateFailed =>
       'Automaattinen päivitys epäonnistui. Voit jatkaa zDriven käyttöä ja yrittää uudelleen.';
+
+  @override
+  String get shareNotFoundTitle => 'Linkkiä ei löytynyt';
+
+  @override
+  String get shareNotFoundMessage =>
+      'Tämä jakolinkki on virheellinen, vanhentunut tai poistettu.';
+
+  @override
+  String get sharePasswordProtectedTitle => 'Salasana vaaditaan';
+
+  @override
+  String get sharePasswordProtectedMessage =>
+      'Tämä jakolinkki on salasanasuojattu, mitä ei vielä tueta.';
+
+  @override
+  String get openZDrive => 'Avaa zDrive';
+
+  @override
+  String get download => 'Lataa';
 }

@@ -386,4 +386,24 @@ class AppLocalizationsSv extends AppLocalizations {
   @override
   String get updateFailed =>
       'Den automatiska uppdateringen misslyckades. Du kan fortsätta använda zDrive och försöka igen.';
+
+  @override
+  String get shareNotFoundTitle => 'Länken hittades inte';
+
+  @override
+  String get shareNotFoundMessage =>
+      'Den här delningslänken är ogiltig, har gått ut eller har tagits bort.';
+
+  @override
+  String get sharePasswordProtectedTitle => 'Lösenord krävs';
+
+  @override
+  String get sharePasswordProtectedMessage =>
+      'Den här delningslänken är lösenordsskyddad, vilket ännu inte stöds.';
+
+  @override
+  String get openZDrive => 'Öppna zDrive';
+
+  @override
+  String get download => 'Ladda ner';
 }

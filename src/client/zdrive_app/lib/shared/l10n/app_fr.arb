@@ -115,5 +115,12 @@
   "exitApp": "Quitter",
   "exitFailed": "Impossible de quitter l’application. Réessayez.",
   "appVersionFailed": "Impossible de charger la version de l’application.",
-  "appVersion": "Version {version}"
+  "appVersion": "Version {version}",
+
+  "shareNotFoundTitle": "Lien introuvable",
+  "shareNotFoundMessage": "Ce lien de partage est invalide, expiré ou a été supprimé.",
+  "sharePasswordProtectedTitle": "Mot de passe requis",
+  "sharePasswordProtectedMessage": "Ce lien de partage est protégé par un mot de passe, ce qui n’est pas encore pris en charge.",
+  "openZDrive": "Ouvrir zDrive",
+  "download": "Télécharger"
 }

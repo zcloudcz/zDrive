@@ -115,6 +115,13 @@
   "exitApp": "退出",
   "exitFailed": "无法退出应用。请重试。",
   "appVersionFailed": "无法加载应用版本。",
-  "appVersion": "版本 {version}"
+  "appVersion": "版本 {version}",
+
+  "shareNotFoundTitle": "链接未找到",
+  "shareNotFoundMessage": "此共享链接无效、已过期或已被删除。",
+  "sharePasswordProtectedTitle": "需要密码",
+  "sharePasswordProtectedMessage": "此共享链接受密码保护，目前尚不支持。",
+  "openZDrive": "打开 zDrive",
+  "download": "下载"
 }
 

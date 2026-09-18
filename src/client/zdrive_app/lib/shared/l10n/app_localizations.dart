@@ -815,6 +815,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Automatic update failed. You can keep using zDrive and try again.'**
   String get updateFailed;
+
+  /// No description provided for @shareNotFoundTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Link not found'**
+  String get shareNotFoundTitle;
+
+  /// No description provided for @shareNotFoundMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This share link is invalid, expired, or was removed.'**
+  String get shareNotFoundMessage;
+
+  /// No description provided for @sharePasswordProtectedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Password required'**
+  String get sharePasswordProtectedTitle;
+
+  /// No description provided for @sharePasswordProtectedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This share link is password-protected, which is not supported yet.'**
+  String get sharePasswordProtectedMessage;
+
+  /// No description provided for @openZDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'Open zDrive'**
+  String get openZDrive;
+
+  /// No description provided for @download.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get download;
 }
 
 class _AppLocalizationsDelegate

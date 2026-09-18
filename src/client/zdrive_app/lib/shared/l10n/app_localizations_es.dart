@@ -392,4 +392,24 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get updateFailed =>
       'La actualización automática falló. Puedes seguir usando zDrive e intentarlo de nuevo.';
+
+  @override
+  String get shareNotFoundTitle => 'Enlace no encontrado';
+
+  @override
+  String get shareNotFoundMessage =>
+      'Este enlace para compartir no es válido, ha caducado o se ha eliminado.';
+
+  @override
+  String get sharePasswordProtectedTitle => 'Se requiere contraseña';
+
+  @override
+  String get sharePasswordProtectedMessage =>
+      'Este enlace está protegido con contraseña, algo que aún no es compatible.';
+
+  @override
+  String get openZDrive => 'Abrir zDrive';
+
+  @override
+  String get download => 'Descargar';
 }

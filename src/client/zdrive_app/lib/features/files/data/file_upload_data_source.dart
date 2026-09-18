@@ -303,47 +303,64 @@ class FileUploadDataSource {
 
   /// Each yielded chunk has a valid SHA-256. Successful stream completion
   /// additionally proves index completeness and total byte length.
-  Stream<Uint8List> downloadFileStream(String fileId, {String? manifestHash}) async* {
-    final manifest = await getManifest(fileId, manifestHash: manifestHash);
-    if (manifestHash != null && manifest.manifestHash != manifestHash) {
-      throw StateError('Storage did not confirm the requested immutable manifest');
+  Stream<Uint8List> downloadFileStream(String fileId, {String? manifestHash}) {
+    return assembleVerifiedFileStream(
+      fetchManifest: () => getManifest(fileId, manifestHash: manifestHash),
+      fetchChunkBytes: (chunkHash) => downloadChunkBytes(fileId, chunkHash),
+      expectedManifestHash: manifestHash,
+    );
+  }
+}
+
+/// Fetches a manifest, then each chunk it lists in order, verifying every
+/// chunk's SHA-256 and the assembled total size — the reassembly + integrity
+/// logic shared by [FileUploadDataSource.downloadFileStream] (authenticated
+/// download) and the public share-link download path, which fetches the
+/// manifest and chunk bytes through different endpoints (anonymous, grant-
+/// header authenticated) but must apply identical corruption checks.
+Stream<Uint8List> assembleVerifiedFileStream({
+  required Future<ManifestDto> Function() fetchManifest,
+  required Future<Uint8List> Function(String chunkHash) fetchChunkBytes,
+  String? expectedManifestHash,
+}) async* {
+  final manifest = await fetchManifest();
+  if (expectedManifestHash != null && manifest.manifestHash != expectedManifestHash) {
+    throw StateError('Storage did not confirm the requested immutable manifest');
+  }
+
+  final chunks = [...manifest.chunks]..sort((a, b) => a.index.compareTo(b.index));
+
+  // The length check further down does not subsume this. Chunks are a fixed
+  // size, so a manifest repeating one index — [{0,A},{0,A}] — assembles to
+  // A||A at exactly the size A||B would have been, and every individual
+  // chunk still hashes correctly. Indices must therefore be exactly
+  // 0..n-1: unique, contiguous, zero-based.
+  for (var i = 0; i < chunks.length; i++) {
+    if (chunks[i].index != i) {
+      throw ManifestChunkIndexException(i, chunks[i].index);
     }
+  }
 
-    final chunks = [...manifest.chunks]
-      ..sort((a, b) => a.index.compareTo(b.index));
+  var receivedSize = 0;
+  for (final chunk in chunks) {
+    final bytes = await fetchChunkBytes(chunk.hash);
 
-    // The length check further down does not subsume this. Chunks are a fixed
-    // size, so a manifest repeating one index — [{0,A},{0,A}] — assembles to
-    // A||A at exactly the size A||B would have been, and every individual
-    // chunk still hashes correctly. Indices must therefore be exactly
-    // 0..n-1: unique, contiguous, zero-based.
-    for (var i = 0; i < chunks.length; i++) {
-      if (chunks[i].index != i) {
-        throw ManifestChunkIndexException(i, chunks[i].index);
-      }
+    final actualHash = await compute(_chunkHash, bytes);
+    if (actualHash != chunk.hash) {
+      throw ChunkHashMismatchException(chunk.hash, actualHash);
     }
-
-    var receivedSize = 0;
-    for (final chunk in chunks) {
-      final bytes = await downloadChunkBytes(fileId, chunk.hash);
-
-      final actualHash = await compute(_chunkHash, bytes);
-      if (actualHash != chunk.hash) {
-        throw ChunkHashMismatchException(chunk.hash, actualHash);
-      }
-      receivedSize += bytes.length;
-      if (receivedSize > manifest.totalSize) {
-        throw ManifestSizeMismatchException(manifest.totalSize, receivedSize);
-      }
-      yield bytes;
-    }
-
-    // Per-chunk hashing only proves each chunk's own bytes are intact — it
-    // says nothing about whether the *set* of chunks is complete. Together
-    // with the index check above (which catches duplicates and gaps at equal
-    // total size), this catches a truncated manifest and an empty chunk list.
-    if (receivedSize != manifest.totalSize) {
+    receivedSize += bytes.length;
+    if (receivedSize > manifest.totalSize) {
       throw ManifestSizeMismatchException(manifest.totalSize, receivedSize);
     }
+    yield bytes;
+  }
+
+  // Per-chunk hashing only proves each chunk's own bytes are intact — it
+  // says nothing about whether the *set* of chunks is complete. Together
+  // with the index check above (which catches duplicates and gaps at equal
+  // total size), this catches a truncated manifest and an empty chunk list.
+  if (receivedSize != manifest.totalSize) {
+    throw ManifestSizeMismatchException(manifest.totalSize, receivedSize);
   }
 }

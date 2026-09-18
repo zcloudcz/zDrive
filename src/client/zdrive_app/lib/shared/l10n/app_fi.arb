@@ -115,5 +115,12 @@
   "exitApp": "Lopeta",
   "exitFailed": "Sovellusta ei voitu sulkea. Yritä uudelleen.",
   "appVersionFailed": "Sovelluksen versiota ei voitu ladata.",
-  "appVersion": "Versio {version}"
+  "appVersion": "Versio {version}",
+
+  "shareNotFoundTitle": "Linkkiä ei löytynyt",
+  "shareNotFoundMessage": "Tämä jakolinkki on virheellinen, vanhentunut tai poistettu.",
+  "sharePasswordProtectedTitle": "Salasana vaaditaan",
+  "sharePasswordProtectedMessage": "Tämä jakolinkki on salasanasuojattu, mitä ei vielä tueta.",
+  "openZDrive": "Avaa zDrive",
+  "download": "Lataa"
 }

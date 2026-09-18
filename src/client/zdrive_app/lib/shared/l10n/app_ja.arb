@@ -115,5 +115,12 @@
   "exitApp": "終了",
   "exitFailed": "アプリを終了できませんでした。もう一度お試しください。",
   "appVersionFailed": "アプリのバージョンを読み込めませんでした。",
-  "appVersion": "バージョン {version}"
+  "appVersion": "バージョン {version}",
+
+  "shareNotFoundTitle": "リンクが見つかりません",
+  "shareNotFoundMessage": "この共有リンクは無効か、期限切れか、削除されています。",
+  "sharePasswordProtectedTitle": "パスワードが必要です",
+  "sharePasswordProtectedMessage": "この共有リンクはパスワードで保護されていますが、まだサポートされていません。",
+  "openZDrive": "zDriveを開く",
+  "download": "ダウンロード"
 }

@@ -4,6 +4,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../domain/file_item.dart';
 import 'file_icon.dart';
+import 'file_size_format.dart';
 
 class FileListItem extends StatelessWidget {
   final FileItem file;
@@ -33,7 +34,7 @@ class FileListItem extends StatelessWidget {
       subtitle: Text(
         file.isFolder
             ? formatRelativeTime(file.updatedAt, l10n.localeName)
-            : '${_formatFileSize(file.sizeBytes)} · ${formatRelativeTime(file.updatedAt, l10n.localeName)}',
+            : '${formatFileSize(file.sizeBytes)} · ${formatRelativeTime(file.updatedAt, l10n.localeName)}',
         style: Theme.of(context).textTheme.bodySmall,
       ),
       trailing: PopupMenuButton<String>(
@@ -60,15 +61,5 @@ class FileListItem extends StatelessWidget {
       ),
       onTap: onTap,
     );
-  }
-
-  String _formatFileSize(int? bytes) {
-    if (bytes == null) return '';
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 }

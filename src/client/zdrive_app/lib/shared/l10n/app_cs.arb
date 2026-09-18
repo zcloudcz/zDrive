@@ -170,6 +170,13 @@
   "updateRetry": "Zkusit aktualizaci znovu",
   "updateRestart": "Restartovat a aktualizovat",
   "updateReady": "Aktualizace {version} je připravena. Nainstaluje se při příštím spuštění.",
-  "updateRestarting": "Dokončuji synchronizaci před restartováním…"
+  "updateRestarting": "Dokončuji synchronizaci před restartováním…",
+
+  "shareNotFoundTitle": "Odkaz nenalezen",
+  "shareNotFoundMessage": "Tento sdílený odkaz je neplatný, vypršel nebo byl odstraněn.",
+  "sharePasswordProtectedTitle": "Vyžaduje se heslo",
+  "sharePasswordProtectedMessage": "Tento sdílený odkaz je chráněný heslem, což zatím není podporováno.",
+  "openZDrive": "Otevřít zDrive",
+  "download": "Stáhnout"
 
 }

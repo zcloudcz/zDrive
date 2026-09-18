@@ -115,5 +115,12 @@
   "exitApp": "Afsluiten",
   "exitFailed": "De app kon niet worden afgesloten. Probeer het opnieuw.",
   "appVersionFailed": "De appversie kon niet worden geladen.",
-  "appVersion": "Versie {version}"
+  "appVersion": "Versie {version}",
+
+  "shareNotFoundTitle": "Link niet gevonden",
+  "shareNotFoundMessage": "Deze deellink is ongeldig, verlopen of verwijderd.",
+  "sharePasswordProtectedTitle": "Wachtwoord vereist",
+  "sharePasswordProtectedMessage": "Deze deellink is met een wachtwoord beveiligd, wat nog niet wordt ondersteund.",
+  "openZDrive": "zDrive openen",
+  "download": "Downloaden"
 }

@@ -169,6 +169,9 @@ class _ShareDialogState extends State<ShareDialog> {
   }
 
   String _buildShareUrl(String token) {
-    return '${ApiConstants.baseUrl}/share/$token';
+    // Hash route: the web app is hosted on GitHub Pages, which has no SPA
+    // fallback, so a path-based deep link (/s/token) would 404 on a fresh
+    // load — go_router's default hash strategy keeps routing client-side.
+    return '${ApiConstants.webBaseUrl}/#/s/$token';
   }
 }
