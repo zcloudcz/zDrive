@@ -115,6 +115,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get folders => 'Dossiers';
 
   @override
+  String get newItem => 'Nouveau';
+
+  @override
   String get newFolder => 'Nouveau dossier';
 
   @override
@@ -146,6 +149,12 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get refresh => 'Actualiser';
+
+  @override
+  String get gridView => 'Vue en grille';
+
+  @override
+  String get listView => 'Vue en liste';
 
   @override
   String get noFiles => 'Aucun fichier';

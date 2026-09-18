@@ -112,6 +112,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get folders => '文件夹';
 
   @override
+  String get newItem => '新建';
+
+  @override
   String get newFolder => '新建文件夹';
 
   @override
@@ -143,6 +146,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get refresh => '刷新';
+
+  @override
+  String get gridView => '网格视图';
+
+  @override
+  String get listView => '列表视图';
 
   @override
   String get noFiles => '没有文件';

@@ -41,6 +41,7 @@
     }
   },
   "folders": "Folders",
+  "newItem": "New",
   "newFolder": "New folder",
   "uploadFile": "Upload file",
   "rename": "Rename",
@@ -52,6 +53,8 @@
   "search": "Search",
   "clearSearch": "Clear search",
   "refresh": "Refresh",
+  "gridView": "Grid view",
+  "listView": "List view",
   "noFiles": "No files",
   "createFolder": "Create folder",
   "folderName": "Folder name",

@@ -119,6 +119,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get folders => 'Carpetas';
 
   @override
+  String get newItem => 'Nuevo';
+
+  @override
   String get newFolder => 'Nueva carpeta';
 
   @override
@@ -150,6 +153,12 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get refresh => 'Actualizar';
+
+  @override
+  String get gridView => 'Vista de cuadrícula';
+
+  @override
+  String get listView => 'Vista de lista';
 
   @override
   String get noFiles => 'No hay archivos';

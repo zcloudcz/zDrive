@@ -113,6 +113,9 @@ class AppLocalizationsSv extends AppLocalizations {
   String get folders => 'Mappar';
 
   @override
+  String get newItem => 'Nytt';
+
+  @override
   String get newFolder => 'Ny mapp';
 
   @override
@@ -144,6 +147,12 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get refresh => 'Uppdatera';
+
+  @override
+  String get gridView => 'Rutnätsvy';
+
+  @override
+  String get listView => 'Listvy';
 
   @override
   String get noFiles => 'Inga filer';

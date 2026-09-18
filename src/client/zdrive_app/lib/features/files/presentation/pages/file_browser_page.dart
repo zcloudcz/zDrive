@@ -19,6 +19,7 @@ import '../../domain/use_cases/search_files_use_case.dart';
 import '../../domain/use_cases/upload_file_use_case.dart';
 import '../file_browser_bloc.dart';
 import '../widgets/create_folder_dialog.dart';
+import '../widgets/file_actions_toolbar.dart';
 import '../widgets/file_grid_item.dart';
 import '../widgets/file_list_item.dart';
 import '../widgets/rename_dialog.dart';
@@ -41,13 +42,16 @@ class FileBrowserPage extends StatelessWidget {
         fileRepository: getIt<FileRepository>(),
         remoteChangeNotifier: getIt<RemoteFileChangeNotifier>(),
       )..add(LoadFolder(folderId: folderId)),
-      child: const _FileBrowserView(),
+      child: const FileBrowserView(),
     );
   }
 }
 
-class _FileBrowserView extends StatelessWidget {
-  const _FileBrowserView();
+/// Public only so a widget test can pump the real view under a MockBloc,
+/// without the page's get_it wiring.
+@visibleForTesting
+class FileBrowserView extends StatelessWidget {
+  const FileBrowserView({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +69,6 @@ class _FileBrowserView extends StatelessWidget {
         return Scaffold(
           appBar: _buildAppBar(context, state, l10n),
           body: _buildBody(context, state, l10n),
-          floatingActionButton: _buildFab(context, l10n),
         );
       },
     );
@@ -77,7 +80,6 @@ class _FileBrowserView extends StatelessWidget {
     AppLocalizations l10n,
   ) {
     final breadcrumbs = state is FileBrowserLoaded ? state.breadcrumbs : null;
-    final viewMode = state is FileBrowserLoaded ? state.viewMode : null;
 
     return AppBar(
       title: breadcrumbs != null
@@ -117,30 +119,11 @@ class _FileBrowserView extends StatelessWidget {
             )
           : Text(l10n.files),
       actions: [
-        // Pull-to-refresh (RefreshIndicator, below) is not discoverable with
-        // a mouse — this gives desktop users an equally-obvious manual
-        // refresh, reusing the same RefreshFiles event.
-        IconButton(
-          icon: const Icon(Icons.refresh),
-          tooltip: l10n.refresh,
-          onPressed: () => context.read<FileBrowserBloc>().add(const RefreshFiles()),
-        ),
         IconButton(
           icon: const Icon(Icons.search),
           tooltip: l10n.search,
           onPressed: () => context.go('/home/files/search'),
         ),
-        if (viewMode != null)
-          IconButton(
-            icon: Icon(
-              viewMode == FileViewMode.list
-                  ? Icons.grid_view
-                  : Icons.view_list,
-            ),
-            onPressed: () {
-              context.read<FileBrowserBloc>().add(const ToggleViewMode());
-            },
-          ),
         IconButton(
           icon: const Icon(Icons.delete_outline),
           tooltip: l10n.trash,
@@ -151,6 +134,23 @@ class _FileBrowserView extends StatelessWidget {
   }
 
   Widget _buildBody(
+    BuildContext context,
+    FileBrowserState state,
+    AppLocalizations l10n,
+  ) {
+    return Column(
+      children: [
+        FileActionsToolbar(
+          viewMode: state is FileBrowserLoaded ? state.viewMode : null,
+          onUploadFile: () => _pickAndUploadFile(context),
+          onCreateFolder: () => _showCreateFolderDialog(context),
+        ),
+        Expanded(child: _buildContent(context, state, l10n)),
+      ],
+    );
+  }
+
+  Widget _buildContent(
     BuildContext context,
     FileBrowserState state,
     AppLocalizations l10n,
@@ -250,26 +250,6 @@ class _FileBrowserView extends StatelessWidget {
           onVersions: () => _showVersionHistoryDialog(context, file),
         );
       },
-    );
-  }
-
-  Widget _buildFab(BuildContext context, AppLocalizations l10n) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        FloatingActionButton.small(
-          heroTag: 'upload',
-          onPressed: () => _pickAndUploadFile(context),
-          child: const Icon(Icons.upload_file),
-        ),
-        const SizedBox(height: 8),
-        FloatingActionButton(
-          heroTag: 'newFolder',
-          onPressed: () => _showCreateFolderDialog(context),
-          child: const Icon(Icons.create_new_folder),
-        ),
-      ],
     );
   }
 
