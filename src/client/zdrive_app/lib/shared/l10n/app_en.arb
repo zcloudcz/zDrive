@@ -67,6 +67,8 @@
   "permission": "Permission",
   "readOnly": "Read only",
   "readWrite": "Read & Write",
+  "allowDelete": "Allow deleting",
+  "allowDeleteHelp": "Deleted items go to the owner's trash.",
   "expiresAt": "Expires at",
   "never": "Never",
   "uploadProgress": "Uploading...",

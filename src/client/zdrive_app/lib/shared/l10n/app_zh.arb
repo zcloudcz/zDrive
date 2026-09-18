@@ -54,6 +54,8 @@
   "permission": "权限",
   "readOnly": "只读",
   "readWrite": "读写",
+  "allowDelete": "允许删除",
+  "allowDeleteHelp": "已删除的项目将移至所有者的回收站。",
   "expiresAt": "到期时间",
   "never": "永不过期",
   "uploadProgress": "正在上传…",

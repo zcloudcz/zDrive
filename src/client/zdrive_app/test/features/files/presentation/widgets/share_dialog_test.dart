@@ -23,7 +23,8 @@ void main() {
       home: Scaffold(
         body: ShareDialog(
           fileId: 'f1',
-          onShare: (fileId, permission, expiresAt) async => const ShareInfo(
+          onShare: (fileId, permission, expiresAt, {allowDelete = false}) async =>
+              const ShareInfo(
             id: 's1',
             fileId: 'f1',
             permission: SharePermission.read,
@@ -42,5 +43,45 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('https://drive.zcloud.cz/#/s/abc123'), findsOneWidget);
+  });
+
+  testWidgets(
+      'AllowDeleteCheckbox_Toggled_PassedToOnShare — the checkbox is '
+      'independent of the Permission dropdown, so a Read link with deletion '
+      'allowed must still reach onShare', (tester) async {
+    bool? capturedAllowDelete;
+
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('en'),
+      home: Scaffold(
+        body: ShareDialog(
+          fileId: 'f1',
+          onShare: (fileId, permission, expiresAt, {allowDelete = false}) async {
+            capturedAllowDelete = allowDelete;
+            return ShareInfo(
+              id: 's1',
+              fileId: 'f1',
+              permission: permission,
+              linkToken: 'abc123',
+              allowDelete: allowDelete,
+            );
+          },
+        ),
+      ),
+    ));
+
+    final l10n = AppLocalizations.of(tester.element(find.byType(ShareDialog)))!;
+    await tester.tap(find.text(l10n.allowDelete));
+    await tester.tap(find.widgetWithText(FilledButton, l10n.shareLink));
+    await tester.pumpAndSettle();
+
+    expect(capturedAllowDelete, isTrue);
   });
 }

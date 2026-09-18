@@ -191,6 +191,12 @@ class AppLocalizationsSv extends AppLocalizations {
   String get readWrite => 'Läsning och skrivning';
 
   @override
+  String get allowDelete => 'Tillåt radering';
+
+  @override
+  String get allowDeleteHelp => 'Raderade objekt hamnar i ägarens papperskorg.';
+
+  @override
   String get expiresAt => 'Gäller till';
 
   @override

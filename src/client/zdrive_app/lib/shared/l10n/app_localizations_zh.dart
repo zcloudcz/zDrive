@@ -190,6 +190,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get readWrite => '读写';
 
   @override
+  String get allowDelete => '允许删除';
+
+  @override
+  String get allowDeleteHelp => '已删除的项目将移至所有者的回收站。';
+
+  @override
   String get expiresAt => '到期时间';
 
   @override

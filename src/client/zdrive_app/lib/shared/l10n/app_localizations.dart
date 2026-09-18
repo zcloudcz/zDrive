@@ -470,6 +470,18 @@ abstract class AppLocalizations {
   /// **'Read & Write'**
   String get readWrite;
 
+  /// No description provided for @allowDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow deleting'**
+  String get allowDelete;
+
+  /// No description provided for @allowDeleteHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted items go to the owner\'s trash.'**
+  String get allowDeleteHelp;
+
   /// No description provided for @expiresAt.
   ///
   /// In en, this message translates to:

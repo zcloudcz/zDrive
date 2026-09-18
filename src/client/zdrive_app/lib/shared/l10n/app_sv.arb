@@ -54,6 +54,8 @@
   "permission": "Behörighet",
   "readOnly": "Endast läsning",
   "readWrite": "Läsning och skrivning",
+  "allowDelete": "Tillåt radering",
+  "allowDeleteHelp": "Raderade objekt hamnar i ägarens papperskorg.",
   "expiresAt": "Gäller till",
   "never": "Aldrig",
   "uploadProgress": "Laddar upp…",

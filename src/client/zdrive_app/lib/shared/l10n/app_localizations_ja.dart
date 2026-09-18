@@ -190,6 +190,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get readWrite => '読み取りと書き込み';
 
   @override
+  String get allowDelete => '削除を許可';
+
+  @override
+  String get allowDeleteHelp => '削除された項目は所有者のごみ箱に移動します。';
+
+  @override
   String get expiresAt => '有効期限';
 
   @override

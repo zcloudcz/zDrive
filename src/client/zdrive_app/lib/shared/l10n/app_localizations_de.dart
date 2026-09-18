@@ -195,6 +195,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get readWrite => 'Lesen und Schreiben';
 
   @override
+  String get allowDelete => 'Löschen erlauben';
+
+  @override
+  String get allowDeleteHelp =>
+      'Gelöschte Elemente landen im Papierkorb des Besitzers.';
+
+  @override
   String get expiresAt => 'Gültig bis';
 
   @override

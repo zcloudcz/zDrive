@@ -72,6 +72,7 @@ ShareDto _$ShareDtoFromJson(Map<String, dynamic> json) => ShareDto(
   expiresAt: json['expiresAt'] == null
       ? null
       : DateTime.parse(json['expiresAt'] as String),
+  allowDelete: json['allowDelete'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$ShareDtoToJson(ShareDto instance) => <String, dynamic>{
@@ -80,6 +81,7 @@ Map<String, dynamic> _$ShareDtoToJson(ShareDto instance) => <String, dynamic>{
   'permission': instance.permission,
   'linkToken': instance.linkToken,
   'expiresAt': instance.expiresAt?.toIso8601String(),
+  'allowDelete': instance.allowDelete,
 };
 
 PagedResultDto _$PagedResultDtoFromJson(Map<String, dynamic> json) =>

@@ -54,6 +54,8 @@
   "permission": "Autorisation",
   "readOnly": "Lecture seule",
   "readWrite": "Lecture et écriture",
+  "allowDelete": "Autoriser la suppression",
+  "allowDeleteHelp": "Les éléments supprimés vont dans la corbeille du propriétaire.",
   "expiresAt": "Expire le",
   "never": "Jamais",
   "uploadProgress": "Importation en cours…",
