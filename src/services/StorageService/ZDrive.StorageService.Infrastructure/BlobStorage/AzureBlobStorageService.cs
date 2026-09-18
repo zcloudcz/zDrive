@@ -133,6 +133,13 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         await foreach (var blob in container.GetBlobsAsync(prefix: $"temp-uploads/{sessionId}/", cancellationToken: ct))
             await container.DeleteBlobIfExistsAsync(blob.Name, cancellationToken: ct);
     }
+    public async Task DeleteTempChunkAsync(Guid sessionId, int chunkIndex, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(SystemContainer);
+        var blobClient = containerClient.GetBlobClient(GetTempBlobPath(sessionId, chunkIndex));
+        await blobClient.DeleteIfExistsAsync(cancellationToken: ct);
+    }
+
     public async Task DeleteFileAsync(Guid tenantId, Guid userId, Guid fileId, CancellationToken ct = default)
     {
         var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);

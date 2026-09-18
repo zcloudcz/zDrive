@@ -94,6 +94,26 @@ public sealed class CreateShareUploadGrantCommandHandler
             }
             else
             {
+                // A NEW node is created before any byte moves, so an abusive
+                // caller who never uploads still leaves a permanent node
+                // behind (same behaviour as the authenticated CreateFile flow
+                // — accepted there because a real client account can only do
+                // it to itself). A public link isn't rate-limited by an
+                // account, so cap how many such versionless nodes one owner
+                // can accumulate from link traffic in a day; reusing an
+                // existing node (the overwrite branches above) doesn't count,
+                // since it creates nothing.
+                // ponytail: fixed 100/24h ceiling, not per-share or configurable;
+                // revisit once blob GC exists and this stops being the only backstop.
+                var pendingCutoff = DateTime.UtcNow.AddHours(-24);
+                var pendingCount = await _db.FileNodes.CountAsync(f =>
+                    f.TenantId == owner.TenantId && f.UserId == owner.UserId && !f.IsFolder && !f.IsDeleted
+                    && f.CreatedAt >= pendingCutoff
+                    && !_db.FileVersions.Any(v => v.FileId == f.Id),
+                    cancellationToken);
+                if (pendingCount >= MaxPendingUploadsPerDay)
+                    throw new TooManyRequestsException("Too many pending uploads through share links in the last 24 hours.");
+
                 // CreateFileCommandHandler does its own quota pre-check.
                 var createCommand = new CreateFileCommand(
                     owner.UserId, owner.TenantId, parent.Id, request.FileName, IsFolder: false,
@@ -111,10 +131,15 @@ public sealed class CreateShareUploadGrantCommandHandler
             ? shareExpiresAt.Value
             : uncappedExpiry;
 
+        var usage = await _quota.GetUsageAsync(owner.TenantId, owner.UserId, claimLimit: null, cancellationToken);
+        var quotaRemaining = Math.Max(0, usage.LimitBytes - usage.UsedBytes);
+
         var payload = new ShareUploadGrant.Payload(
-            targetFile.TenantId, targetFile.UserId, targetFile.Id, request.SizeBytes, expiresAt);
+            targetFile.TenantId, targetFile.UserId, targetFile.Id, request.SizeBytes, expiresAt, quotaRemaining);
         var grant = ShareUploadGrant.Create(payload, key);
 
         return new ShareUploadGrantResultDto(grant, expiresAt, targetFile.Id, targetFile.Name, request.SizeBytes);
     }
+
+    private const int MaxPendingUploadsPerDay = 100;
 }

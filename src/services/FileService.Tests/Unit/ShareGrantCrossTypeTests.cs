@@ -23,7 +23,7 @@ public sealed class ShareGrantCrossTypeTests
 
     private static string MakeUploadGrant() => ShareUploadGrant.Create(
         new ShareUploadGrant.Payload(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1024,
-            DateTimeOffset.UtcNow.AddHours(1)),
+            DateTimeOffset.UtcNow.AddHours(1), QuotaRemainingBytes: 5000),
         Key);
 
     private static string MakeUploadReceipt() => ShareUploadReceipt.Create(

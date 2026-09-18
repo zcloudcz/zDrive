@@ -8,7 +8,6 @@ public sealed record UploadChunkCommand(
     int ChunkIndex,
     string ChunkHash,
     Stream Stream,
-    long? ChunkSizeBytes = null,
     // Set only by the shared (link-driven) upload flow, which has no JWT to
     // bind the session to — the grant's own (tenant, owner, fileId) stands
     // in, and a session belonging to a different file/owner must 404 exactly

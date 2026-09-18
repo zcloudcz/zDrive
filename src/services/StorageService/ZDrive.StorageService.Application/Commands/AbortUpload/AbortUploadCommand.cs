@@ -26,8 +26,10 @@ public sealed class AbortUploadCommandHandler : IRequestHandler<AbortUploadComma
             .FirstOrDefaultAsync(s => s.Id == request.SessionId, cancellationToken);
         if (session is null)
             return true;
-        if (session.UserId != request.UserId || session.TenantId != request.TenantId
-            || (request.ExpectedFileId is not null && session.FileId != request.ExpectedFileId))
+        var isSharedCall = request.ExpectedFileId is not null;
+        if (session.IsShared != isSharedCall
+            || session.UserId != request.UserId || session.TenantId != request.TenantId
+            || (isSharedCall && session.FileId != request.ExpectedFileId))
         {
             throw new NotFoundException("UploadSession", request.SessionId);
         }

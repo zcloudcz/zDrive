@@ -16,7 +16,13 @@ public static class ShareUploadGrant
         Guid OwnerUserId,
         Guid FileId,
         long MaxBytes,
-        DateTimeOffset ExpiresAt);
+        DateTimeOffset ExpiresAt,
+        // Owner's quota headroom at mint time (limit - used, never negative).
+        // StorageService has no way to see FileService's quota on its own —
+        // this bounds how much a Write-link holder can push into promoted,
+        // unreceipted blob storage across a burst of grants. See
+        // InitUploadCommandHandler's 24h in-flight budget check.
+        long QuotaRemainingBytes);
 
     public static string Create(Payload payload, byte[] key) =>
         ShareGrantCodec.Create(Purpose, payload, key);

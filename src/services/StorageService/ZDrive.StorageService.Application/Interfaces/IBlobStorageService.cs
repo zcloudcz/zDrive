@@ -44,6 +44,16 @@ public interface IBlobStorageService
     Task DeleteTempUploadAsync(Guid sessionId, CancellationToken ct = default);
 
     /// <summary>
+    /// Deletes a single temp chunk (not the whole session) — used when a
+    /// chunk turns out to push a capped upload session over its maxBytes:
+    /// the bytes were already written (streamed uploads have no reliable
+    /// upfront size, e.g. chunked transfer-encoding has no Content-Length),
+    /// so the cap is enforced by measuring what actually landed and removing
+    /// it if it doesn't fit, rather than by trusting a client-supplied size.
+    /// </summary>
+    Task DeleteTempChunkAsync(Guid sessionId, int chunkIndex, CancellationToken ct = default);
+
+    /// <summary>
     /// Deletes all blobs (chunks + manifest) for a file.
     /// </summary>
     Task DeleteFileAsync(Guid tenantId, Guid userId, Guid fileId, CancellationToken ct = default);

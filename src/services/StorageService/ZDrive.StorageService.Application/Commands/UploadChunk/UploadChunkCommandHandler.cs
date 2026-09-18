@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ZDrive.StorageService.Application.DTOs;
@@ -37,10 +38,17 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
         if (session.Status != UploadSessionStatus.Active)
             throw new ConflictException($"Upload session '{request.SessionId}' is not active (status: {session.Status}).");
 
-        if (request.ExpectedTenantId is not null
-            && (session.TenantId != request.ExpectedTenantId
-                || session.UserId != request.ExpectedUserId
-                || session.FileId != request.ExpectedFileId))
+        // Both directions of the shared/authenticated split: a shared-flow
+        // caller (ExpectedTenantId set) must find IsShared==true with a
+        // matching owner, and an authenticated caller (no Expected* — the
+        // pre-existing StorageController never set them) must not silently
+        // touch a session it did not create via its own JWT-bound init.
+        var isSharedCall = request.ExpectedTenantId is not null;
+        if (session.IsShared != isSharedCall
+            || (isSharedCall
+                && (session.TenantId != request.ExpectedTenantId
+                    || session.UserId != request.ExpectedUserId
+                    || session.FileId != request.ExpectedFileId)))
         {
             throw new NotFoundException("UploadSession", request.SessionId);
         }
@@ -48,20 +56,36 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
         if (request.ChunkIndex >= session.TotalChunks)
             throw new ConflictException($"Chunk index {request.ChunkIndex} exceeds total chunks {session.TotalChunks}.");
 
-        // Cumulative check BEFORE the bytes are written, under the same row
-        // lock UploadedChunks already relies on, so two chunks of one
-        // session uploaded concurrently can't both pass the check and then
-        // together exceed MaxBytes.
+        await _blobStorage.UploadChunkToTempAsync(session.Id, request.ChunkIndex, request.Stream, cancellationToken);
+
+        // Checked AFTER the bytes are written, measuring what actually
+        // landed (GetTempChunkSizeAsync reads the blob's real length) rather
+        // than trusting a client-supplied size: a chunked-transfer-encoding
+        // request has no Content-Length at all, so a pre-write check keyed
+        // on that header could be bypassed simply by omitting it. Still
+        // under the same row lock UploadedChunks already relies on, so two
+        // chunks of one session uploaded concurrently can't both pass the
+        // check and together exceed MaxBytes. Keyed per chunk index (not a
+        // running total) so a legitimate retry of one index replaces its own
+        // contribution instead of being counted twice. A chunk that pushes
+        // the session over the cap is removed again — the session must never
+        // end up holding more than MaxBytes worth of temp data even
+        // transiently.
         if (session.MaxBytes is { } maxBytes)
         {
-            var newTotal = session.ReceivedBytes + (request.ChunkSizeBytes ?? 0);
+            var chunkSize = await _blobStorage.GetTempChunkSizeAsync(session.Id, request.ChunkIndex, cancellationToken);
+            var sizes = DeserializeChunkSizes(session.ChunkSizesJson);
+            var newTotal = sizes.Where(kv => kv.Key != request.ChunkIndex).Sum(kv => kv.Value) + chunkSize;
+
             if (newTotal > maxBytes)
+            {
+                await _blobStorage.DeleteTempChunkAsync(session.Id, request.ChunkIndex, cancellationToken);
                 throw new QuotaExceededException(maxBytes, newTotal);
+            }
 
-            session.ReceivedBytes = newTotal;
+            sizes[request.ChunkIndex] = chunkSize;
+            session.ChunkSizesJson = JsonSerializer.Serialize(sizes);
         }
-
-        await _blobStorage.UploadChunkToTempAsync(session.Id, request.ChunkIndex, request.Stream, cancellationToken);
 
         session.UploadedChunks++;
         await _db.SaveChangesAsync(cancellationToken);
@@ -70,4 +94,9 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
 
         return new ChunkUploadResultDto(session.Id, request.ChunkIndex, request.ChunkHash, Accepted: true);
     }
+
+    internal static Dictionary<int, long> DeserializeChunkSizes(string? json) =>
+        string.IsNullOrEmpty(json)
+            ? new Dictionary<int, long>()
+            : JsonSerializer.Deserialize<Dictionary<int, long>>(json) ?? new Dictionary<int, long>();
 }

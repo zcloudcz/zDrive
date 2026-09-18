@@ -101,6 +101,7 @@ public sealed class SharedStorageController : ControllerBase
     [HttpPost("upload/init")]
     [ProducesResponseType(typeof(ApiResponse<UploadSessionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
     public async Task<IActionResult> InitSharedUpload(
         [FromHeader(Name = "X-Share-Grant")] string? grant,
         [FromBody] InitSharedUploadRequest request, CancellationToken ct)
@@ -109,7 +110,8 @@ public sealed class SharedStorageController : ControllerBase
 
         var payload = ValidateUploadGrantOrThrow(grant);
         var command = new InitUploadCommand(
-            payload.OwnerUserId, payload.TenantId, payload.FileId, request.FileName, request.TotalChunks, payload.MaxBytes);
+            payload.OwnerUserId, payload.TenantId, payload.FileId, request.FileName, request.TotalChunks,
+            payload.MaxBytes, IsShared: true, payload.QuotaRemainingBytes);
         var result = await _mediator.Send(command, ct);
         return Ok(ApiResponse<UploadSessionDto>.Ok(result));
     }
@@ -129,7 +131,7 @@ public sealed class SharedStorageController : ControllerBase
 
         var payload = ValidateUploadGrantOrThrow(grant);
         var command = new UploadChunkCommand(
-            sessionId, index, chunkHash, Request.Body, Request.ContentLength,
+            sessionId, index, chunkHash, Request.Body,
             payload.TenantId, payload.OwnerUserId, payload.FileId);
         var result = await _mediator.Send(command, ct);
         return Ok(ApiResponse<ChunkUploadResultDto>.Ok(result));

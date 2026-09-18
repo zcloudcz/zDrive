@@ -2,6 +2,7 @@ using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using ZDrive.StorageService.Application.Behaviors;
+using ZDrive.StorageService.Application.Services;
 
 namespace ZDrive.StorageService.Application;
 
@@ -14,6 +15,7 @@ public static class DependencyInjection
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(assembly));
         services.AddValidatorsFromAssembly(assembly);
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+        services.AddHostedService<ExpiredUploadSessionSweeper>();
 
         return services;
     }
