@@ -115,5 +115,12 @@
   "exitApp": "Beenden",
   "exitFailed": "Die App konnte nicht beendet werden. Versuche es erneut.",
   "appVersionFailed": "Die App-Version konnte nicht geladen werden.",
-  "appVersion": "Version {version}"
+  "appVersion": "Version {version}",
+
+  "shareNotFoundTitle": "Link nicht gefunden",
+  "shareNotFoundMessage": "Dieser Freigabelink ist ungültig, abgelaufen oder wurde entfernt.",
+  "sharePasswordProtectedTitle": "Passwort erforderlich",
+  "sharePasswordProtectedMessage": "Dieser Freigabelink ist passwortgeschützt, was noch nicht unterstützt wird.",
+  "openZDrive": "zDrive öffnen",
+  "download": "Herunterladen"
 }

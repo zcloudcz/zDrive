@@ -385,4 +385,24 @@ class AppLocalizationsCs extends AppLocalizations {
   @override
   String get updateFailed =>
       'Automatická aktualizace se nezdařila. zDrive můžete dál používat a zkusit to znovu.';
+
+  @override
+  String get shareNotFoundTitle => 'Odkaz nenalezen';
+
+  @override
+  String get shareNotFoundMessage =>
+      'Tento sdílený odkaz je neplatný, vypršel nebo byl odstraněn.';
+
+  @override
+  String get sharePasswordProtectedTitle => 'Vyžaduje se heslo';
+
+  @override
+  String get sharePasswordProtectedMessage =>
+      'Tento sdílený odkaz je chráněný heslem, což zatím není podporováno.';
+
+  @override
+  String get openZDrive => 'Otevřít zDrive';
+
+  @override
+  String get download => 'Stáhnout';
 }

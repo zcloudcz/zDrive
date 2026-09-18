@@ -7,6 +7,14 @@ class ApiConstants {
     defaultValue: 'http://localhost:5100/api/v1',
   );
 
+  // Origin of the Drive web app (GitHub Pages). A share link must open the
+  // web UI, not the API — and a desktop/mobile build has no "current origin"
+  // to derive that from, so it needs its own build-time default.
+  static const String webBaseUrl = String.fromEnvironment(
+    'WEB_BASE_URL',
+    defaultValue: 'https://drive.zcloud.cz',
+  );
+
   // Auth (auth-service)
   static const String authRegister = '/auth/register';
   static const String authLogin = '/auth/login';

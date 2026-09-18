@@ -1,16 +1,32 @@
+import 'dart:async';
+
+import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/core/auth/auth_bloc.dart';
+import 'package:zdrive_app/core/di/injection.dart';
 import 'package:zdrive_app/core/events/remote_file_change_notifier.dart';
 import 'package:zdrive_app/core/storage/app_preferences.dart';
+import 'package:zdrive_app/features/auth/domain/user.dart';
+import 'package:zdrive_app/features/auth/presentation/login_page.dart';
+import 'package:zdrive_app/features/files/data/file_dtos.dart';
+import 'package:zdrive_app/features/share_link/data/share_link_data_source.dart';
+import 'package:zdrive_app/features/share_link/presentation/pages/share_link_page.dart';
 import 'package:zdrive_app/features/sync/data/pull_sync_service.dart';
 import 'package:zdrive_app/features/sync/data/sync_coordinator.dart';
 import 'package:zdrive_app/features/sync/data/sync_remote_data_source.dart';
 import 'package:zdrive_app/features/sync/presentation/sync_bloc.dart';
 import 'package:zdrive_app/features/home/presentation/home_page.dart';
+import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
 import 'package:zdrive_app/shared/router/app_router.dart';
+
+class MockAuthBloc extends MockBloc<AuthEvent, AuthState> implements AuthBloc {}
+
+class MockShareLinkDataSource extends Mock implements ShareLinkDataSource {}
 
 class MockSyncRemoteDataSource extends Mock implements SyncRemoteDataSource {}
 
@@ -155,6 +171,82 @@ void main() {
           reason: 'photosEnabled: $photosEnabled',
         );
       }
+    });
+  });
+
+  group('/s/:token public route', () {
+    // The full createRouter(authBloc) redirect logic, exercised end to end —
+    // unlike the tests above, which drive buildSyncShellProvider/
+    // buildHomeBranches directly. ShareLinkPage resolves ShareLinkDataSource
+    // from getIt, so it is registered with a never-resolving stub: these
+    // tests only assert on which page the router lands on, not on the
+    // share's own loaded content (covered by share_link_page_test.dart).
+    late MockAuthBloc authBloc;
+
+    setUp(() {
+      authBloc = MockAuthBloc();
+      getIt.registerSingleton<ShareLinkDataSource>(MockShareLinkDataSource());
+      when(() => getIt<ShareLinkDataSource>().getShareLink(any()))
+          .thenAnswer((_) => Completer<({ShareDto share, FileDto file})>().future);
+    });
+
+    tearDown(() async {
+      await getIt.reset();
+    });
+
+    // /home/files (redirected-to /login when unauthenticated) needs
+    // AuthBloc reachable via context — LoginPage reads it directly, the
+    // same way main.dart provides it above the router rather than inside it.
+    Widget buildApp(GoRouter router) {
+      return BlocProvider<AuthBloc>.value(
+        value: authBloc,
+        child: MaterialApp.router(
+          routerConfig: router,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+        ),
+      );
+    }
+
+    testWidgets('unauthenticated /s/abc renders ShareLinkPage, not /login',
+        (tester) async {
+      whenListen(authBloc, const Stream<AuthState>.empty(),
+          initialState: const Unauthenticated());
+      // go() before the first pump: createRouter's initialLocation is
+      // '/login', and letting that first frame actually build before
+      // navigating away — for the authenticated variant below — would
+      // transiently build the authenticated /home/files shell, which needs
+      // SyncBloc dependencies this test never registers.
+      final router = createRouter(authBloc)..go('/s/abc');
+
+      await tester.pumpWidget(buildApp(router));
+
+      expect(find.byType(ShareLinkPage), findsOneWidget);
+      expect(find.byType(LoginPage), findsNothing);
+    });
+
+    testWidgets('authenticated /s/abc also renders ShareLinkPage, unchanged',
+        (tester) async {
+      whenListen(authBloc, const Stream<AuthState>.empty(),
+          initialState: const Authenticated(
+              User(id: 'u1', email: 'a@b.com', displayName: 'A')));
+      final router = createRouter(authBloc)..go('/s/abc');
+
+      await tester.pumpWidget(buildApp(router));
+
+      expect(find.byType(ShareLinkPage), findsOneWidget);
+    });
+
+    testWidgets('unauthenticated /home/files is still redirected to /login '
+        '— the guard is exempted only for /s/, not loosened generally',
+        (tester) async {
+      whenListen(authBloc, const Stream<AuthState>.empty(),
+          initialState: const Unauthenticated());
+      final router = createRouter(authBloc)..go('/home/files');
+
+      await tester.pumpWidget(buildApp(router));
+
+      expect(find.byType(LoginPage), findsOneWidget);
     });
   });
 }

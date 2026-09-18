@@ -115,5 +115,12 @@
   "exitApp": "Avsluta",
   "exitFailed": "Det gick inte att avsluta appen. Försök igen.",
   "appVersionFailed": "Det gick inte att läsa in appversionen.",
-  "appVersion": "Version {version}"
+  "appVersion": "Version {version}",
+
+  "shareNotFoundTitle": "Länken hittades inte",
+  "shareNotFoundMessage": "Den här delningslänken är ogiltig, har gått ut eller har tagits bort.",
+  "sharePasswordProtectedTitle": "Lösenord krävs",
+  "sharePasswordProtectedMessage": "Den här delningslänken är lösenordsskyddad, vilket ännu inte stöds.",
+  "openZDrive": "Öppna zDrive",
+  "download": "Ladda ner"
 }

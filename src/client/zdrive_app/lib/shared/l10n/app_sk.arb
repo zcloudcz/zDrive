@@ -115,5 +115,12 @@
   "exitApp": "Ukončiť",
   "exitFailed": "Aplikáciu sa nepodarilo ukončiť. Skúste to znova.",
   "appVersionFailed": "Verziu aplikácie sa nepodarilo načítať.",
-  "appVersion": "Verzia {version}"
+  "appVersion": "Verzia {version}",
+
+  "shareNotFoundTitle": "Odkaz sa nenašiel",
+  "shareNotFoundMessage": "Tento zdieľaný odkaz je neplatný, vypršal alebo bol odstránený.",
+  "sharePasswordProtectedTitle": "Vyžaduje sa heslo",
+  "sharePasswordProtectedMessage": "Tento zdieľaný odkaz je chránený heslom, čo zatiaľ nie je podporované.",
+  "openZDrive": "Otvoriť zDrive",
+  "download": "Stiahnuť"
 }

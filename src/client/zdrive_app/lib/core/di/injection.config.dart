@@ -49,6 +49,8 @@ import 'package:zdrive_app/features/photos/data/photo_repository_impl.dart'
     as _i826;
 import 'package:zdrive_app/features/photos/domain/photo_repository.dart'
     as _i328;
+import 'package:zdrive_app/features/share_link/data/share_link_data_source.dart'
+    as _i960;
 import 'package:zdrive_app/features/sync/data/current_device_platform.dart'
     as _i191;
 import 'package:zdrive_app/features/sync/data/device_id_storage.dart' as _i918;
@@ -105,6 +107,9 @@ extension GetItInjectableX on _i174.GetIt {
     );
     gh.lazySingleton<_i5.PhotoRemoteDataSource>(
       () => _i5.PhotoRemoteDataSource(gh<_i361.Dio>()),
+    );
+    gh.lazySingleton<_i960.ShareLinkDataSource>(
+      () => _i960.ShareLinkDataSource(gh<_i361.Dio>()),
     );
     gh.lazySingleton<_i319.SyncRemoteDataSource>(
       () => _i319.SyncRemoteDataSource(gh<_i361.Dio>()),

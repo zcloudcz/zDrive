@@ -191,6 +191,13 @@
   },
   "updateDownloading": "Downloading update: {percent}%",
   "updateReady": "Update {version} is ready. It will install on the next start.",
-  "updateFailed": "Automatic update failed. You can keep using zDrive and try again."
+  "updateFailed": "Automatic update failed. You can keep using zDrive and try again.",
+
+  "shareNotFoundTitle": "Link not found",
+  "shareNotFoundMessage": "This share link is invalid, expired, or was removed.",
+  "sharePasswordProtectedTitle": "Password required",
+  "sharePasswordProtectedMessage": "This share link is password-protected, which is not supported yet.",
+  "openZDrive": "Open zDrive",
+  "download": "Download"
 
 }

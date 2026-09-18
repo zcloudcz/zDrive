@@ -378,4 +378,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get updateFailed => '自动更新失败。你可以继续使用 zDrive 并重试。';
+
+  @override
+  String get shareNotFoundTitle => '链接未找到';
+
+  @override
+  String get shareNotFoundMessage => '此共享链接无效、已过期或已被删除。';
+
+  @override
+  String get sharePasswordProtectedTitle => '需要密码';
+
+  @override
+  String get sharePasswordProtectedMessage => '此共享链接受密码保护，目前尚不支持。';
+
+  @override
+  String get openZDrive => '打开 zDrive';
+
+  @override
+  String get download => '下载';
 }
