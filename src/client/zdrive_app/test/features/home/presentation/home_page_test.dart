@@ -6,6 +6,7 @@ import 'package:zdrive_app/features/home/presentation/home_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
 import 'package:zdrive_app/shared/router/app_router.dart';
+import 'package:zdrive_app/shared/theme/app_theme.dart';
 import 'package:zdrive_app/shared/widgets/brand_lockup.dart';
 
 void main() {
@@ -88,7 +89,7 @@ void main() {
   // the real destination count under --dart-define=PHOTOS_ENABLED=true,
   // where HomePage renders 3 destinations over what used to be 2 branches
   // and goBranch(2) threw a RangeError (review round 2, finding 2).
-  Widget buildHomeApp() {
+  Widget buildHomeApp({ThemeData? theme}) {
     final branchCount =
         buildHomeDestinations(AppLocalizationsEn()).length;
     final router = GoRouter(
@@ -113,6 +114,7 @@ void main() {
     );
     return MaterialApp.router(
       routerConfig: router,
+      theme: theme,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -161,6 +163,28 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  // Guards the "black wordmark on dark rail" regression: BrandLockup's
+  // default (non-monochrome) variant colours the wordmark from
+  // colorScheme.onSurface (fixed in #50), and the rail keeps passing that
+  // default variant rather than switching to monochrome — this proves the
+  // combination actually resolves to the dark scheme's onSurface at runtime.
+  testWidgets('dark theme: the rail\'s BrandLockup wordmark follows onSurface',
+      (tester) async {
+    setTestSize(tester, const Size(1200, 900));
+
+    await tester.pumpWidget(buildHomeApp(theme: AppTheme.dark));
+    await tester.pumpAndSettle();
+
+    final wordmark = tester.widget<Text>(
+      find.descendant(
+        of: find.byType(NavigationRail),
+        matching: find.text('zDrive'),
+      ),
+    );
+
+    expect(wordmark.style!.color, AppTheme.dark.colorScheme.onSurface);
   });
 
   testWidgets('same destination labels, in the same order, at both widths',
