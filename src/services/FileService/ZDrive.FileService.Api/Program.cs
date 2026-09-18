@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Serilog;
 using ZDrive.FileService.Application;
 using ZDrive.FileService.Infrastructure;
@@ -82,6 +83,18 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Public share downloads are fail-closed (see ShareDownloadGrantOptions):
+// this is the one place that says so out loud, instead of every anonymous
+// request just 404ing with no clue why. Both FileService and StorageService
+// must have the SAME key — StorageService validates what FileService signs.
+var shareGrantOptions = app.Services.GetRequiredService<IOptions<ZDrive.Shared.Auth.ShareDownloadGrantOptions>>().Value;
+if (!shareGrantOptions.TryGetKey(out _))
+{
+    app.Logger.LogInformation(
+        "Sharing:DownloadGrantKey is missing or too short — public share downloads are disabled. " +
+        "Set the same key on FileService and StorageService to enable them.");
+}
 
 // Apply this service's own pending EF migrations on startup, in every
 // environment. The "zdrive" database itself must already exist — docker-

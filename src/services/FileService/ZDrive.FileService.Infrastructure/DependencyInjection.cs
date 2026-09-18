@@ -41,6 +41,26 @@ public static class DependencyInjection
         services.Configure<ZDrive.FileService.Application.Options.VersioningOptions>(
             configuration.GetSection(ZDrive.FileService.Application.Options.VersioningOptions.SectionName));
 
+        // Public share download grants (defaults to an empty key — see
+        // ShareDownloadGrantOptions.TryGetKey for the fail-closed behavior).
+        // In Development only, an empty key falls back to the same per-machine
+        // dev key StorageService reads (DevShareGrantKeyProvider) instead of a
+        // literal in appsettings.Development.json — see PostConfigure below;
+        // Configure<T> runs before it, so this section's own explicit value
+        // (if ever set) still wins.
+        services.Configure<ShareDownloadGrantOptions>(
+            configuration.GetSection(ShareDownloadGrantOptions.SectionName));
+        if (isDevelopment)
+        {
+            services.PostConfigure<ShareDownloadGrantOptions>(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.DownloadGrantKey))
+                {
+                    options.DownloadGrantKey = DevShareGrantKeyProvider.GetOrCreateKey();
+                }
+            });
+        }
+
         // Authentication (validates JWTs issued by AuthService)
         var publicKeyPem = configuration["Jwt:RsaPublicKeyPem"];
         if (string.IsNullOrWhiteSpace(publicKeyPem))

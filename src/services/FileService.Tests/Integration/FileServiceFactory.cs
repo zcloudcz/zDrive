@@ -31,6 +31,13 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
 
     public const int MaxVersionsPerFile = 3;
 
+    // Generated at runtime (not a literal) so nothing here looks like a
+    // committed secret to the repo's gitleaks scan. This suite never
+    // validates a grant string against the key, only the DTO fields — the
+    // key just needs to be present so ShareDownloadGrantOptions.TryGetKey
+    // succeeds and the download-grant endpoint isn't fail-closed off.
+    public static readonly string TestShareGrantKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
     public Guid TestUserId { get; } = Guid.NewGuid();
     public Guid TestTenantId { get; } = Guid.NewGuid();
 
@@ -69,6 +76,9 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
             // creating dozens of versions (see VersionFlowTests).
             services.PostConfigure<ZDrive.FileService.Application.Options.VersioningOptions>(
                 options => options.MaxVersionsPerFile = MaxVersionsPerFile);
+
+            services.PostConfigure<ZDrive.Shared.Auth.ShareDownloadGrantOptions>(
+                options => options.DownloadGrantKey = TestShareGrantKey);
         });
     }
 

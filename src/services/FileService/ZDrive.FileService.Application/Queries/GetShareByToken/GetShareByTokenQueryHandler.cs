@@ -1,8 +1,7 @@
 using MediatR;
-using Microsoft.EntityFrameworkCore;
+using ZDrive.FileService.Application.Common;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Application.Interfaces;
-using ZDrive.Shared.Exceptions;
 
 namespace ZDrive.FileService.Application.Queries.GetShareByToken;
 
@@ -14,18 +13,7 @@ public sealed class GetShareByTokenQueryHandler : IRequestHandler<GetShareByToke
 
     public async Task<SharedFileDto> Handle(GetShareByTokenQuery request, CancellationToken cancellationToken)
     {
-        var share = await _db.Shares
-            .AsNoTracking()
-            .Include(s => s.File)
-            .FirstOrDefaultAsync(s => s.LinkToken == request.LinkToken, cancellationToken)
-            ?? throw new NotFoundException("Share", request.LinkToken);
-
-        if (share.IsExpired)
-            throw new NotFoundException("Share", request.LinkToken);
-
-        if (share.File.IsDeleted)
-            throw new NotFoundException("FileNode", share.FileId);
-
+        var share = await PublicShareAccess.LoadShareAsync(_db, request.LinkToken, cancellationToken);
         return new SharedFileDto(share.ToDto(), share.File.ToDto());
     }
 }

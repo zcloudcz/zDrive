@@ -63,6 +63,67 @@ public sealed class RateLimiterPartitioningTests
     }
 
     [Fact]
+    public void GetPublicSharePartitionKey_SingleIp_ReturnsIt()
+    {
+        RateLimiterPartitioning.GetPublicSharePartitionKey("203.0.113.5", "10.0.0.1")
+            .Should().Be("203.0.113.5");
+    }
+
+    [Fact]
+    public void GetPublicSharePartitionKey_SpoofedLeftEntry_ReturnsRightmostTrustedEntry()
+    {
+        // "spoofed" is attacker-controlled (the client sets X-Forwarded-For
+        // itself); "real" is what Azure's front end appended as the last
+        // hop. Only the rightmost entry can't be forged by the caller.
+        RateLimiterPartitioning.GetPublicSharePartitionKey("spoofed, real", "10.0.0.1")
+            .Should().Be("real");
+    }
+
+    [Fact]
+    public void GetPublicSharePartitionKey_Ipv4WithPort_StripsPort()
+    {
+        RateLimiterPartitioning.GetPublicSharePartitionKey("203.0.113.5:54321", "10.0.0.1")
+            .Should().Be("203.0.113.5");
+    }
+
+    [Fact]
+    public void GetPublicSharePartitionKey_BracketedIpv6WithPort_StripsPort()
+    {
+        RateLimiterPartitioning.GetPublicSharePartitionKey("[2001:db8::1]:54321", "10.0.0.1")
+            .Should().Be("2001:db8::1");
+    }
+
+    [Fact]
+    public void GetPublicSharePartitionKey_BareIpv6_ReturnsItUnchanged()
+    {
+        // No brackets means no unambiguous port to strip — splitting on the
+        // last colon would cut the address itself in half.
+        RateLimiterPartitioning.GetPublicSharePartitionKey("2001:db8::1", "10.0.0.1")
+            .Should().Be("2001:db8::1");
+    }
+
+    [Fact]
+    public void GetPublicSharePartitionKey_EmptyHeader_FallsBackToRemoteIp()
+    {
+        RateLimiterPartitioning.GetPublicSharePartitionKey("", "10.0.0.1")
+            .Should().Be("10.0.0.1");
+    }
+
+    [Fact]
+    public void GetPublicSharePartitionKey_MissingHeader_FallsBackToRemoteIp()
+    {
+        RateLimiterPartitioning.GetPublicSharePartitionKey(null, "10.0.0.1")
+            .Should().Be("10.0.0.1");
+    }
+
+    [Fact]
+    public void GetPublicSharePartitionKey_GarbageHeader_FallsBackToRemoteIp()
+    {
+        RateLimiterPartitioning.GetPublicSharePartitionKey(",  ,,", "10.0.0.1")
+            .Should().Be("10.0.0.1");
+    }
+
+    [Fact]
     public void GetRetryAfterSeconds_RejectedLease_ReturnsWholeSecondsRoundedUp()
     {
         // A real FixedWindowRateLimiter (rather than a hand-rolled fake lease)
