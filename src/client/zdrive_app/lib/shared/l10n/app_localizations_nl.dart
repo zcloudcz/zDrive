@@ -193,6 +193,13 @@ class AppLocalizationsNl extends AppLocalizations {
   String get readWrite => 'Lezen en schrijven';
 
   @override
+  String get allowDelete => 'Verwijderen toestaan';
+
+  @override
+  String get allowDeleteHelp =>
+      'Verwijderde items gaan naar de prullenbak van de eigenaar.';
+
+  @override
   String get expiresAt => 'Verloopt op';
 
   @override

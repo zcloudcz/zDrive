@@ -94,6 +94,10 @@ class ShareDto {
   final String permission;
   final String linkToken;
   final DateTime? expiresAt;
+  // Absent on an older backend that predates AllowDelete — default to false
+  // rather than failing to parse.
+  @JsonKey(defaultValue: false)
+  final bool allowDelete;
 
   const ShareDto({
     required this.id,
@@ -101,6 +105,7 @@ class ShareDto {
     required this.permission,
     required this.linkToken,
     this.expiresAt,
+    this.allowDelete = false,
   });
 
   factory ShareDto.fromJson(Map<String, dynamic> json) =>

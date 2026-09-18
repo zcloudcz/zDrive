@@ -54,6 +54,8 @@
   "permission": "Permiso",
   "readOnly": "Solo lectura",
   "readWrite": "Lectura y escritura",
+  "allowDelete": "Permitir eliminar",
+  "allowDeleteHelp": "Los elementos eliminados van a la papelera del propietario.",
   "expiresAt": "Caduca el",
   "never": "Nunca",
   "uploadProgress": "Subiendo…",

@@ -54,6 +54,8 @@
   "permission": "Käyttöoikeus",
   "readOnly": "Vain luku",
   "readWrite": "Luku ja kirjoitus",
+  "allowDelete": "Salli poistaminen",
+  "allowDeleteHelp": "Poistetut kohteet siirtyvät omistajan roskakoriin.",
   "expiresAt": "Voimassa asti",
   "never": "Ei koskaan",
   "uploadProgress": "Lähetetään…",

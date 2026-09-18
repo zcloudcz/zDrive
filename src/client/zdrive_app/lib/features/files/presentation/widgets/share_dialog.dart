@@ -8,7 +8,11 @@ import '../../domain/file_item.dart';
 class ShareDialog extends StatefulWidget {
   final String fileId;
   final Future<ShareInfo> Function(
-      String fileId, SharePermission permission, DateTime? expiresAt) onShare;
+    String fileId,
+    SharePermission permission,
+    DateTime? expiresAt, {
+    bool allowDelete,
+  }) onShare;
 
   const ShareDialog({
     super.key,
@@ -22,6 +26,7 @@ class ShareDialog extends StatefulWidget {
 
 class _ShareDialogState extends State<ShareDialog> {
   SharePermission _permission = SharePermission.read;
+  bool _allowDelete = false;
   DateTime? _expiresAt;
   ShareInfo? _shareInfo;
   bool _loading = false;
@@ -63,6 +68,19 @@ class _ShareDialogState extends State<ShareDialog> {
             onChanged: (value) {
               if (value != null) setState(() => _permission = value);
             },
+          ),
+          const SizedBox(height: 12),
+          // AllowDelete is independent of Permission — a Read link with
+          // deletion allowed is a valid, if unusual, combination (see the
+          // share-link API contract).
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(l10n.allowDelete),
+            subtitle: Text(l10n.allowDeleteHelp),
+            value: _allowDelete,
+            onChanged: (value) =>
+                setState(() => _allowDelete = value ?? false),
           ),
           const SizedBox(height: 12),
           ListTile(
@@ -155,6 +173,7 @@ class _ShareDialogState extends State<ShareDialog> {
         widget.fileId,
         _permission,
         _expiresAt,
+        allowDelete: _allowDelete,
       );
       setState(() {
         _shareInfo = info;

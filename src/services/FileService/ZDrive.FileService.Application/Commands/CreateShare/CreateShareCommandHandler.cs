@@ -32,6 +32,7 @@ public sealed class CreateShareCommandHandler : IRequestHandler<CreateShareComma
             SharedBy = request.UserId,
             SharedWith = request.SharedWith,
             Permission = request.Permission,
+            AllowDelete = request.AllowDelete,
             LinkToken = GenerateToken(),
             PasswordHash = request.Password is not null ? HashPassword(request.Password) : null,
             ExpiresAt = request.ExpiresAt

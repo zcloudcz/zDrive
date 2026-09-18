@@ -47,3 +47,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+  assets:
+    - assets/branding/zdrive-mark.png
+    - assets/branding/zdrive-mark@2x.png
+    - assets/branding/zdrive-mark@3x.png

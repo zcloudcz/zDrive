@@ -9,6 +9,7 @@ public sealed class Share
     public Guid SharedBy { get; set; }
     public Guid? SharedWith { get; set; }
     public Permission Permission { get; set; }
+    public bool AllowDelete { get; set; }
     public required string LinkToken { get; set; }
     public string? PasswordHash { get; set; }
     public DateTime? ExpiresAt { get; set; }

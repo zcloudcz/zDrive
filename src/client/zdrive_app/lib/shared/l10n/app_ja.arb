@@ -54,6 +54,8 @@
   "permission": "アクセス権",
   "readOnly": "読み取り専用",
   "readWrite": "読み取りと書き込み",
+  "allowDelete": "削除を許可",
+  "allowDeleteHelp": "削除された項目は所有者のごみ箱に移動します。",
   "expiresAt": "有効期限",
   "never": "無期限",
   "uploadProgress": "アップロード中…",

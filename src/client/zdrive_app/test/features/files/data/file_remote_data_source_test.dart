@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/core/network/api_constants.dart';
+import 'package:zdrive_app/features/files/data/file_dtos.dart';
 import 'package:zdrive_app/features/files/data/file_remote_data_source.dart';
 
 class MockDio extends Mock implements Dio {}
@@ -220,7 +221,26 @@ void main() {
     final dto = await ds.createShare('f1', 'read', null);
 
     expect(dto.id, 's1');
-    verify(() => dio.post('/shares', data: {'fileId': 'f1', 'permission': 'read'}))
+    verify(() => dio.post('/shares',
+            data: {'fileId': 'f1', 'permission': 'read', 'allowDelete': false}))
+        .called(1);
+  });
+
+  test('createShare carries allowDelete=true in the request body', () async {
+    final shareJson = {
+      'id': 's1',
+      'fileId': 'f1',
+      'permission': 'read',
+      'linkToken': 'tok',
+      'expiresAt': null,
+    };
+    when(() => dio.post('/shares', data: any(named: 'data')))
+        .thenAnswer((_) async => ok(shareJson, '/shares'));
+
+    await ds.createShare('f1', 'read', null, allowDelete: true);
+
+    verify(() => dio.post('/shares',
+            data: {'fileId': 'f1', 'permission': 'read', 'allowDelete': true}))
         .called(1);
   });
 
@@ -315,5 +335,31 @@ void main() {
 
     expect(list, hasLength(2));
     expect(list.last['versionNumber'], 2);
+  });
+
+  test('ShareDto parses allowDelete when present', () {
+    final dto = ShareDto.fromJson({
+      'id': 's1',
+      'fileId': 'f1',
+      'permission': 'read',
+      'linkToken': 'tok',
+      'expiresAt': null,
+      'allowDelete': true,
+    });
+
+    expect(dto.allowDelete, isTrue);
+  });
+
+  test('ShareDto defaults allowDelete to false when absent (older backend)',
+      () {
+    final dto = ShareDto.fromJson({
+      'id': 's1',
+      'fileId': 'f1',
+      'permission': 'read',
+      'linkToken': 'tok',
+      'expiresAt': null,
+    });
+
+    expect(dto.allowDelete, isFalse);
   });
 }

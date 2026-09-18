@@ -49,7 +49,9 @@ public sealed class StorageController : ControllerBase
     public async Task<IActionResult> UploadChunk(
         Guid sessionId, int index, [FromHeader(Name = "X-Chunk-Hash")] string chunkHash, CancellationToken ct)
     {
-        var command = new UploadChunkCommand(sessionId, index, chunkHash, Request.Body);
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var command = new UploadChunkCommand(sessionId, index, chunkHash, Request.Body, tenantId, userId);
         var result = await _mediator.Send(command, ct);
         return Ok(ApiResponse<ChunkUploadResultDto>.Ok(result));
     }
@@ -70,7 +72,9 @@ public sealed class StorageController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CompleteUpload(Guid sessionId, CancellationToken ct)
     {
-        var command = new CompleteUploadCommand(sessionId);
+        var userId = User.GetUserId();
+        var tenantId = User.GetTenantId() ?? userId;
+        var command = new CompleteUploadCommand(sessionId, tenantId, userId);
         var result = await _mediator.Send(command, ct);
         return Ok(ApiResponse<UploadCompleteDto>.Ok(result));
     }

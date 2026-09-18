@@ -14,6 +14,6 @@ public sealed class GetShareByTokenQueryHandler : IRequestHandler<GetShareByToke
     public async Task<SharedFileDto> Handle(GetShareByTokenQuery request, CancellationToken cancellationToken)
     {
         var share = await PublicShareAccess.LoadShareAsync(_db, request.LinkToken, cancellationToken);
-        return new SharedFileDto(share.ToDto(), share.File.ToDto());
+        return new SharedFileDto(share.ToDto().ToPublicDto(), share.File.ToDto().ToPublicDto());
     }
 }

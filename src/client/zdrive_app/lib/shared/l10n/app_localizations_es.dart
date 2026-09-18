@@ -197,6 +197,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get readWrite => 'Lectura y escritura';
 
   @override
+  String get allowDelete => 'Permitir eliminar';
+
+  @override
+  String get allowDeleteHelp =>
+      'Los elementos eliminados van a la papelera del propietario.';
+
+  @override
   String get expiresAt => 'Caduca el';
 
   @override

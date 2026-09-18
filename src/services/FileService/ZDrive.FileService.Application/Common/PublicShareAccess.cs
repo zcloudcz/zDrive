@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ZDrive.FileService.Application.Interfaces;
 using ZDrive.FileService.Domain.Entities;
+using ZDrive.FileService.Domain.Enums;
 using ZDrive.Shared.Exceptions;
 
 namespace ZDrive.FileService.Application.Common;
@@ -46,6 +47,34 @@ public static class PublicShareAccess
             throw new ForbiddenException("This share is password protected.");
 
         return share;
+    }
+
+    // Fixed message, no token: this fires only after LoadShareAsync already
+    // proved the link itself is valid (404 rules run first — see the
+    // ordering note on every write endpoint), so there is nothing to hide by
+    // varying the message; keeping it fixed just avoids ever accidentally
+    // interpolating share/link state into a public error body.
+    private const string ForbiddenMessage = "This share link does not allow this action.";
+
+    /// <summary>
+    /// Write access = Permission is Write or Admin (Admin behaves as Write on
+    /// a link — see the contract). Called AFTER LoadShareAsync, so a 404 for
+    /// an invalid link always wins over a 403 for a valid-but-read-only one.
+    /// </summary>
+    public static void RequireWrite(Share share)
+    {
+        if (share.Permission is not (Permission.Write or Permission.Admin))
+            throw new ForbiddenException(ForbiddenMessage);
+    }
+
+    /// <summary>
+    /// Delete is a separate, additive right (AllowDelete) — independent of
+    /// Permission, so a Write link without AllowDelete still can't delete.
+    /// </summary>
+    public static void RequireDelete(Share share)
+    {
+        if (!share.AllowDelete)
+            throw new ForbiddenException(ForbiddenMessage);
     }
 
     // FileNode only stores ParentId, no materialized path, so "is this node

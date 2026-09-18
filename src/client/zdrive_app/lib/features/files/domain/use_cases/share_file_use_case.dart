@@ -12,8 +12,10 @@ class ShareFileUseCase {
   Future<ShareInfo> call(
     String fileId,
     SharePermission permission,
-    DateTime? expiresAt,
-  ) {
-    return _repository.createShare(fileId, permission, expiresAt);
+    DateTime? expiresAt, {
+    bool allowDelete = false,
+  }) {
+    return _repository.createShare(fileId, permission, expiresAt,
+        allowDelete: allowDelete);
   }
 }

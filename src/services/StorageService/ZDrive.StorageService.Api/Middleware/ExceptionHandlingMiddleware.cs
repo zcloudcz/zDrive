@@ -62,6 +62,10 @@ public sealed class ExceptionHandlingMiddleware
                 HttpStatusCode.Forbidden,
                 new ErrorResponse("FORBIDDEN", forbiddenEx.Message)),
 
+            QuotaExceededException quotaEx => (
+                HttpStatusCode.RequestEntityTooLarge,
+                new ErrorResponse("QUOTA_EXCEEDED", quotaEx.Message)),
+
             _ => (
                 HttpStatusCode.InternalServerError,
                 new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred."))

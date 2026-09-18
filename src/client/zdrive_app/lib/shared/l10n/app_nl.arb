@@ -54,6 +54,8 @@
   "permission": "Machtiging",
   "readOnly": "Alleen lezen",
   "readWrite": "Lezen en schrijven",
+  "allowDelete": "Verwijderen toestaan",
+  "allowDeleteHelp": "Verwijderde items gaan naar de prullenbak van de eigenaar.",
   "expiresAt": "Verloopt op",
   "never": "Nooit",
   "uploadProgress": "Uploaden…",

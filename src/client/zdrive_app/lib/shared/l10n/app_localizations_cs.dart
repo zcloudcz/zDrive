@@ -191,6 +191,12 @@ class AppLocalizationsCs extends AppLocalizations {
   String get readWrite => 'Čtení a zápis';
 
   @override
+  String get allowDelete => 'Povolit mazání';
+
+  @override
+  String get allowDeleteHelp => 'Smazané položky skončí v koši vlastníka.';
+
+  @override
   String get expiresAt => 'Platnost do';
 
   @override

@@ -6,7 +6,15 @@ using ZDrive.StorageService.Domain.Enums;
 
 namespace ZDrive.StorageService.Application.Commands.AbortUpload;
 
-public sealed record AbortUploadCommand(Guid SessionId, Guid UserId, Guid TenantId) : IRequest<bool>;
+public sealed record AbortUploadCommand(
+    Guid SessionId,
+    Guid UserId,
+    Guid TenantId,
+    // Same explicit style as UploadChunkCommand/CompleteUploadCommand's
+    // IsShared, rather than inferring it from whether ExpectedFileId is
+    // set — kept behaviourally identical, just spelled the same way.
+    bool IsShared = false,
+    Guid? ExpectedFileId = null) : IRequest<bool>;
 
 public sealed class AbortUploadCommandHandler : IRequestHandler<AbortUploadCommand, bool>
 {
@@ -26,8 +34,12 @@ public sealed class AbortUploadCommandHandler : IRequestHandler<AbortUploadComma
             .FirstOrDefaultAsync(s => s.Id == request.SessionId, cancellationToken);
         if (session is null)
             return true;
-        if (session.UserId != request.UserId || session.TenantId != request.TenantId)
+        if (session.IsShared != request.IsShared
+            || session.UserId != request.UserId || session.TenantId != request.TenantId
+            || (request.IsShared && session.FileId != request.ExpectedFileId))
+        {
             throw new NotFoundException("UploadSession", request.SessionId);
+        }
 
         // A completed session stays completed. Only its temporary prefix is cleaned;
         // immutable manifests and content-addressed chunks may back existing versions.

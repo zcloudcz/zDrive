@@ -33,8 +33,9 @@ abstract class FileRepository {
   Future<ShareInfo> createShare(
     String fileId,
     SharePermission permission,
-    DateTime? expiresAt,
-  );
+    DateTime? expiresAt, {
+    bool allowDelete = false,
+  });
   Future<void> revokeShare(String id);
 
   /// Uploads [content] as a new file. [sizeBytes] must be the exact byte
