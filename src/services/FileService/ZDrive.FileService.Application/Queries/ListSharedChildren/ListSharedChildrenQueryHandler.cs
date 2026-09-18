@@ -42,6 +42,6 @@ public sealed class ListSharedChildrenQueryHandler : IRequestHandler<ListSharedC
             .ThenBy(f => f.Name)
             .ToListAsync(cancellationToken);
 
-        return children.Select(f => f.ToDto()).ToList();
+        return children.Select(f => f.ToDto().ToPublicDto()).ToList();
     }
 }

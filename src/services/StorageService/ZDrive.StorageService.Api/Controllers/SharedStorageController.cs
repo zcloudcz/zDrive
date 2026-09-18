@@ -132,7 +132,7 @@ public sealed class SharedStorageController : ControllerBase
         var payload = ValidateUploadGrantOrThrow(grant);
         var command = new UploadChunkCommand(
             sessionId, index, chunkHash, Request.Body,
-            payload.TenantId, payload.OwnerUserId, payload.FileId);
+            payload.TenantId, payload.OwnerUserId, IsShared: true, payload.FileId);
         var result = await _mediator.Send(command, ct);
         return Ok(ApiResponse<ChunkUploadResultDto>.Ok(result));
     }
@@ -147,7 +147,7 @@ public sealed class SharedStorageController : ControllerBase
         Response.SetPublicShareCacheHeaders();
 
         var payload = ValidateUploadGrantOrThrow(grant);
-        var command = new CompleteUploadCommand(sessionId, payload.TenantId, payload.OwnerUserId, payload.FileId);
+        var command = new CompleteUploadCommand(sessionId, payload.TenantId, payload.OwnerUserId, IsShared: true, payload.FileId);
         var result = await _mediator.Send(command, ct);
 
         // The receipt is StorageService's proof to FileService that these

@@ -34,7 +34,14 @@ public sealed class ShareWriteFlowTests : IClassFixture<FileServiceFactory>
     public ShareWriteFlowTests(FileServiceFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateAuthenticatedClient();
+        // A fresh owner per test instance (xUnit creates one instance per
+        // [Fact]/[Theory] case) — not FileServiceFactory.TestUserId/TestTenantId,
+        // which every test in the whole assembly would otherwise share along
+        // with the one Testcontainers database. UploadGrant_101stPendingNode
+        // in particular leaves 100 version-less nodes behind for its owner;
+        // sharing an owner with any other upload-grant test would make the
+        // pair order-dependent (whichever runs second sees the other's count).
+        _client = factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
         _anon = factory.CreateClient();
         _key = Convert.FromBase64String(FileServiceFactory.TestShareGrantKey);
     }
@@ -115,6 +122,33 @@ public sealed class ShareWriteFlowTests : IClassFixture<FileServiceFactory>
 
         overCap.StatusCode.Should().Be((HttpStatusCode)429);
         (await overCap.Content.ReadAsStringAsync()).Should().Contain("TOO_MANY_PENDING_UPLOADS");
+    }
+
+    [Fact]
+    public async Task AnonymousResponses_NeverExposeOwnerIdsOrBlobPath()
+    {
+        var root = await CreateFileAsync("leak-root", isFolder: true);
+        var file = await CreateFileAsync("leak-file.txt", parentId: root.Id);
+        var share = await CreateShareAsync(root.Id);
+
+        // The authenticated FileDto for `file` carries the real owner ids —
+        // use those as the needles.
+        file.UserId.Should().NotBe(Guid.Empty);
+        var userIdText = file.UserId.ToString();
+        var tenantIdText = file.TenantId.ToString();
+
+        var infoBody = await (await _anon.GetAsync($"/api/v1/shares/link/{share.LinkToken}/info")).Content.ReadAsStringAsync();
+        infoBody.Should().NotContain(userIdText).And.NotContain(tenantIdText);
+
+        var metadataBody = await (await _anon.GetAsync($"/api/v1/shares/link/{share.LinkToken}")).Content.ReadAsStringAsync();
+        metadataBody.Should().NotContain(userIdText).And.NotContain(tenantIdText).And.NotContain(share.LinkToken);
+
+        var childrenBody = await (await _anon.GetAsync($"/api/v1/shares/link/{share.LinkToken}/children")).Content.ReadAsStringAsync();
+        childrenBody.Should().NotContain(userIdText).And.NotContain(tenantIdText);
+
+        var folderBody = await (await _anon.PostAsJsonAsync(
+            $"/api/v1/shares/link/{share.LinkToken}/folders", new { name = "leak-sub" })).Content.ReadAsStringAsync();
+        folderBody.Should().NotContain(userIdText).And.NotContain(tenantIdText);
     }
 
     [Fact]
@@ -215,8 +249,27 @@ public sealed class ShareWriteFlowTests : IClassFixture<FileServiceFactory>
             $"/api/v1/shares/link/{share.LinkToken}/children");
         children!.Data.Should().ContainSingle(f => f.Id == file.Id && f.ManifestHash == manifestHash);
 
-        var changes = await _client.GetFromJsonAsync<ApiResponse<FileChangesPageDto>>("/api/v1/files/changes");
-        changes!.Data!.Changes.Should().Contain(c => c.FileId == file.Id);
+        // The change feed deliberately withholds rows younger than 5s (see
+        // CLAUDE.md "File change log" / docs/adr/0001) so a reader can never
+        // observe them out of commit order — poll instead of asserting
+        // immediately.
+        await PollUntilChangeAppearsAsync(file.Id, TimeSpan.FromSeconds(10));
+    }
+
+    private async Task PollUntilChangeAppearsAsync(Guid fileId, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            var changes = await _client.GetFromJsonAsync<ApiResponse<FileChangesPageDto>>("/api/v1/files/changes");
+            if (changes!.Data!.Changes.Any(c => c.FileId == fileId))
+                return;
+
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException($"File change for {fileId} did not appear within {timeout}.");
+
+            await Task.Delay(250);
+        }
     }
 
     [Fact]
@@ -242,7 +295,7 @@ public sealed class ShareWriteFlowTests : IClassFixture<FileServiceFactory>
 
         // Tampered receipt -> 404, and the body never echoes it back.
         var validReceipt = MakeReceipt(file.Id, manifestHash, 5);
-        var tampered = validReceipt[..^1] + (validReceipt[^1] == 'a' ? 'b' : 'a');
+        var tampered = GrantTampering.FlipSignatureBit(validReceipt);
         var tamperedResponse = await _anon.PostAsJsonAsync(
             $"/api/v1/shares/link/{share.LinkToken}/files/{file.Id}/versions", new { receipt = tampered });
         tamperedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -309,8 +362,10 @@ public sealed class ShareWriteFlowTests : IClassFixture<FileServiceFactory>
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         (await deleteResponse.Content.ReadFromJsonAsync<ApiResponse<bool>>())!.Data.Should().BeTrue();
 
-        var trash = await _client.GetFromJsonAsync<ApiResponse<List<FileDto>>>("/api/v1/files/trash");
-        trash!.Data.Should().Contain(f => f.Id == file.Id);
+        var trashResponse = await _client.GetAsync("/api/v1/files/trash");
+        trashResponse.StatusCode.Should().Be(HttpStatusCode.OK, await trashResponse.Content.ReadAsStringAsync());
+        var trash = await trashResponse.Content.ReadFromJsonAsync<ApiResponse<PagedResult<FileDto>>>();
+        trash!.Data!.Items.Should().Contain(f => f.Id == file.Id);
 
         // The shared root itself can never be deleted through its own link.
         var rootDelete = await _anon.DeleteAsync($"/api/v1/shares/link/{deletable.LinkToken}/items/{root.Id}");

@@ -8,12 +8,15 @@ public sealed record UploadChunkCommand(
     int ChunkIndex,
     string ChunkHash,
     Stream Stream,
-    // Set only by the shared (link-driven) upload flow, which has no JWT to
-    // bind the session to — the grant's own (tenant, owner, fileId) stands
-    // in, and a session belonging to a different file/owner must 404 exactly
-    // like an unknown session id (see SharedStorageController's own grant
-    // checks for why: nothing here should distinguish "wrong owner" from
-    // "doesn't exist" for an anonymous caller).
-    Guid? ExpectedTenantId = null,
-    Guid? ExpectedUserId = null,
+    // Always the caller's own ids — for an authenticated request, straight
+    // from the JWT; for a shared request, the grant's owner ids. A session
+    // belonging to someone else's (tenant, user) must 404 exactly like an
+    // unknown session id, for both flows equally (this used to be checked
+    // only for the shared flow — see the security review this closed).
+    Guid CallerTenantId,
+    Guid CallerUserId,
+    // True only for the shared (link-driven) flow, so an authenticated
+    // caller can never touch a shared session (minted from a grant, not a
+    // JWT) and vice versa, even if ids happened to line up.
+    bool IsShared = false,
     Guid? ExpectedFileId = null) : IRequest<ChunkUploadResultDto>;

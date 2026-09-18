@@ -14,7 +14,7 @@ public sealed class UploadChunkCommandValidatorTests
     public void Valid_Command_Passes()
     {
         using var stream = new MemoryStream([1, 2, 3]);
-        var command = new UploadChunkCommand(Guid.NewGuid(), 0, "abc123", stream);
+        var command = new UploadChunkCommand(Guid.NewGuid(), 0, "abc123", stream, Guid.NewGuid(), Guid.NewGuid());
         var result = _validator.TestValidate(command);
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -23,7 +23,7 @@ public sealed class UploadChunkCommandValidatorTests
     public void Empty_SessionId_Fails()
     {
         using var stream = new MemoryStream([1, 2, 3]);
-        var command = new UploadChunkCommand(Guid.Empty, 0, "abc123", stream);
+        var command = new UploadChunkCommand(Guid.Empty, 0, "abc123", stream, Guid.NewGuid(), Guid.NewGuid());
         var result = _validator.TestValidate(command);
         result.ShouldHaveValidationErrorFor(x => x.SessionId);
     }
@@ -32,7 +32,7 @@ public sealed class UploadChunkCommandValidatorTests
     public void Empty_ChunkHash_Fails()
     {
         using var stream = new MemoryStream([1, 2, 3]);
-        var command = new UploadChunkCommand(Guid.NewGuid(), 0, "", stream);
+        var command = new UploadChunkCommand(Guid.NewGuid(), 0, "", stream, Guid.NewGuid(), Guid.NewGuid());
         var result = _validator.TestValidate(command);
         result.ShouldHaveValidationErrorFor(x => x.ChunkHash);
     }
@@ -41,7 +41,7 @@ public sealed class UploadChunkCommandValidatorTests
     public void Negative_ChunkIndex_Fails()
     {
         using var stream = new MemoryStream([1, 2, 3]);
-        var command = new UploadChunkCommand(Guid.NewGuid(), -1, "abc123", stream);
+        var command = new UploadChunkCommand(Guid.NewGuid(), -1, "abc123", stream, Guid.NewGuid(), Guid.NewGuid());
         var result = _validator.TestValidate(command);
         result.ShouldHaveValidationErrorFor(x => x.ChunkIndex);
     }

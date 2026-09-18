@@ -105,6 +105,14 @@ public sealed class CreateShareUploadGrantCommandHandler
                 // since it creates nothing.
                 // ponytail: fixed 100/24h ceiling, not per-share or configurable;
                 // revisit once blob GC exists and this stops being the only backstop.
+                // ponytail: this counts ALL of the owner's versionless nodes
+                // from the last 24h, including ones the owner's own
+                // authenticated client created (it keeps up to ~3 uploads in
+                // flight, and a failed one can linger versionless) — not just
+                // link-created ones, so a very active legitimate owner could
+                // in theory eat into this budget themselves. Upgrade path: a
+                // column tagging which nodes were created via a share link,
+                // and count only those.
                 var pendingCutoff = DateTime.UtcNow.AddHours(-24);
                 var pendingCount = await _db.FileNodes.CountAsync(f =>
                     f.TenantId == owner.TenantId && f.UserId == owner.UserId && !f.IsFolder && !f.IsDeleted

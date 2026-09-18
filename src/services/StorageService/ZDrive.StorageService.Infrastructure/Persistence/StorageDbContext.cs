@@ -28,6 +28,29 @@ public sealed class StorageDbContext : DbContext, IStorageDbContext
             throw;
         }
     }
+    // Transaction-scoped: no matching unlock call needed, Postgres releases it
+    // at commit/rollback. hashtext() on the two concatenated ids collapses
+    // them into one bigint lock key per owner — collisions between different
+    // owners are possible but harmless (worst case, unrelated owners briefly
+    // serialize their init calls against each other).
+    public async Task<IDbContextTransaction> LockOwnerSharedUploadBudgetAsync(
+        Guid tenantId, Guid userId, CancellationToken cancellationToken)
+    {
+        var transaction = await Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var key = $"{tenantId}:{userId}";
+            await Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtext({key}))", cancellationToken);
+            return transaction;
+        }
+        catch
+        {
+            await transaction.DisposeAsync();
+            throw;
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("storage");

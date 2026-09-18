@@ -52,13 +52,13 @@ public sealed class CreateShareFileVersionCommandHandler : IRequestHandler<Creat
 
         // Idempotent replay: the current version already IS these bytes.
         if (file.ManifestHash == receipt.ManifestHash)
-            return file.ToDto();
+            return file.ToDto().ToPublicDto();
 
         await _mediator.Send(new CreateFileVersionCommand(
             file.TenantId, file.UserId, file.Id, receipt.ManifestHash, receipt.SizeBytes, receipt.ManifestHash, Comment: null),
             cancellationToken);
 
         var updated = await _db.FileNodes.AsNoTracking().FirstAsync(f => f.Id == file.Id, cancellationToken);
-        return updated.ToDto();
+        return updated.ToDto().ToPublicDto();
     }
 }

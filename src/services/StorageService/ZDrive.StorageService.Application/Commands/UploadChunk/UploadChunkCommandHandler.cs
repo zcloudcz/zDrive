@@ -38,17 +38,17 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
         if (session.Status != UploadSessionStatus.Active)
             throw new ConflictException($"Upload session '{request.SessionId}' is not active (status: {session.Status}).");
 
-        // Both directions of the shared/authenticated split: a shared-flow
-        // caller (ExpectedTenantId set) must find IsShared==true with a
-        // matching owner, and an authenticated caller (no Expected* — the
-        // pre-existing StorageController never set them) must not silently
-        // touch a session it did not create via its own JWT-bound init.
-        var isSharedCall = request.ExpectedTenantId is not null;
-        if (session.IsShared != isSharedCall
-            || (isSharedCall
-                && (session.TenantId != request.ExpectedTenantId
-                    || session.UserId != request.ExpectedUserId
-                    || session.FileId != request.ExpectedFileId)))
+        // Ownership check for BOTH flows: an authenticated caller must own
+        // the session (tenant/user from its JWT) exactly like a shared
+        // caller must own it (tenant/user/file from its grant) — a session
+        // belonging to someone else 404s either way. IsShared additionally
+        // keeps the two flows from ever reaching each other's sessions even
+        // when ids happen to line up (a Write-link grant for file F must not
+        // also match the owner's own authenticated session on F).
+        if (session.IsShared != request.IsShared
+            || session.TenantId != request.CallerTenantId
+            || session.UserId != request.CallerUserId
+            || (request.IsShared && session.FileId != request.ExpectedFileId))
         {
             throw new NotFoundException("UploadSession", request.SessionId);
         }
@@ -79,6 +79,17 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
 
             if (newTotal > maxBytes)
             {
+                // ponytail: this deletes whatever is currently stored at
+                // this index — including a PREVIOUS, still-valid upload of
+                // it, if this PUT is a re-upload that grew (e.g. a client
+                // retry sending a different/larger chunk than before).
+                // Self-inflicted (the caller changed what it sent for an
+                // index it already had accepted) and accounting stays
+                // internally consistent (the index just goes back to
+                // "nothing uploaded yet"), but it does mean a successful
+                // prior chunk can be undone by a later failed one at the
+                // same index. Upgrade path: stage the new chunk under a
+                // temp name and swap it in only once it's confirmed to fit.
                 await _blobStorage.DeleteTempChunkAsync(session.Id, request.ChunkIndex, cancellationToken);
                 throw new QuotaExceededException(maxBytes, newTotal);
             }

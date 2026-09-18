@@ -31,12 +31,10 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
             .FirstOrDefaultAsync(s => s.Id == request.SessionId, cancellationToken)
             ?? throw new NotFoundException("UploadSession", request.SessionId);
 
-        var isSharedCall = request.ExpectedTenantId is not null;
-        if (session.IsShared != isSharedCall
-            || (isSharedCall
-                && (session.TenantId != request.ExpectedTenantId
-                    || session.UserId != request.ExpectedUserId
-                    || session.FileId != request.ExpectedFileId)))
+        if (session.IsShared != request.IsShared
+            || session.TenantId != request.CallerTenantId
+            || session.UserId != request.CallerUserId
+            || (request.IsShared && session.FileId != request.ExpectedFileId))
         {
             throw new NotFoundException("UploadSession", request.SessionId);
         }

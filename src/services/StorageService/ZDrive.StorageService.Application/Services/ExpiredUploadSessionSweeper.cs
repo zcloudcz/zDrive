@@ -53,7 +53,24 @@ public sealed class ExpiredUploadSessionSweeper : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            await SweepOnceAsync(stoppingToken);
+            try
+            {
+                await SweepOnceAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Shutdown mid-sweep — end the loop quietly, not as a failure.
+                break;
+            }
+            catch (Exception ex)
+            {
+                // A whole-sweep failure (e.g. the DB briefly unreachable) must
+                // not propagate out of ExecuteAsync: BackgroundService's
+                // default StopHostOnBackgroundServiceException behavior would
+                // take the entire StorageService down over a cleanup job.
+                // Log and try again next interval instead.
+                _logger.LogError(ex, "Upload session sweep failed; will retry at the next interval");
+            }
 
             try
             {
@@ -77,25 +94,52 @@ public sealed class ExpiredUploadSessionSweeper : BackgroundService
         // comparisons against DateTime.UtcNow translate fine either way, but
         // keeping the actual sweep condition as one testable method avoids
         // ever having two copies of "what counts as expired" drift apart.
-        var candidates = await db.UploadSessions
+        // This first pass is only a candidate list — the authoritative check
+        // happens again per session, under its own lock, in SweepSessionAsync.
+        var candidateIds = await db.UploadSessions
             .Where(s => s.Status == UploadSessionStatus.Active)
+            .Select(s => s.Id)
             .ToListAsync(ct);
 
-        foreach (var session in candidates.Where(s => ShouldSweep(s, DateTime.UtcNow)))
+        foreach (var sessionId in candidateIds)
         {
             try
             {
-                await blobStorage.DeleteTempUploadAsync(session.Id, ct);
-                session.Status = UploadSessionStatus.Expired;
+                await SweepSessionAsync(db, blobStorage, sessionId, ct);
             }
             catch (Exception ex)
             {
                 // One session's failure (e.g. a transient blob storage error)
                 // must not stop the sweep of every other expired session.
-                _logger.LogWarning(ex, "Failed to sweep expired upload session {SessionId}", session.Id);
+                _logger.LogError(ex, "Failed to sweep expired upload session {SessionId}", sessionId);
             }
         }
+    }
 
+    private static async Task SweepSessionAsync(
+        IStorageDbContext db, IBlobStorageService blobStorage, Guid sessionId, CancellationToken ct)
+    {
+        // Same row lock every write handler takes (LockUploadSessionAsync) —
+        // re-checking status/expiry INSIDE it, not trusting the candidate
+        // list gathered before the lock, is what stops this from ever
+        // sweeping a session another request is concurrently completing:
+        // CompleteUpload holds the same lock while it moves chunks to final
+        // storage, so this either runs strictly before that (and correctly
+        // finds it still Active-and-expired) or strictly after (and finds it
+        // Completed, so ShouldSweep says no).
+        await using var transaction = await db.LockUploadSessionAsync(sessionId, ct);
+
+        var session = await db.UploadSessions.FirstOrDefaultAsync(s => s.Id == sessionId, ct);
+        if (session is null || !ShouldSweep(session, DateTime.UtcNow))
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
+        await blobStorage.DeleteTempUploadAsync(session.Id, ct);
+        session.Status = UploadSessionStatus.Expired;
         await db.SaveChangesAsync(ct);
+
+        await transaction.CommitAsync(ct);
     }
 }

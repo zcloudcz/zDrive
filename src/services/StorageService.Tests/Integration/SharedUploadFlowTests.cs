@@ -2,11 +2,15 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using ZDrive.Shared.Auth;
 using ZDrive.Shared.DTOs;
 using ZDrive.StorageService.Api.Controllers;
 using ZDrive.StorageService.Application.DTOs;
+using ZDrive.StorageService.Domain.Enums;
+using ZDrive.StorageService.Infrastructure.Persistence;
 
 namespace ZDrive.StorageService.Tests.Integration;
 
@@ -125,7 +129,7 @@ public sealed class SharedUploadFlowTests : IClassFixture<StorageServiceFactory>
         (await InitShared("", "x.bin", 1)).StatusCode.Should().Be(HttpStatusCode.NotFound);
 
         var grant = MakeGrant(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 100);
-        var tampered = grant[..^1] + (grant[^1] == 'a' ? 'b' : 'a');
+        var tampered = GrantTampering.FlipSignatureBit(grant);
         (await InitShared(tampered, "x.bin", 1)).StatusCode.Should().Be(HttpStatusCode.NotFound);
 
         var downloadGrant = ShareDownloadGrant.Create(
@@ -225,22 +229,39 @@ public sealed class SharedUploadFlowTests : IClassFixture<StorageServiceFactory>
     }
 
     [Fact]
-    public async Task Complete_TotalOverCap_Returns413AndAbortsSession()
+    public async Task Complete_SessionMaxBytesLoweredAfterChunksAccepted_Returns413AndAbortsSession()
     {
-        // Each chunk individually fits under the cap, but the total does not
-        // — only Complete's own pre-move check catches this.
-        var grant = MakeGrant(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), maxBytes: 100);
-        var initResponse = await InitShared(grant, "total-overcap.bin", 2);
+        // The per-chunk check in UploadChunk cannot be exercised through the
+        // API alone to prove Complete's OWN re-check (any chunk sequence that
+        // would fail Complete's total check already fails a chunk PUT first
+        // — see the two accounting tests above). So: accept both chunks
+        // honestly under a generous cap, then shrink MaxBytes directly
+        // through the DbContext (as if the grant's budget had been computed
+        // tighter), and prove Complete refuses to promote a session that is
+        // now over cap rather than trusting the chunk-time bookkeeping.
+        var grant = MakeGrant(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), maxBytes: 1000);
+        var initResponse = await InitShared(grant, "shrunk-cap.bin", 2);
         var sessionId = (await initResponse.Content.ReadFromJsonAsync<ApiResponse<UploadSessionDto>>())!.Data!.SessionId;
 
-        // Chunk sizes chosen so each PUT passes (60 <= 100) but the sum (120) does not.
         (await PutShared(grant, sessionId, 0, new byte[60])).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PutShared(grant, sessionId, 1, new byte[60])).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        // The second chunk alone (60) makes the running total 120 > 100, so
-        // the per-chunk check already catches it here — this still proves
-        // Complete never gets a chance to promote an over-cap session.
-        var secondChunk = await PutShared(grant, sessionId, 1, new byte[60]);
-        secondChunk.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<StorageDbContext>();
+            var session = await db.UploadSessions.SingleAsync(s => s.Id == sessionId);
+            session.MaxBytes = 50; // below the 120 already accepted
+            await db.SaveChangesAsync();
+        }
+
+        var complete = await CompleteShared(grant, sessionId);
+        complete.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+
+        using var readScope = _factory.Services.CreateScope();
+        var readDb = readScope.ServiceProvider.GetRequiredService<StorageDbContext>();
+        var finalStatus = await readDb.UploadSessions.AsNoTracking()
+            .Where(s => s.Id == sessionId).Select(s => s.Status).SingleAsync();
+        finalStatus.Should().Be(UploadSessionStatus.Aborted);
     }
 
     [Fact]
@@ -260,5 +281,49 @@ public sealed class SharedUploadFlowTests : IClassFixture<StorageServiceFactory>
         var second = await InitShared(secondGrant, "second.bin", 1);
 
         second.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact]
+    public async Task InitUpload_CompletedSessionDoesNotCountAgainstBudget_ButAnOpenOneDoes()
+    {
+        var tenantId = Guid.NewGuid();
+        var ownerId = Guid.NewGuid();
+
+        // First session consumes 900 of a 1000 budget, then COMPLETES — its
+        // bytes are now visible to the real (FileService-side) quota once a
+        // receipt is recorded, so they must stop counting against this
+        // in-flight budget, or a legitimate heavy uploader gets refused at
+        // roughly half their real headroom for no reason.
+        var firstGrant = MakeGrant(tenantId, ownerId, Guid.NewGuid(), maxBytes: 900, quotaRemaining: 1000);
+        var firstInit = await InitShared(firstGrant, "completed.bin", 1);
+        var firstSessionId = (await firstInit.Content.ReadFromJsonAsync<ApiResponse<UploadSessionDto>>())!.Data!.SessionId;
+        (await PutShared(firstGrant, firstSessionId, 0, new byte[900])).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await CompleteShared(firstGrant, firstSessionId)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // A second grant for 200 now fits: 0 (nothing still open) + 200 <= 1000.
+        var secondGrant = MakeGrant(tenantId, ownerId, Guid.NewGuid(), maxBytes: 200, quotaRemaining: 1000);
+        (await InitShared(secondGrant, "second.bin", 1)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // But that second session is still OPEN (Active), so a THIRD grant
+        // that would push the open sum past budget is still refused: 200 + 900 > 1000.
+        var thirdGrant = MakeGrant(tenantId, ownerId, Guid.NewGuid(), maxBytes: 900, quotaRemaining: 1000);
+        (await InitShared(thirdGrant, "third.bin", 1)).StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact]
+    public async Task InitUpload_ParallelInits_OnlyAsManyAsFitTheBudgetSucceed()
+    {
+        var tenantId = Guid.NewGuid();
+        var ownerId = Guid.NewGuid();
+        const long budget = 1000;
+        const long perGrantMaxBytes = 300; // floor(1000/300) = 3 should succeed, out of 5 attempts
+        var grants = Enumerable.Range(0, 5)
+            .Select(_ => MakeGrant(tenantId, ownerId, Guid.NewGuid(), perGrantMaxBytes, budget))
+            .ToList();
+
+        var results = await Task.WhenAll(grants.Select(g => InitShared(g, "parallel.bin", 1)));
+
+        results.Count(r => r.StatusCode == HttpStatusCode.OK).Should().Be(3);
+        results.Count(r => r.StatusCode == HttpStatusCode.RequestEntityTooLarge).Should().Be(2);
     }
 }

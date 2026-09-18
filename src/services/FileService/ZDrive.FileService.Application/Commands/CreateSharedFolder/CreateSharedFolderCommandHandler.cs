@@ -40,6 +40,7 @@ public sealed class CreateSharedFolderCommandHandler : IRequestHandler<CreateSha
             owner.UserId, owner.TenantId, parent.Id, request.Name, IsFolder: true,
             SizeBytes: null, MimeType: null, BlobPath: null, ManifestHash: null);
 
-        return await _mediator.Send(command, cancellationToken);
+        var created = await _mediator.Send(command, cancellationToken);
+        return created.ToPublicDto();
     }
 }

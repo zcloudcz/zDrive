@@ -37,7 +37,7 @@ public sealed class GetShareInfoQueryHandler : IRequestHandler<GetShareInfoQuery
             share.Permission.ToString(),
             share.AllowDelete,
             share.ExpiresAt,
-            share.File.ToDto(),
+            share.File.ToDto().ToPublicDto(),
             quota);
     }
 }
