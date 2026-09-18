@@ -34,9 +34,7 @@ public sealed class ShareDownloadGrantTests
     {
         var grant = ShareDownloadGrant.Create(MakePayload(), Key);
         var parts = grant.Split('.');
-        // Flip one character of the payload segment — signature no longer matches.
-        var tamperedPayload = parts[0][^1] == 'A' ? "B" + parts[0][1..] : "A" + parts[0][1..];
-        var tampered = $"{tamperedPayload}.{parts[1]}";
+        var tampered = $"{FlipFirstByte(parts[0])}.{parts[1]}";
 
         var isValid = ShareDownloadGrant.TryValidate(tampered, Key, DateTimeOffset.UtcNow, out _);
 
@@ -48,12 +46,37 @@ public sealed class ShareDownloadGrantTests
     {
         var grant = ShareDownloadGrant.Create(MakePayload(), Key);
         var parts = grant.Split('.');
-        var tamperedSignature = parts[1][^1] == 'A' ? "B" + parts[1][1..] : "A" + parts[1][1..];
-        var tampered = $"{parts[0]}.{tamperedSignature}";
+        var tampered = $"{parts[0]}.{FlipFirstByte(parts[1])}";
 
         var isValid = ShareDownloadGrant.TryValidate(tampered, Key, DateTimeOffset.UtcNow, out _);
 
         isValid.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Decodes a base64url segment, flips a bit in its FIRST byte, and
+    /// re-encodes. Deliberately not "swap the last character": for a
+    /// 32-byte HMAC signature the trailing base64url character carries only
+    /// 4 significant bits plus 2 always-zero padding bits, so some
+    /// substitutions there decode to the exact same bytes — that made this
+    /// test probabilistic (it failed roughly 1 run in a few dozen). Flipping
+    /// a bit in the first byte always changes the decoded bytes.
+    /// </summary>
+    private static string FlipFirstByte(string base64UrlSegment)
+    {
+        var bytes = Base64UrlDecode(base64UrlSegment);
+        bytes[0] ^= 0x01;
+        return Base64UrlEncode(bytes);
+    }
+
+    private static string Base64UrlEncode(byte[] bytes) =>
+        Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    private static byte[] Base64UrlDecode(string value)
+    {
+        var padded = value.Replace('-', '+').Replace('_', '/');
+        padded = padded.PadRight(padded.Length + ((4 - (padded.Length % 4)) % 4), '=');
+        return Convert.FromBase64String(padded);
     }
 
     [Fact]

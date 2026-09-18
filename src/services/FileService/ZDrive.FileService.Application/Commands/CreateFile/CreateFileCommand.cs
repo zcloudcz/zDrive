@@ -12,4 +12,5 @@ public sealed record CreateFileCommand(
     long? SizeBytes,
     string? MimeType,
     string? BlobPath,
-    string? ManifestHash) : IRequest<FileDto>;
+    string? ManifestHash,
+    long? ClaimQuotaBytes = null) : IRequest<FileDto>;
