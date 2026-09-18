@@ -28,7 +28,11 @@ class ShareLinkDataSource {
   ShareLinkDataSource(this._dio);
 
   Future<({ShareDto share, FileDto file})> getShareLink(String token) async {
-    final response = await _dio.get('${ApiConstants.shares}/link/$token');
+    // go_router hands path parameters over already URL-decoded, so a token
+    // containing '/', '?', etc. (opaque server-issued ids, not guaranteed
+    // URL-safe) must be re-encoded before it goes back into a path segment —
+    // otherwise it would split the path or start a query string.
+    final response = await _dio.get('${ApiConstants.shares}/link/${Uri.encodeComponent(token)}');
     final data = unwrapMap(response);
     return (
       share: ShareDto.fromJson(data['share'] as Map<String, dynamic>),
@@ -40,7 +44,7 @@ class ShareLinkDataSource {
   /// means the shared root itself.
   Future<List<FileDto>> getChildren(String token, {String? folderId}) async {
     final response = await _dio.get(
-      '${ApiConstants.shares}/link/$token/children',
+      '${ApiConstants.shares}/link/${Uri.encodeComponent(token)}/children',
       queryParameters: folderId == null ? null : {'folderId': folderId},
     );
     return unwrapMapList(response).map(FileDto.fromJson).toList();
@@ -48,16 +52,24 @@ class ShareLinkDataSource {
 
   Future<DownloadGrantDto> requestDownloadGrant(String token, String fileId) async {
     final response = await _dio.post(
-      '${ApiConstants.shares}/link/$token/download-grant',
+      '${ApiConstants.shares}/link/${Uri.encodeComponent(token)}/download-grant',
       data: {'fileId': fileId},
     );
     return DownloadGrantDto.fromJson(unwrapMap(response));
   }
 
+  /// The first storage call of the flow, so it may hit a cold StorageService
+  /// instance — same reasoning as `initUpload`/the authenticated
+  /// `getManifest` in `file_upload_data_source.dart`. Chunk requests don't
+  /// carry it: only the very first request of a session pays the cold-start
+  /// cost.
   Future<ManifestDto> getManifest(String grant) async {
     final response = await _dio.get(
       '${ApiConstants.storage}/shared/manifest',
-      options: Options(headers: {shareGrantHeader: grant}),
+      options: Options(
+        headers: {shareGrantHeader: grant},
+        receiveTimeout: ApiConstants.storageColdStartTimeout,
+      ),
     );
     return ManifestDto.fromJson(unwrapMap(response));
   }
@@ -75,17 +87,34 @@ class ShareLinkDataSource {
   /// uses ([assembleVerifiedFileStream]), and hand the result to the same
   /// platform saver the file browser's download uses ([saveFileStream]).
   /// [onProgress] is fed 0..1 from the grant's declared [DownloadGrantDto.sizeBytes].
+  ///
+  /// The grant is a revocation window, not a download-completion budget — it
+  /// lives 1 hour, but a slow/large download can still outlive it, at which
+  /// point storage starts answering 404 to chunk requests carrying it. On
+  /// exactly one such 404, a fresh grant is requested and that chunk is
+  /// retried with it; a second 404 (grant re-minting didn't help, or the
+  /// share was revoked meanwhile) fails the download instead of looping.
   Future<void> downloadFile(
     String token,
     String fileId, {
     void Function(double progress)? onProgress,
     Future<void> Function(String fileName, Stream<Uint8List> content) save = saveFileStream,
   }) async {
-    final grantInfo = await requestDownloadGrant(token, fileId);
+    var grantInfo = await requestDownloadGrant(token, fileId);
+    var reMinted = false;
     var transferred = 0;
     final stream = assembleVerifiedFileStream(
       fetchManifest: () => getManifest(grantInfo.grant),
-      fetchChunkBytes: (hash) => downloadChunkBytes(grantInfo.grant, hash),
+      fetchChunkBytes: (hash) async {
+        try {
+          return await downloadChunkBytes(grantInfo.grant, hash);
+        } on DioException catch (e) {
+          if (e.response?.statusCode != 404 || reMinted) rethrow;
+          reMinted = true;
+          grantInfo = await requestDownloadGrant(token, fileId);
+          return await downloadChunkBytes(grantInfo.grant, hash);
+        }
+      },
       expectedManifestHash: grantInfo.manifestHash,
     ).map((chunk) {
       transferred += chunk.length;

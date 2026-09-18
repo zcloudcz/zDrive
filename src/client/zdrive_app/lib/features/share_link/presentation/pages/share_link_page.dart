@@ -46,26 +46,43 @@ class ShareLinkView extends StatelessWidget {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
-            child: BlocBuilder<ShareLinkCubit, ShareLinkState>(
-              builder: (context, state) => switch (state) {
-                ShareLinkLoading() => const Center(child: CircularProgressIndicator()),
-                ShareLinkNotFound() => _StatusMessage(
-                    icon: Icons.link_off,
-                    title: l10n.shareNotFoundTitle,
-                    message: l10n.shareNotFoundMessage,
-                  ),
-                ShareLinkPasswordProtected() => _StatusMessage(
-                    icon: Icons.lock_outline,
-                    title: l10n.sharePasswordProtectedTitle,
-                    message: l10n.sharePasswordProtectedMessage,
-                  ),
-                ShareLinkFailure() => _StatusMessage(
-                    icon: Icons.error_outline,
-                    title: describeError(state.error, l10n),
-                    onRetry: () => context.read<ShareLinkCubit>().load(),
-                  ),
-                ShareLinkLoaded() => _ShareLinkLoadedView(state: state),
+            child: BlocListener<ShareLinkCubit, ShareLinkState>(
+              // Only when navigationError actually became non-null: the
+              // cubit clears it (sets it back to null) on every successful
+              // navigation, and that clearing state change must not itself
+              // pop a SnackBar.
+              listenWhen: (previous, current) =>
+                  current is ShareLinkLoaded &&
+                  current.navigationError != null &&
+                  (previous is! ShareLinkLoaded ||
+                      previous.navigationError != current.navigationError),
+              listener: (context, state) {
+                final error = (state as ShareLinkLoaded).navigationError!;
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(SnackBar(content: Text(describeError(error, l10n))));
               },
+              child: BlocBuilder<ShareLinkCubit, ShareLinkState>(
+                builder: (context, state) => switch (state) {
+                  ShareLinkLoading() => const Center(child: CircularProgressIndicator()),
+                  ShareLinkNotFound() => _StatusMessage(
+                      icon: Icons.link_off,
+                      title: l10n.shareNotFoundTitle,
+                      message: l10n.shareNotFoundMessage,
+                    ),
+                  ShareLinkPasswordProtected() => _StatusMessage(
+                      icon: Icons.lock_outline,
+                      title: l10n.sharePasswordProtectedTitle,
+                      message: l10n.sharePasswordProtectedMessage,
+                    ),
+                  ShareLinkFailure() => _StatusMessage(
+                      icon: Icons.error_outline,
+                      title: describeError(state.error, l10n),
+                      onRetry: () => context.read<ShareLinkCubit>().load(),
+                    ),
+                  ShareLinkLoaded() => _ShareLinkLoadedView(state: state),
+                },
+              ),
             ),
           ),
         ),

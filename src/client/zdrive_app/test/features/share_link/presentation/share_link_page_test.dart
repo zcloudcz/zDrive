@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -125,5 +127,24 @@ void main() {
     await tester.pump();
 
     verify(() => cubit.download(file)).called(1);
+  });
+
+  testWidgets('a navigationError appearing on the loaded state pops a SnackBar '
+      'and the page stays on the same folder listing', (tester) async {
+    final loaded = ShareLinkLoaded(root: folder, path: const [], children: [child]);
+    final controller = StreamController<ShareLinkState>();
+    addTearDown(controller.close);
+    whenListen(cubit, controller.stream, initialState: loaded);
+
+    await tester.pumpWidget(build());
+    expect(find.byType(SnackBar), findsNothing);
+
+    controller.add(loaded.copyWith(navigationError: () => Exception('boom')));
+    await tester.pump();
+
+    expect(find.byType(SnackBar), findsOneWidget);
+    // The listing itself is untouched — a failed navigation must not blank
+    // the page the visitor was already looking at.
+    expect(find.text('child.txt'), findsOneWidget);
   });
 }

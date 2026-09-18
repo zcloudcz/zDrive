@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/core/network/api_constants.dart';
 import 'package:zdrive_app/features/share_link/data/share_link_data_source.dart';
 
 class MockDio extends Mock implements Dio {}
@@ -106,7 +107,7 @@ void main() {
 
     final options = verify(() => dio.get('/storage/shared/manifest',
         options: captureAny(named: 'options'))).captured.single as Options;
-    expect(options.headers![shareGrantHeader], 'grant-1');
+    expect(options.headers?[shareGrantHeader], 'grant-1');
   });
 
   // Teeth check: dropping shareGrantHeader from the chunk request must fail
@@ -123,7 +124,7 @@ void main() {
     expect(bytes, Uint8List.fromList([1, 2, 3]));
     final options = verify(() => dio.get<List<int>>('/storage/shared/chunk/hash1/bytes',
         options: captureAny(named: 'options'))).captured.single as Options;
-    expect(options.headers![shareGrantHeader], 'grant-1');
+    expect(options.headers?[shareGrantHeader], 'grant-1');
   });
 
   test('downloadFile fetches a grant, verifies chunks, and saves under the grant\'s fileName',
@@ -167,6 +168,136 @@ void main() {
     expect(savedName, 'report.pdf');
     expect(savedBytes, Uint8List.fromList([1, 2, 3]));
     expect(progress, [1.0]);
+  });
+
+  test(
+      'a token with path-hostile characters is percent-encoded before it '
+      'goes back into a URL path — go_router hands path parameters over '
+      'already decoded', () async {
+    const rawToken = 'a/b?c';
+    when(() => dio.get('/shares/link/a%2Fb%3Fc')).thenAnswer(
+        (_) async => ok({'share': shareJson, 'file': fileJson}, '/shares/link/a%2Fb%3Fc'));
+
+    await ds.getShareLink(rawToken);
+
+    verify(() => dio.get('/shares/link/a%2Fb%3Fc')).called(1);
+  });
+
+  test('getManifest carries the storage cold-start receive timeout; chunk '
+      'requests do not', () async {
+    when(() => dio.get('/storage/shared/manifest', options: any(named: 'options')))
+        .thenAnswer((_) async => ok({
+              'totalSize': 3,
+              'chunks': [
+                {'index': 0, 'hash': 'a' * 64}
+              ],
+              'manifestHash': null,
+            }, '/storage/shared/manifest'));
+    when(() => dio.get<List<int>>('/storage/shared/chunk/hash1/bytes',
+        options: any(named: 'options'))).thenAnswer(
+        (_) async => Response(data: <int>[1, 2, 3], statusCode: 200,
+            requestOptions: RequestOptions(path: '/storage/shared/chunk/hash1/bytes')));
+
+    await ds.getManifest('grant-1');
+    final manifestOptions = verify(() => dio.get('/storage/shared/manifest',
+        options: captureAny(named: 'options'))).captured.single as Options;
+    expect(manifestOptions.receiveTimeout, ApiConstants.storageColdStartTimeout);
+
+    await ds.downloadChunkBytes('grant-1', 'hash1');
+    final chunkOptions = verify(() => dio.get<List<int>>('/storage/shared/chunk/hash1/bytes',
+        options: captureAny(named: 'options'))).captured.single as Options;
+    expect(chunkOptions.receiveTimeout, isNull);
+  });
+
+  group('grant re-mint on an expired-grant 404', () {
+    Map<String, dynamic> grantJson(String grant) => {
+          'grant': grant,
+          'expiresAt': '2026-01-01T00:05:00.000Z',
+          'fileId': 'f1',
+          'fileName': 'report.pdf',
+          'sizeBytes': 3,
+          'manifestHash': null,
+        };
+
+    DioException chunkNotFound(String path) => DioException(
+          requestOptions: RequestOptions(path: path),
+          response: Response(statusCode: 404, requestOptions: RequestOptions(path: path)),
+        );
+
+    setUp(() {
+      when(() => dio.get('/storage/shared/manifest', options: any(named: 'options')))
+          .thenAnswer((_) async => ok({
+                'totalSize': 3,
+                'chunks': [
+                  {'index': 0, 'hash': _sha256Hex}
+                ],
+                'manifestHash': null,
+              }, '/storage/shared/manifest'));
+    });
+
+    test('a single chunk 404 re-mints the grant once and retries that chunk '
+        'with the new grant — download completes', () async {
+      var grantCalls = 0;
+      when(() => dio.post('/shares/link/tok123/download-grant', data: any(named: 'data')))
+          .thenAnswer((_) async {
+        grantCalls++;
+        return ok(grantJson('g$grantCalls'), '/shares/link/tok123/download-grant');
+      });
+
+      final chunkPath = '/storage/shared/chunk/$_sha256Hex/bytes';
+      var chunkCalls = 0;
+      final capturedHeaders = <String?>[];
+      when(() => dio.get<List<int>>(chunkPath, options: any(named: 'options')))
+          .thenAnswer((invocation) {
+        chunkCalls++;
+        final options = invocation.namedArguments[#options] as Options;
+        capturedHeaders.add(options.headers?[shareGrantHeader] as String?);
+        if (chunkCalls == 1) {
+          throw chunkNotFound(chunkPath);
+        }
+        return Future.value(Response(
+          data: [1, 2, 3],
+          statusCode: 200,
+          requestOptions: RequestOptions(path: chunkPath),
+        ));
+      });
+
+      Uint8List? savedBytes;
+      await ds.downloadFile('tok123', 'f1', save: (fileName, content) async {
+        final builder = BytesBuilder();
+        await for (final chunk in content) {
+          builder.add(chunk);
+        }
+        savedBytes = builder.takeBytes();
+      });
+
+      expect(savedBytes, Uint8List.fromList([1, 2, 3]));
+      expect(grantCalls, 2, reason: 'initial grant + exactly one re-mint');
+      expect(capturedHeaders, ['g1', 'g2'], reason: 'the retry must use the NEW grant');
+    });
+
+    test('a second 404 (after the one re-mint) fails the download — grant '
+        'was requested exactly twice, never a third time', () async {
+      var grantCalls = 0;
+      when(() => dio.post('/shares/link/tok123/download-grant', data: any(named: 'data')))
+          .thenAnswer((_) async {
+        grantCalls++;
+        return ok(grantJson('g$grantCalls'), '/shares/link/tok123/download-grant');
+      });
+
+      final chunkPath = '/storage/shared/chunk/$_sha256Hex/bytes';
+      when(() => dio.get<List<int>>(chunkPath, options: any(named: 'options')))
+          .thenThrow(chunkNotFound(chunkPath));
+
+      await expectLater(
+        ds.downloadFile('tok123', 'f1', save: (_, content) async {
+          await content.drain<void>();
+        }),
+        throwsA(isA<DioException>()),
+      );
+
+      expect(grantCalls, 2);
+    });
   });
 }
 
