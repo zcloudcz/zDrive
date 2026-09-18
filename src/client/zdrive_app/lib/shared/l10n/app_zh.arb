@@ -127,6 +127,10 @@
   "download": "下载",
   "shareAvailableUntil": "有效期至 {date}",
   "shareWhatIsZDrive": "什么是 zDrive?",
-  "shareFooterTagline": "由 zDrive 提供安全保障"
+  "shareFooterTagline": "由 zDrive 提供安全保障",
+  "tagline": "您的文件，随时随地。",
+  "authBenefitSync": "跨所有设备同步",
+  "authBenefitShare": "安全共享文件和文件夹",
+  "authBenefitSecure": "始终加密存储"
 }
 

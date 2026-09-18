@@ -182,6 +182,10 @@
   "download": "Stáhnout",
   "shareAvailableUntil": "Dostupné do {date}",
   "shareWhatIsZDrive": "Co je zDrive?",
-  "shareFooterTagline": "Zabezpečeno pomocí zDrive"
+  "shareFooterTagline": "Zabezpečeno pomocí zDrive",
+  "tagline": "Vaše soubory, kdekoli.",
+  "authBenefitSync": "Synchronizace napříč všemi zařízeními",
+  "authBenefitShare": "Bezpečné sdílení souborů a složek",
+  "authBenefitSecure": "Vždy šifrované úložiště"
 
 }
