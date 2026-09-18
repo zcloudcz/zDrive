@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 
 namespace ZDrive.Shared.Auth;
@@ -32,10 +33,19 @@ public static class ClaimsHelper
     /// Per-user storage quota override carried on the JWT. Absent for most
     /// users today (subscription plans will start setting it later) — a null
     /// return means "fall back to the configured default", not "unlimited".
+    /// A garbage claim value also falls back to the default instead of
+    /// throwing a FormatException that would 500 every request from that
+    /// user. Zero or negative is returned as-is — both already mean
+    /// "everything refused" once it reaches EnsureCanStoreAsync, not
+    /// "unlimited", so there is nothing to guard against here.
     /// </summary>
     public static long? GetQuotaBytes(this ClaimsPrincipal principal)
     {
         var value = principal.FindFirstValue(JwtConstants.QuotaBytesClaim);
-        return value is null ? null : long.Parse(value);
+        if (value is null)
+            return null;
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var quotaBytes)
+            ? quotaBytes
+            : null;
     }
 }

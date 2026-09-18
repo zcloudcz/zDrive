@@ -31,6 +31,11 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
 
     public const int MaxVersionsPerFile = 3;
 
+    // Small enough that a couple of file versions can push a test user over
+    // it, without needing to actually move that many bytes (see
+    // StorageUsageFlowTests).
+    public const long DefaultUserQuotaBytes = 1000;
+
     // Generated at runtime (not a literal) so nothing here looks like a
     // committed secret to the repo's gitleaks scan. This suite never
     // validates a grant string against the key, only the DTO fields — the
@@ -79,6 +84,9 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
 
             services.PostConfigure<ZDrive.Shared.Auth.ShareDownloadGrantOptions>(
                 options => options.DownloadGrantKey = TestShareGrantKey);
+
+            services.PostConfigure<ZDrive.FileService.Application.Options.StorageOptions>(
+                options => options.DefaultUserQuotaBytes = DefaultUserQuotaBytes);
         });
     }
 

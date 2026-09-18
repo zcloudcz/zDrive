@@ -42,9 +42,15 @@ public sealed class RestoreFileVersionCommandHandler : IRequestHandler<RestoreFi
         // Restore records a NEW file_versions row carrying the source's
         // SizeBytes (see CLAUDE.md "Blob versioning" — restore-as-new-version).
         // That row is counted by the usage SUM the same as any other version,
-        // so it must clear the same quota check a fresh upload would.
+        // so it must clear the same quota check a fresh upload would — net of
+        // whatever retention prunes for this same write (see CreateFileVersion-
+        // CommandHandler for why: otherwise a user at the limit could never
+        // restore a version even when doing so frees more than it adds).
+        var toPrune = await SelectVersionsToPruneAsync(request.FileId, cancellationToken);
+        var prunedBytes = toPrune.Sum(v => v.SizeBytes);
+        var additionalBytes = Math.Max(0, source.SizeBytes - prunedBytes);
         await _quota.EnsureCanStoreAsync(
-            request.TenantId, request.UserId, request.ClaimQuotaBytes, source.SizeBytes, cancellationToken);
+            request.TenantId, request.UserId, request.ClaimQuotaBytes, additionalBytes, cancellationToken);
 
         var maxVersion = await _db.FileVersions
             .Where(v => v.FileId == request.FileId)
@@ -69,19 +75,29 @@ public sealed class RestoreFileVersionCommandHandler : IRequestHandler<RestoreFi
         file.UpdatedAt = DateTime.UtcNow;
 
         _db.FileVersions.Add(restored);
-        if (_options.MaxVersionsPerFile > 0)
-        {
-            // The restored version is still only tracked; reserve one slot
-            // for it, just as CreateFileVersion does for a new upload.
-            var excess = await _db.FileVersions
-                .Where(v => v.FileId == request.FileId)
-                .OrderByDescending(v => v.VersionNumber)
-                .Skip(_options.MaxVersionsPerFile - 1)
-                .ToListAsync(cancellationToken);
-            _db.FileVersions.RemoveRange(excess);
-        }
+        _db.FileVersions.RemoveRange(toPrune);
         await _db.SaveChangesAsync(cancellationToken);
 
         return restored.ToDto();
+    }
+
+    /// <summary>
+    /// Retention policy: keeps at most MaxVersionsPerFile versions (including
+    /// the one being added in this request); the oldest rows are selected for
+    /// removal. Single source of truth for "what retention prunes" — used both
+    /// to net the quota check against freed bytes and to actually delete.
+    /// </summary>
+    private async Task<List<FileVersion>> SelectVersionsToPruneAsync(Guid fileId, CancellationToken cancellationToken)
+    {
+        if (_options.MaxVersionsPerFile <= 0)
+            return [];
+
+        // The restored version is still only tracked; reserve one slot for it,
+        // just as CreateFileVersion does for a new upload.
+        return await _db.FileVersions
+            .Where(v => v.FileId == fileId)
+            .OrderByDescending(v => v.VersionNumber)
+            .Skip(_options.MaxVersionsPerFile - 1)
+            .ToListAsync(cancellationToken);
     }
 }

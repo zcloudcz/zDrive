@@ -34,10 +34,19 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
                 cancellationToken)
             ?? throw new NotFoundException("FileNode", request.FileId);
 
+        // Determine what retention will prune for this write BEFORE checking
+        // quota: a write that itself frees old versions must be judged net of
+        // those freed bytes — otherwise a user sitting at the limit could
+        // never replace even a tiny file whose retention-pruned predecessor
+        // was huge, and nothing but manual deletion would unstick them.
+        var toPrune = await SelectVersionsToPruneAsync(request.FileId, cancellationToken);
+        var prunedBytes = toPrune.Sum(v => v.SizeBytes);
+        var additionalBytes = Math.Max(0, request.SizeBytes - prunedBytes);
+
         // Single enforcement point for the quota check — both the authenticated
         // and the link-driven upload flow (package A) go through this handler.
         await _quota.EnsureCanStoreAsync(
-            request.TenantId, request.UserId, request.ClaimQuotaBytes, request.SizeBytes, cancellationToken);
+            request.TenantId, request.UserId, request.ClaimQuotaBytes, additionalBytes, cancellationToken);
 
         var maxVersion = await _db.FileVersions
             .Where(v => v.FileId == request.FileId)
@@ -62,7 +71,10 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
 
         _db.FileVersions.Add(version);
 
-        await PruneOldVersionsAsync(request.FileId, cancellationToken);
+        // Blob manifest snapshots are content-addressed and shared, so removing
+        // metadata rows is enough — orphaned snapshots are garbage, not data loss.
+        foreach (var old in toPrune)
+            _db.FileVersions.Remove(old);
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -71,25 +83,22 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
 
     /// <summary>
     /// Retention policy: keeps at most MaxVersionsPerFile versions (including
-    /// the one being added in this request); the oldest rows are removed.
-    /// Blob manifest snapshots are content-addressed and shared, so removing
-    /// metadata rows is enough — orphaned snapshots are garbage, not data loss.
+    /// the one being added in this request); the oldest rows are selected for
+    /// removal. Single source of truth for "what retention prunes" — used both
+    /// to net the quota check against freed bytes and to actually delete.
     /// </summary>
-    private async Task PruneOldVersionsAsync(Guid fileId, CancellationToken cancellationToken)
+    private async Task<List<FileVersion>> SelectVersionsToPruneAsync(Guid fileId, CancellationToken cancellationToken)
     {
         if (_options.MaxVersionsPerFile <= 0)
-            return;
+            return [];
 
         // The new version is only in the change tracker — this query hits the
         // database and does not see it. Keeping MaxVersionsPerFile - 1 existing
         // rows therefore yields exactly MaxVersionsPerFile after SaveChanges.
-        var excess = await _db.FileVersions
+        return await _db.FileVersions
             .Where(v => v.FileId == fileId)
             .OrderByDescending(v => v.VersionNumber)
             .Skip(Math.Max(0, _options.MaxVersionsPerFile - 1))
             .ToListAsync(cancellationToken);
-
-        foreach (var old in excess)
-            _db.FileVersions.Remove(old);
     }
 }
