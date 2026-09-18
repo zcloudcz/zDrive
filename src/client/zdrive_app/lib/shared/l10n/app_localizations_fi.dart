@@ -193,6 +193,13 @@ class AppLocalizationsFi extends AppLocalizations {
   String get readWrite => 'Luku ja kirjoitus';
 
   @override
+  String get allowDelete => 'Salli poistaminen';
+
+  @override
+  String get allowDeleteHelp =>
+      'Poistetut kohteet siirtyvät omistajan roskakoriin.';
+
+  @override
   String get expiresAt => 'Voimassa asti';
 
   @override

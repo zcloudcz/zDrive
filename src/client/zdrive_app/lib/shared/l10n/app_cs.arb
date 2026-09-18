@@ -60,6 +60,8 @@
   "permission": "Oprávnění",
   "readOnly": "Jen ke čtení",
   "readWrite": "Čtení a zápis",
+  "allowDelete": "Povolit mazání",
+  "allowDeleteHelp": "Smazané položky skončí v koši vlastníka.",
   "expiresAt": "Platnost do",
   "never": "Neomezeně",
   "uploadProgress": "Nahrávání...",

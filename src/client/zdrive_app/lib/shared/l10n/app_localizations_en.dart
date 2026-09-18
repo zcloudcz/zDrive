@@ -190,6 +190,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get readWrite => 'Read & Write';
 
   @override
+  String get allowDelete => 'Allow deleting';
+
+  @override
+  String get allowDeleteHelp => 'Deleted items go to the owner\'s trash.';
+
+  @override
   String get expiresAt => 'Expires at';
 
   @override

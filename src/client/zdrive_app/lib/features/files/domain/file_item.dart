@@ -46,6 +46,7 @@ class ShareInfo extends Equatable {
   final SharePermission permission;
   final String linkToken;
   final DateTime? expiresAt;
+  final bool allowDelete;
 
   const ShareInfo({
     required this.id,
@@ -53,10 +54,12 @@ class ShareInfo extends Equatable {
     required this.permission,
     required this.linkToken,
     this.expiresAt,
+    this.allowDelete = false,
   });
 
   @override
-  List<Object?> get props => [id, fileId, permission, linkToken, expiresAt];
+  List<Object?> get props =>
+      [id, fileId, permission, linkToken, expiresAt, allowDelete];
 }
 
 enum SharePermission { read, write }

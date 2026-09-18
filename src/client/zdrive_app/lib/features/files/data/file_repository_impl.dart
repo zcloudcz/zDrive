@@ -131,12 +131,14 @@ class FileRepositoryImpl implements FileRepository {
   Future<ShareInfo> createShare(
     String fileId,
     SharePermission permission,
-    DateTime? expiresAt,
-  ) async {
+    DateTime? expiresAt, {
+    bool allowDelete = false,
+  }) async {
     final dto = await _remoteDataSource.createShare(
       fileId,
       permission.name,
       expiresAt,
+      allowDelete: allowDelete,
     );
     return ShareInfo(
       id: dto.id,
@@ -145,6 +147,7 @@ class FileRepositoryImpl implements FileRepository {
           dto.permission == 'write' ? SharePermission.write : SharePermission.read,
       linkToken: dto.linkToken,
       expiresAt: dto.expiresAt,
+      allowDelete: dto.allowDelete,
     );
   }
 

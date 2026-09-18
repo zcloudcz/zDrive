@@ -193,6 +193,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get readWrite => 'Lecture et écriture';
 
   @override
+  String get allowDelete => 'Autoriser la suppression';
+
+  @override
+  String get allowDeleteHelp =>
+      'Les éléments supprimés vont dans la corbeille du propriétaire.';
+
+  @override
   String get expiresAt => 'Expire le';
 
   @override

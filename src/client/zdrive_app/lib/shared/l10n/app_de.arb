@@ -54,6 +54,8 @@
   "permission": "Berechtigung",
   "readOnly": "Nur Lesen",
   "readWrite": "Lesen und Schreiben",
+  "allowDelete": "Löschen erlauben",
+  "allowDeleteHelp": "Gelöschte Elemente landen im Papierkorb des Besitzers.",
   "expiresAt": "Gültig bis",
   "never": "Nie",
   "uploadProgress": "Wird hochgeladen…",

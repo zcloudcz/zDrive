@@ -54,6 +54,8 @@
   "permission": "Oprávnenie",
   "readOnly": "Iba čítanie",
   "readWrite": "Čítanie a zápis",
+  "allowDelete": "Povoliť mazanie",
+  "allowDeleteHelp": "Vymazané položky skončia v koši vlastníka.",
   "expiresAt": "Platnosť do",
   "never": "Nikdy",
   "uploadProgress": "Nahráva sa…",

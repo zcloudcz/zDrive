@@ -150,14 +150,16 @@ class FileRemoteDataSource {
   Future<ShareDto> createShare(
     String fileId,
     String permission,
-    DateTime? expiresAt,
-  ) async {
+    DateTime? expiresAt, {
+    bool allowDelete = false,
+  }) async {
     final response = await _dio.post(
       ApiConstants.shares,
       data: {
         'fileId': fileId,
         'permission': permission,
         if (expiresAt != null) 'expiresAt': expiresAt.toIso8601String(),
+        'allowDelete': allowDelete,
       },
     );
     return ShareDto.fromJson(unwrapMap(response));
