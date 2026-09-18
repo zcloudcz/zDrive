@@ -50,15 +50,19 @@ public sealed class CreateShareFileVersionCommandHandler : IRequestHandler<Creat
         if (file is null || file.IsFolder)
             throw new NotFoundException("FileNode", request.FileId);
 
+        // A single-file share's root IS the versioned file — same ParentId
+        // leak as GetShareByToken/GetShareInfo if not blanked here too.
+        var isShareRoot = file.Id == share.FileId;
+
         // Idempotent replay: the current version already IS these bytes.
         if (file.ManifestHash == receipt.ManifestHash)
-            return file.ToDto().ToPublicDto();
+            return file.ToDto().ToPublicDto(isShareRoot);
 
         await _mediator.Send(new CreateFileVersionCommand(
             file.TenantId, file.UserId, file.Id, receipt.ManifestHash, receipt.SizeBytes, receipt.ManifestHash, Comment: null),
             cancellationToken);
 
         var updated = await _db.FileNodes.AsNoTracking().FirstAsync(f => f.Id == file.Id, cancellationToken);
-        return updated.ToDto().ToPublicDto();
+        return updated.ToDto().ToPublicDto(isShareRoot);
     }
 }

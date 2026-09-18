@@ -404,6 +404,12 @@ abstract class AppLocalizations {
   /// **'No files'**
   String get noFiles;
 
+  /// No description provided for @noFilesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload a file or create a folder to get started.'**
+  String get noFilesBody;
+
   /// No description provided for @createFolder.
   ///
   /// In en, this message translates to:
@@ -863,6 +869,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Download'**
   String get download;
+
+  /// No description provided for @shareAvailableUntil.
+  ///
+  /// In en, this message translates to:
+  /// **'Available until {date}'**
+  String shareAvailableUntil(Object date);
+
+  /// No description provided for @shareWhatIsZDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'What is zDrive?'**
+  String get shareWhatIsZDrive;
+
+  /// No description provided for @shareFooterTagline.
+  ///
+  /// In en, this message translates to:
+  /// **'Secured by zDrive'**
+  String get shareFooterTagline;
+
+  /// No description provided for @tagline.
+  ///
+  /// In en, this message translates to:
+  /// **'Your files, everywhere.'**
+  String get tagline;
+
+  /// No description provided for @authBenefitSync.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync across every device'**
+  String get authBenefitSync;
+
+  /// No description provided for @authBenefitShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share files and folders securely'**
+  String get authBenefitShare;
+
+  /// No description provided for @authBenefitSecure.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted storage, always'**
+  String get authBenefitSecure;
 }
 
 class _AppLocalizationsDelegate

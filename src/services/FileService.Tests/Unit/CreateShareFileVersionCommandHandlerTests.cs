@@ -65,6 +65,9 @@ public sealed class CreateShareFileVersionCommandHandlerTests
 
         result.ManifestHash.Should().Be(new string('b', 64));
         result.SizeBytes.Should().Be(99);
+        // ctx.File IS the shared root here (a single-file share) — its real
+        // ParentId is outside the share and must be blanked, same as GetShareByToken/info.
+        result.ParentId.Should().BeNull();
     }
 
     [Fact]

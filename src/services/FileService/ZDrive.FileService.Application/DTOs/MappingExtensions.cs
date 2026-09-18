@@ -56,11 +56,18 @@ public static class MappingExtensions
     // every anonymous shares/link/* handler that returns a FileDto/ShareDto
     // (GetShareByToken, ListSharedChildren, GetShareInfo, CreateSharedFolder,
     // CreateShareFileVersion) — one mapping, not one per endpoint.
-    public static FileDto ToPublicDto(this FileDto dto) => dto with
+    //
+    // isShareRoot: the shared node's real ParentId points OUTSIDE the share
+    // (the owner's folder above it), which would let a client "navigate up"
+    // out of the share — so the ROOT always reports ParentId = null.
+    // Descendants keep their real ParentId (a direct child's equals the root
+    // id, which the link already exposes, and clients need it to navigate).
+    public static FileDto ToPublicDto(this FileDto dto, bool isShareRoot = false) => dto with
     {
         UserId = Guid.Empty,
         TenantId = Guid.Empty,
-        BlobPath = null
+        BlobPath = null,
+        ParentId = isShareRoot ? null : dto.ParentId
     };
 
     public static ShareDto ToPublicDto(this ShareDto dto) => dto with

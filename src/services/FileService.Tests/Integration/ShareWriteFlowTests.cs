@@ -83,6 +83,9 @@ public sealed class ShareWriteFlowTests : IClassFixture<FileServiceFactory>
         info.Permission.Should().Be("Write");
         info.AllowDelete.Should().BeTrue();
         info.Root.Id.Should().Be(root.Id);
+        // The root's real ParentId is outside the share (the owner's folder above
+        // it) — must be blanked, or a client could "navigate up" out of the share.
+        info.Root.ParentId.Should().BeNull();
         info.Quota.Should().NotBeNull();
         info.Quota!.LimitBytes.Should().BeGreaterThan(0);
     }

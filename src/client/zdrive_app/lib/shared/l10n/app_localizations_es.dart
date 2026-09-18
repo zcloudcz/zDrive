@@ -164,6 +164,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get noFiles => 'No hay archivos';
 
   @override
+  String get noFilesBody => 'Sube un archivo o crea una carpeta para empezar.';
+
+  @override
   String get createFolder => 'Crear carpeta';
 
   @override
@@ -419,4 +422,27 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get download => 'Descargar';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Disponible hasta $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => '¿Qué es zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Protegido por zDrive';
+
+  @override
+  String get tagline => 'Tus archivos, en todas partes.';
+
+  @override
+  String get authBenefitSync => 'Sincronización en todos los dispositivos';
+
+  @override
+  String get authBenefitShare => 'Comparte archivos y carpetas de forma segura';
+
+  @override
+  String get authBenefitSecure => 'Almacenamiento siempre cifrado';
 }

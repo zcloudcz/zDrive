@@ -157,6 +157,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get noFiles => '没有文件';
 
   @override
+  String get noFilesBody => '上传文件或新建文件夹即可开始。';
+
+  @override
   String get createFolder => '创建文件夹';
 
   @override
@@ -402,4 +405,27 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get download => '下载';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return '有效期至 $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => '什么是 zDrive?';
+
+  @override
+  String get shareFooterTagline => '由 zDrive 提供安全保障';
+
+  @override
+  String get tagline => '您的文件，随时随地。';
+
+  @override
+  String get authBenefitSync => '跨所有设备同步';
+
+  @override
+  String get authBenefitShare => '安全共享文件和文件夹';
+
+  @override
+  String get authBenefitSecure => '始终加密存储';
 }

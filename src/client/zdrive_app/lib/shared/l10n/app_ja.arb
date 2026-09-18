@@ -43,6 +43,7 @@
   "clearSearch": "検索をクリア",
   "refresh": "更新",
   "noFiles": "ファイルがありません",
+  "noFilesBody": "ファイルをアップロードするか、フォルダを作成して始めましょう。",
   "createFolder": "フォルダーを作成",
   "folderName": "フォルダー名",
   "enterFolderName": "フォルダー名を入力",
@@ -124,5 +125,12 @@
   "sharePasswordProtectedTitle": "パスワードが必要です",
   "sharePasswordProtectedMessage": "この共有リンクはパスワードで保護されていますが、まだサポートされていません。",
   "openZDrive": "zDriveを開く",
-  "download": "ダウンロード"
+  "download": "ダウンロード",
+  "shareAvailableUntil": "{date}まで利用可能",
+  "shareWhatIsZDrive": "zDriveとは?",
+  "shareFooterTagline": "zDriveによって保護されています",
+  "tagline": "あなたのファイルを、どこでも。",
+  "authBenefitSync": "すべてのデバイスで同期",
+  "authBenefitShare": "ファイルとフォルダを安全に共有",
+  "authBenefitSecure": "常に暗号化されたストレージ"
 }

@@ -43,6 +43,7 @@
   "clearSearch": "Vymazať vyhľadávanie",
   "refresh": "Obnoviť",
   "noFiles": "Žiadne súbory",
+  "noFilesBody": "Nahrajte súbor alebo vytvorte priečinok a začnite.",
   "createFolder": "Vytvoriť priečinok",
   "folderName": "Názov priečinka",
   "enterFolderName": "Zadajte názov priečinka",
@@ -124,5 +125,12 @@
   "sharePasswordProtectedTitle": "Vyžaduje sa heslo",
   "sharePasswordProtectedMessage": "Tento zdieľaný odkaz je chránený heslom, čo zatiaľ nie je podporované.",
   "openZDrive": "Otvoriť zDrive",
-  "download": "Stiahnuť"
+  "download": "Stiahnuť",
+  "shareAvailableUntil": "Dostupné do {date}",
+  "shareWhatIsZDrive": "Čo je zDrive?",
+  "shareFooterTagline": "Zabezpečené pomocou zDrive",
+  "tagline": "Vaše súbory, kdekoľvek.",
+  "authBenefitSync": "Synchronizácia naprieč všetkými zariadeniami",
+  "authBenefitShare": "Bezpečné zdieľanie súborov a priečinkov",
+  "authBenefitSecure": "Vždy šifrované úložisko"
 }

@@ -43,6 +43,7 @@
   "clearSearch": "Tyhjennä haku",
   "refresh": "Päivitä",
   "noFiles": "Ei tiedostoja",
+  "noFilesBody": "Aloita lataamalla tiedosto tai luomalla kansio.",
   "createFolder": "Luo kansio",
   "folderName": "Kansion nimi",
   "enterFolderName": "Anna kansion nimi",
@@ -124,5 +125,12 @@
   "sharePasswordProtectedTitle": "Salasana vaaditaan",
   "sharePasswordProtectedMessage": "Tämä jakolinkki on salasanasuojattu, mitä ei vielä tueta.",
   "openZDrive": "Avaa zDrive",
-  "download": "Lataa"
+  "download": "Lataa",
+  "shareAvailableUntil": "Saatavilla {date} asti",
+  "shareWhatIsZDrive": "Mikä on zDrive?",
+  "shareFooterTagline": "zDriven suojaama",
+  "tagline": "Tiedostosi, kaikkialla.",
+  "authBenefitSync": "Synkronointi kaikilla laitteilla",
+  "authBenefitShare": "Jaa tiedostoja ja kansioita turvallisesti",
+  "authBenefitSecure": "Aina salattu tallennustila"
 }

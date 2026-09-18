@@ -158,6 +158,10 @@ class AppLocalizationsSv extends AppLocalizations {
   String get noFiles => 'Inga filer';
 
   @override
+  String get noFilesBody =>
+      'Ladda upp en fil eller skapa en mapp för att komma igång.';
+
+  @override
   String get createFolder => 'Skapa mapp';
 
   @override
@@ -412,4 +416,27 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get download => 'Ladda ner';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Tillgänglig till $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Vad är zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Skyddad av zDrive';
+
+  @override
+  String get tagline => 'Dina filer, överallt.';
+
+  @override
+  String get authBenefitSync => 'Synkronisering på alla enheter';
+
+  @override
+  String get authBenefitShare => 'Dela filer och mappar säkert';
+
+  @override
+  String get authBenefitSecure => 'Alltid krypterad lagring';
 }

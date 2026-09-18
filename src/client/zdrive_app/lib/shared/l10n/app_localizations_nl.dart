@@ -160,6 +160,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get noFiles => 'Geen bestanden';
 
   @override
+  String get noFilesBody =>
+      'Upload een bestand of maak een map aan om te beginnen.';
+
+  @override
   String get createFolder => 'Map maken';
 
   @override
@@ -416,4 +420,27 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get download => 'Downloaden';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Beschikbaar tot $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Wat is zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Beveiligd door zDrive';
+
+  @override
+  String get tagline => 'Je bestanden, overal.';
+
+  @override
+  String get authBenefitSync => 'Synchronisatie op alle apparaten';
+
+  @override
+  String get authBenefitShare => 'Bestanden en mappen veilig delen';
+
+  @override
+  String get authBenefitSecure => 'Altijd versleutelde opslag';
 }

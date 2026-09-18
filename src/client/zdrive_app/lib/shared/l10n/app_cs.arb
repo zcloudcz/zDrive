@@ -49,6 +49,7 @@
   "gridView": "Zobrazit mřížku",
   "listView": "Zobrazit seznam",
   "noFiles": "Žádné soubory",
+  "noFilesBody": "Nahrajte soubor nebo vytvořte složku a začněte.",
   "createFolder": "Vytvořit složku",
   "folderName": "Název složky",
   "enterFolderName": "Zadejte název složky",
@@ -179,6 +180,13 @@
   "sharePasswordProtectedTitle": "Vyžaduje se heslo",
   "sharePasswordProtectedMessage": "Tento sdílený odkaz je chráněný heslem, což zatím není podporováno.",
   "openZDrive": "Otevřít zDrive",
-  "download": "Stáhnout"
+  "download": "Stáhnout",
+  "shareAvailableUntil": "Dostupné do {date}",
+  "shareWhatIsZDrive": "Co je zDrive?",
+  "shareFooterTagline": "Zabezpečeno pomocí zDrive",
+  "tagline": "Vaše soubory, kdekoli.",
+  "authBenefitSync": "Synchronizace napříč všemi zařízeními",
+  "authBenefitShare": "Bezpečné sdílení souborů a složek",
+  "authBenefitSecure": "Vždy šifrované úložiště"
 
 }

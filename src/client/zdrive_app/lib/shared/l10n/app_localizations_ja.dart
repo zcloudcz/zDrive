@@ -157,6 +157,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get noFiles => 'ファイルがありません';
 
   @override
+  String get noFilesBody => 'ファイルをアップロードするか、フォルダを作成して始めましょう。';
+
+  @override
   String get createFolder => 'フォルダーを作成';
 
   @override
@@ -403,4 +406,27 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get download => 'ダウンロード';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return '$dateまで利用可能';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'zDriveとは?';
+
+  @override
+  String get shareFooterTagline => 'zDriveによって保護されています';
+
+  @override
+  String get tagline => 'あなたのファイルを、どこでも。';
+
+  @override
+  String get authBenefitSync => 'すべてのデバイスで同期';
+
+  @override
+  String get authBenefitShare => 'ファイルとフォルダを安全に共有';
+
+  @override
+  String get authBenefitSecure => '常に暗号化されたストレージ';
 }

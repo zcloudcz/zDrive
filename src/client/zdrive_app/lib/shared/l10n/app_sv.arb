@@ -43,6 +43,7 @@
   "clearSearch": "Rensa sökning",
   "refresh": "Uppdatera",
   "noFiles": "Inga filer",
+  "noFilesBody": "Ladda upp en fil eller skapa en mapp för att komma igång.",
   "createFolder": "Skapa mapp",
   "folderName": "Mappnamn",
   "enterFolderName": "Ange mappnamn",
@@ -124,5 +125,12 @@
   "sharePasswordProtectedTitle": "Lösenord krävs",
   "sharePasswordProtectedMessage": "Den här delningslänken är lösenordsskyddad, vilket ännu inte stöds.",
   "openZDrive": "Öppna zDrive",
-  "download": "Ladda ner"
+  "download": "Ladda ner",
+  "shareAvailableUntil": "Tillgänglig till {date}",
+  "shareWhatIsZDrive": "Vad är zDrive?",
+  "shareFooterTagline": "Skyddad av zDrive",
+  "tagline": "Dina filer, överallt.",
+  "authBenefitSync": "Synkronisering på alla enheter",
+  "authBenefitShare": "Dela filer och mappar säkert",
+  "authBenefitSecure": "Alltid krypterad lagring"
 }

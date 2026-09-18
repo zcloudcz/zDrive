@@ -162,6 +162,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get noFiles => 'Keine Dateien';
 
   @override
+  String get noFilesBody =>
+      'Laden Sie eine Datei hoch oder erstellen Sie einen Ordner, um loszulegen.';
+
+  @override
   String get createFolder => 'Ordner erstellen';
 
   @override
@@ -420,4 +424,27 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get download => 'Herunterladen';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Verfügbar bis $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Was ist zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Gesichert durch zDrive';
+
+  @override
+  String get tagline => 'Deine Dateien, überall.';
+
+  @override
+  String get authBenefitSync => 'Synchronisierung auf allen Geräten';
+
+  @override
+  String get authBenefitShare => 'Sicheres Teilen von Dateien und Ordnern';
+
+  @override
+  String get authBenefitSecure => 'Immer verschlüsselter Speicher';
 }

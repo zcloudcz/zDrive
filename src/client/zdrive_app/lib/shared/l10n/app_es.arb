@@ -43,6 +43,7 @@
   "clearSearch": "Borrar búsqueda",
   "refresh": "Actualizar",
   "noFiles": "No hay archivos",
+  "noFilesBody": "Sube un archivo o crea una carpeta para empezar.",
   "createFolder": "Crear carpeta",
   "folderName": "Nombre de la carpeta",
   "enterFolderName": "Introduce el nombre de la carpeta",
@@ -124,5 +125,12 @@
   "sharePasswordProtectedTitle": "Se requiere contraseña",
   "sharePasswordProtectedMessage": "Este enlace está protegido con contraseña, algo que aún no es compatible.",
   "openZDrive": "Abrir zDrive",
-  "download": "Descargar"
+  "download": "Descargar",
+  "shareAvailableUntil": "Disponible hasta {date}",
+  "shareWhatIsZDrive": "¿Qué es zDrive?",
+  "shareFooterTagline": "Protegido por zDrive",
+  "tagline": "Tus archivos, en todas partes.",
+  "authBenefitSync": "Sincronización en todos los dispositivos",
+  "authBenefitShare": "Comparte archivos y carpetas de forma segura",
+  "authBenefitSecure": "Almacenamiento siempre cifrado"
 }

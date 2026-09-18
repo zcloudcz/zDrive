@@ -1,7 +1,7 @@
 name: zdrive_app
 description: "zDrive — cloud storage platform"
 publish_to: 'none'
-version: 0.2.9+11
+version: 0.3.0+12
 
 environment:
   sdk: ^3.11.0
@@ -52,3 +52,10 @@ flutter:
     - assets/branding/zdrive-mark.png
     - assets/branding/zdrive-mark@2x.png
     - assets/branding/zdrive-mark@3x.png
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600

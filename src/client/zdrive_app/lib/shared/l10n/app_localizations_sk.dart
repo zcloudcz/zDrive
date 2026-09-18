@@ -159,6 +159,10 @@ class AppLocalizationsSk extends AppLocalizations {
   String get noFiles => 'Žiadne súbory';
 
   @override
+  String get noFilesBody =>
+      'Nahrajte súbor alebo vytvorte priečinok a začnite.';
+
+  @override
   String get createFolder => 'Vytvoriť priečinok';
 
   @override
@@ -413,4 +417,27 @@ class AppLocalizationsSk extends AppLocalizations {
 
   @override
   String get download => 'Stiahnuť';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Dostupné do $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Čo je zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Zabezpečené pomocou zDrive';
+
+  @override
+  String get tagline => 'Vaše súbory, kdekoľvek.';
+
+  @override
+  String get authBenefitSync => 'Synchronizácia naprieč všetkými zariadeniami';
+
+  @override
+  String get authBenefitShare => 'Bezpečné zdieľanie súborov a priečinkov';
+
+  @override
+  String get authBenefitSecure => 'Vždy šifrované úložisko';
 }

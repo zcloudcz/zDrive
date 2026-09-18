@@ -56,6 +56,7 @@
   "gridView": "Grid view",
   "listView": "List view",
   "noFiles": "No files",
+  "noFilesBody": "Upload a file or create a folder to get started.",
   "createFolder": "Create folder",
   "folderName": "Folder name",
   "enterFolderName": "Enter folder name",
@@ -200,6 +201,13 @@
   "sharePasswordProtectedTitle": "Password required",
   "sharePasswordProtectedMessage": "This share link is password-protected, which is not supported yet.",
   "openZDrive": "Open zDrive",
-  "download": "Download"
+  "download": "Download",
+  "shareAvailableUntil": "Available until {date}",
+  "shareWhatIsZDrive": "What is zDrive?",
+  "shareFooterTagline": "Secured by zDrive",
+  "tagline": "Your files, everywhere.",
+  "authBenefitSync": "Sync across every device",
+  "authBenefitShare": "Share files and folders securely",
+  "authBenefitSecure": "Encrypted storage, always"
 
 }

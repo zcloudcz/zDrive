@@ -158,6 +158,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get noFiles => 'Žádné soubory';
 
   @override
+  String get noFilesBody => 'Nahrajte soubor nebo vytvořte složku a začněte.';
+
+  @override
   String get createFolder => 'Vytvořit složku';
 
   @override
@@ -411,4 +414,27 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get download => 'Stáhnout';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Dostupné do $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Co je zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Zabezpečeno pomocí zDrive';
+
+  @override
+  String get tagline => 'Vaše soubory, kdekoli.';
+
+  @override
+  String get authBenefitSync => 'Synchronizace napříč všemi zařízeními';
+
+  @override
+  String get authBenefitShare => 'Bezpečné sdílení souborů a složek';
+
+  @override
+  String get authBenefitSecure => 'Vždy šifrované úložiště';
 }

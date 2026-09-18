@@ -43,6 +43,7 @@
   "clearSearch": "Zoekopdracht wissen",
   "refresh": "Vernieuwen",
   "noFiles": "Geen bestanden",
+  "noFilesBody": "Upload een bestand of maak een map aan om te beginnen.",
   "createFolder": "Map maken",
   "folderName": "Mapnaam",
   "enterFolderName": "Voer een mapnaam in",
@@ -124,5 +125,12 @@
   "sharePasswordProtectedTitle": "Wachtwoord vereist",
   "sharePasswordProtectedMessage": "Deze deellink is met een wachtwoord beveiligd, wat nog niet wordt ondersteund.",
   "openZDrive": "zDrive openen",
-  "download": "Downloaden"
+  "download": "Downloaden",
+  "shareAvailableUntil": "Beschikbaar tot {date}",
+  "shareWhatIsZDrive": "Wat is zDrive?",
+  "shareFooterTagline": "Beveiligd door zDrive",
+  "tagline": "Je bestanden, overal.",
+  "authBenefitSync": "Synchronisatie op alle apparaten",
+  "authBenefitShare": "Bestanden en mappen veilig delen",
+  "authBenefitSecure": "Altijd versleutelde opslag"
 }

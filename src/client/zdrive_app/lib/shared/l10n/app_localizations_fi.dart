@@ -160,6 +160,9 @@ class AppLocalizationsFi extends AppLocalizations {
   String get noFiles => 'Ei tiedostoja';
 
   @override
+  String get noFilesBody => 'Aloita lataamalla tiedosto tai luomalla kansio.';
+
+  @override
   String get createFolder => 'Luo kansio';
 
   @override
@@ -416,4 +419,27 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get download => 'Lataa';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Saatavilla $date asti';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Mikä on zDrive?';
+
+  @override
+  String get shareFooterTagline => 'zDriven suojaama';
+
+  @override
+  String get tagline => 'Tiedostosi, kaikkialla.';
+
+  @override
+  String get authBenefitSync => 'Synkronointi kaikilla laitteilla';
+
+  @override
+  String get authBenefitShare => 'Jaa tiedostoja ja kansioita turvallisesti';
+
+  @override
+  String get authBenefitSecure => 'Aina salattu tallennustila';
 }
