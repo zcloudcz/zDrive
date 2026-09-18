@@ -427,4 +427,16 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get shareFooterTagline => 'zDriven suojaama';
+
+  @override
+  String get tagline => 'Tiedostosi, kaikkialla.';
+
+  @override
+  String get authBenefitSync => 'Synkronointi kaikilla laitteilla';
+
+  @override
+  String get authBenefitShare => 'Jaa tiedostoja ja kansioita turvallisesti';
+
+  @override
+  String get authBenefitSecure => 'Aina salattu tallennustila';
 }

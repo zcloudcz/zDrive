@@ -127,5 +127,9 @@
   "download": "ダウンロード",
   "shareAvailableUntil": "{date}まで利用可能",
   "shareWhatIsZDrive": "zDriveとは?",
-  "shareFooterTagline": "zDriveによって保護されています"
+  "shareFooterTagline": "zDriveによって保護されています",
+  "tagline": "あなたのファイルを、どこでも。",
+  "authBenefitSync": "すべてのデバイスで同期",
+  "authBenefitShare": "ファイルとフォルダを安全に共有",
+  "authBenefitSecure": "常に暗号化されたストレージ"
 }

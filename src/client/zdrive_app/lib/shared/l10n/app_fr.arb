@@ -127,5 +127,9 @@
   "download": "Télécharger",
   "shareAvailableUntil": "Disponible jusqu'au {date}",
   "shareWhatIsZDrive": "Qu'est-ce que zDrive ?",
-  "shareFooterTagline": "Sécurisé par zDrive"
+  "shareFooterTagline": "Sécurisé par zDrive",
+  "tagline": "Vos fichiers, partout.",
+  "authBenefitSync": "Synchronisation sur tous les appareils",
+  "authBenefitShare": "Partagez fichiers et dossiers en toute sécurité",
+  "authBenefitSecure": "Stockage toujours chiffré"
 }

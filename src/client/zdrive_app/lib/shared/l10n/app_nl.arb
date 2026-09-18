@@ -127,5 +127,9 @@
   "download": "Downloaden",
   "shareAvailableUntil": "Beschikbaar tot {date}",
   "shareWhatIsZDrive": "Wat is zDrive?",
-  "shareFooterTagline": "Beveiligd door zDrive"
+  "shareFooterTagline": "Beveiligd door zDrive",
+  "tagline": "Je bestanden, overal.",
+  "authBenefitSync": "Synchronisatie op alle apparaten",
+  "authBenefitShare": "Bestanden en mappen veilig delen",
+  "authBenefitSecure": "Altijd versleutelde opslag"
 }
