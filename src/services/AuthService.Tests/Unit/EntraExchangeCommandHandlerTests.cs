@@ -85,7 +85,7 @@ public sealed class EntraExchangeCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ValidatorFailure_PropagatesAsUnauthorized()
+    public async Task Handle_ValidatorFailure_PropagatesForbidden()
     {
         await using var db = CreateDb();
         var handler = new EntraExchangeCommandHandler(

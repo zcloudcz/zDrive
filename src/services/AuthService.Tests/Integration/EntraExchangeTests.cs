@@ -124,6 +124,44 @@ public sealed class EntraExchangeEnabledTests : IClassFixture<EntraEnabledFactor
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
+
+    [Fact]
+    public async Task EntraExchange_ConcurrentRequestsSameIdentity_CreateExactlyOneUserAndMapping()
+    {
+        _factory.FakeValidator.ExceptionToThrow = null;
+        var identity = new EntraIdentity(
+            "test-tenant", Guid.NewGuid().ToString(), "race@example.com", "Race User");
+        _factory.FakeValidator.IdentityToReturn = identity;
+
+        // Both requests hit the (tid, oid)-unique-index race the handler's
+        // DbUpdateException catch block exists for — the loser must recover
+        // to the winner's user, not fail or create a duplicate.
+        var first = _client.PostAsJsonAsync("/api/v1/auth/entra", new { accessToken = "token-1" });
+        var second = _client.PostAsJsonAsync("/api/v1/auth/entra", new { accessToken = "token-2" });
+        var responses = await Task.WhenAll(first, second);
+
+        responses.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.OK);
+
+        var userIds = new HashSet<Guid>();
+        foreach (var response in responses)
+        {
+            var result = await response.Content.ReadFromJsonAsync<ApiResponse<AuthTokenDto>>();
+
+            var profileRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/users/me");
+            profileRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", result!.Data!.AccessToken);
+            var profileResponse = await _client.SendAsync(profileRequest);
+            var profile = await profileResponse.Content.ReadFromJsonAsync<ApiResponse<UserDto>>();
+            userIds.Add(profile!.Data!.Id);
+        }
+
+        userIds.Should().ContainSingle();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        (await db.Users.CountAsync(u => u.Email == "race@example.com")).Should().Be(1);
+        (await db.ExternalIdentities.CountAsync(
+            ei => ei.ProviderTenantId == identity.TenantId && ei.ObjectId == identity.ObjectId)).Should().Be(1);
+    }
 }
 
 [Trait("Category", "Integration")]

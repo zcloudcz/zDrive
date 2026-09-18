@@ -35,7 +35,10 @@ public sealed class FakeEntraTokenValidator : IEntraTokenValidator
 /// registered once per DI container — needed for integration tests, where
 /// the factory (and its container) is shared across several test cases via
 /// IClassFixture and each case configures its own behavior before calling
-/// the endpoint.
+/// the endpoint. Safe for concurrent ValidateAsync calls (e.g. a test firing
+/// several requests at once with Task.WhenAll): reference reads/writes are
+/// atomic in .NET, and every test sets both properties once, before issuing
+/// any requests — there is no concurrent writer to race against.
 /// </summary>
 public sealed class MutableFakeEntraTokenValidator : IEntraTokenValidator
 {

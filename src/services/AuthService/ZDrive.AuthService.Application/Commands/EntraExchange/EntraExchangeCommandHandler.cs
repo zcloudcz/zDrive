@@ -112,10 +112,18 @@ public sealed class EntraExchangeCommandHandler : IRequestHandler<EntraExchangeC
             _db.Tenants.Remove(tenant);
 
             var mapping = await FindMappedUserAsync(identity.TenantId, identity.ObjectId, ct);
-            if (mapping is null)
-                throw;
+            if (mapping is not null)
+                return mapping;
 
-            return mapping;
+            // Not our own (tid, oid) race — a *different* concurrent Entra
+            // identity may have grabbed this email instead. That's the same
+            // conflict the pre-check above guards against, just discovered
+            // after the fact rather than before.
+            var emailNowTaken = await _db.Users.AnyAsync(u => u.Email == emailNormalized, ct);
+            if (emailNowTaken)
+                throw new ConflictException($"A user with email '{emailNormalized}' already exists.");
+
+            throw;
         }
 
         return user;

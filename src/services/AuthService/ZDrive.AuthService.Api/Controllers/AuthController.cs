@@ -1,12 +1,12 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using ZDrive.AuthService.Application.Auth;
 using ZDrive.AuthService.Application.Commands.EntraExchange;
 using ZDrive.AuthService.Application.Commands.Login;
 using ZDrive.AuthService.Application.Commands.RefreshToken;
 using ZDrive.AuthService.Application.Commands.Register;
 using ZDrive.AuthService.Application.DTOs;
-using ZDrive.AuthService.Infrastructure.Auth;
 using ZDrive.Shared.DTOs;
 
 namespace ZDrive.AuthService.Api.Controllers;

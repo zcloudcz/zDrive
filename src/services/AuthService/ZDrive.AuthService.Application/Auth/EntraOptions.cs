@@ -1,4 +1,4 @@
-namespace ZDrive.AuthService.Infrastructure.Auth;
+namespace ZDrive.AuthService.Application.Auth;
 
 public sealed class EntraOptions
 {

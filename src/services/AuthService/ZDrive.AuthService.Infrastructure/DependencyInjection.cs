@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
+using ZDrive.AuthService.Application.Auth;
 using ZDrive.AuthService.Application.Interfaces;
 using ZDrive.AuthService.Infrastructure.Auth;
 using ZDrive.AuthService.Infrastructure.Persistence;
