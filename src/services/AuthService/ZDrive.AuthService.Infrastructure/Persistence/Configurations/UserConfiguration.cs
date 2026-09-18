@@ -19,8 +19,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.HasIndex(u => u.Email)
             .IsUnique();
 
+        // Optional — Entra-only accounts have no local password.
         builder.Property(u => u.PasswordHash)
-            .IsRequired()
             .HasMaxLength(512);
 
         builder.Property(u => u.DisplayName)
