@@ -30,7 +30,9 @@ public sealed class InitUploadCommandHandler : IRequestHandler<InitUploadCommand
             TotalChunks = request.TotalChunks,
             UploadedChunks = 0,
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddHours(24)
+            ExpiresAt = DateTime.UtcNow.AddHours(24),
+            MaxBytes = request.MaxBytes,
+            ReceivedBytes = 0
         };
 
         _db.UploadSessions.Add(session);

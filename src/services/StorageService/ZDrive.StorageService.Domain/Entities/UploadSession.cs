@@ -14,4 +14,13 @@ public sealed class UploadSession
     public int UploadedChunks { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; set; }
+
+    // Only set for a shared (link-driven) upload, where the grant declares an
+    // upfront size cap — an authenticated session has no such cap (quota is
+    // enforced once, when FileService records the version). Tracked
+    // cumulatively under LockUploadSessionAsync's row lock so concurrent
+    // chunk PUTs of the same session can't each pass the check independently
+    // and together blow past MaxBytes.
+    public long? MaxBytes { get; set; }
+    public long ReceivedBytes { get; set; }
 }

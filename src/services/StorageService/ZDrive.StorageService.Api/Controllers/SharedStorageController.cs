@@ -6,6 +6,10 @@ using ZDrive.Shared.Auth;
 using ZDrive.Shared.DTOs;
 using ZDrive.Shared.Exceptions;
 using ZDrive.Shared.Http;
+using ZDrive.StorageService.Application.Commands.AbortUpload;
+using ZDrive.StorageService.Application.Commands.CompleteUpload;
+using ZDrive.StorageService.Application.Commands.InitUpload;
+using ZDrive.StorageService.Application.Commands.UploadChunk;
 using ZDrive.StorageService.Application.Common;
 using ZDrive.StorageService.Application.DTOs;
 using ZDrive.StorageService.Application.Queries.DownloadChunk;
@@ -91,4 +95,100 @@ public sealed class SharedStorageController : ControllerBase
 
         return payload;
     }
+
+    // --- Shared (link-driven) upload: X-Share-Grant carries a ShareUploadGrant ---
+
+    [HttpPost("upload/init")]
+    [ProducesResponseType(typeof(ApiResponse<UploadSessionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> InitSharedUpload(
+        [FromHeader(Name = "X-Share-Grant")] string? grant,
+        [FromBody] InitSharedUploadRequest request, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var payload = ValidateUploadGrantOrThrow(grant);
+        var command = new InitUploadCommand(
+            payload.OwnerUserId, payload.TenantId, payload.FileId, request.FileName, request.TotalChunks, payload.MaxBytes);
+        var result = await _mediator.Send(command, ct);
+        return Ok(ApiResponse<UploadSessionDto>.Ok(result));
+    }
+
+    [HttpPut("upload/{sessionId:guid}/chunk/{index:int}")]
+    [ProducesResponseType(typeof(ApiResponse<ChunkUploadResultDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [RequestSizeLimit(50 * 1024 * 1024)] // same cap as the authenticated chunk route — never stricter
+    public async Task<IActionResult> UploadSharedChunk(
+        Guid sessionId, int index,
+        [FromHeader(Name = "X-Share-Grant")] string? grant,
+        [FromHeader(Name = "X-Chunk-Hash")] string chunkHash, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var payload = ValidateUploadGrantOrThrow(grant);
+        var command = new UploadChunkCommand(
+            sessionId, index, chunkHash, Request.Body, Request.ContentLength,
+            payload.TenantId, payload.OwnerUserId, payload.FileId);
+        var result = await _mediator.Send(command, ct);
+        return Ok(ApiResponse<ChunkUploadResultDto>.Ok(result));
+    }
+
+    [HttpPost("upload/{sessionId:guid}/complete")]
+    [ProducesResponseType(typeof(ApiResponse<SharedUploadCompleteDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CompleteSharedUpload(
+        Guid sessionId, [FromHeader(Name = "X-Share-Grant")] string? grant, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var payload = ValidateUploadGrantOrThrow(grant);
+        var command = new CompleteUploadCommand(sessionId, payload.TenantId, payload.OwnerUserId, payload.FileId);
+        var result = await _mediator.Send(command, ct);
+
+        // The receipt is StorageService's proof to FileService that these
+        // exact bytes were written for this fileId — short TTL (15 min) since
+        // it is only meant to bridge "upload just finished" to "record the
+        // version", not to outlive the upload flow.
+        if (!_options.TryGetKey(out var key))
+            throw new NotFoundException("ShareUploadGrant", "invalid");
+
+        var receiptPayload = new ShareUploadReceipt.Payload(
+            payload.FileId, result.ManifestHash, result.TotalSize, DateTimeOffset.UtcNow.AddMinutes(15));
+        var receipt = ShareUploadReceipt.Create(receiptPayload, key);
+
+        return Ok(ApiResponse<SharedUploadCompleteDto>.Ok(
+            new SharedUploadCompleteDto(result.ManifestHash, result.TotalSize, receipt)));
+    }
+
+    [HttpDelete("upload/{sessionId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AbortSharedUpload(
+        Guid sessionId, [FromHeader(Name = "X-Share-Grant")] string? grant, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var payload = ValidateUploadGrantOrThrow(grant);
+        var result = await _mediator.Send(
+            new AbortUploadCommand(sessionId, payload.OwnerUserId, payload.TenantId, payload.FileId), ct);
+        return Ok(ApiResponse<bool>.Ok(result));
+    }
+
+    private ShareUploadGrant.Payload ValidateUploadGrantOrThrow(string? grant)
+    {
+        if (!_options.TryGetKey(out var key)
+            || !ShareUploadGrant.TryValidate(grant, key, DateTimeOffset.UtcNow, out var payload))
+        {
+            throw new NotFoundException("ShareUploadGrant", "invalid");
+        }
+
+        return payload;
+    }
 }
+
+public sealed record InitSharedUploadRequest(string FileName, int TotalChunks);
+
+public sealed record SharedUploadCompleteDto(string ManifestHash, long TotalSize, string Receipt);

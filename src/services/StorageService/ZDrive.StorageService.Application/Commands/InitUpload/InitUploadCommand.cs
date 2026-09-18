@@ -8,4 +8,5 @@ public sealed record InitUploadCommand(
     Guid TenantId,
     Guid FileId,
     string FileName,
-    int TotalChunks) : IRequest<UploadSessionDto>;
+    int TotalChunks,
+    long? MaxBytes = null) : IRequest<UploadSessionDto>;

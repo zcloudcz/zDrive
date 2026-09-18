@@ -21,6 +21,7 @@ public sealed class UploadSessionConfiguration : IEntityTypeConfiguration<Upload
         builder.Property(x => x.UploadedChunks).IsRequired();
         builder.Property(x => x.CreatedAt).IsRequired();
         builder.Property(x => x.ExpiresAt).IsRequired();
+        builder.Property(x => x.ReceivedBytes).IsRequired().HasDefaultValue(0L);
 
         builder.HasIndex(x => x.FileId);
         builder.HasIndex(x => new { x.TenantId, x.UserId });

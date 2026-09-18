@@ -37,8 +37,29 @@ public sealed class UploadChunkCommandHandler : IRequestHandler<UploadChunkComma
         if (session.Status != UploadSessionStatus.Active)
             throw new ConflictException($"Upload session '{request.SessionId}' is not active (status: {session.Status}).");
 
+        if (request.ExpectedTenantId is not null
+            && (session.TenantId != request.ExpectedTenantId
+                || session.UserId != request.ExpectedUserId
+                || session.FileId != request.ExpectedFileId))
+        {
+            throw new NotFoundException("UploadSession", request.SessionId);
+        }
+
         if (request.ChunkIndex >= session.TotalChunks)
             throw new ConflictException($"Chunk index {request.ChunkIndex} exceeds total chunks {session.TotalChunks}.");
+
+        // Cumulative check BEFORE the bytes are written, under the same row
+        // lock UploadedChunks already relies on, so two chunks of one
+        // session uploaded concurrently can't both pass the check and then
+        // together exceed MaxBytes.
+        if (session.MaxBytes is { } maxBytes)
+        {
+            var newTotal = session.ReceivedBytes + (request.ChunkSizeBytes ?? 0);
+            if (newTotal > maxBytes)
+                throw new QuotaExceededException(maxBytes, newTotal);
+
+            session.ReceivedBytes = newTotal;
+        }
 
         await _blobStorage.UploadChunkToTempAsync(session.Id, request.ChunkIndex, request.Stream, cancellationToken);
 

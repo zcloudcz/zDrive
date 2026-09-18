@@ -31,6 +31,14 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
             .FirstOrDefaultAsync(s => s.Id == request.SessionId, cancellationToken)
             ?? throw new NotFoundException("UploadSession", request.SessionId);
 
+        if (request.ExpectedTenantId is not null
+            && (session.TenantId != request.ExpectedTenantId
+                || session.UserId != request.ExpectedUserId
+                || session.FileId != request.ExpectedFileId))
+        {
+            throw new NotFoundException("UploadSession", request.SessionId);
+        }
+
         if (session.Status != UploadSessionStatus.Active)
             throw new ConflictException($"Upload session '{request.SessionId}' is not active (status: {session.Status}).");
 

@@ -26,6 +26,10 @@ public sealed class ShareConfiguration : IEntityTypeConfiguration<Share>
             .HasConversion<string>()
             .HasMaxLength(20);
 
+        builder.Property(s => s.AllowDelete)
+            .IsRequired()
+            .HasDefaultValue(false);
+
         builder.Property(s => s.CreatedAt)
             .HasDefaultValueSql("now() at time zone 'utc'");
 

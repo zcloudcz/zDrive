@@ -26,6 +26,7 @@ public static class MappingExtensions
         share.SharedBy,
         share.SharedWith,
         share.Permission.ToString(),
+        share.AllowDelete,
         share.LinkToken,
         share.ExpiresAt,
         share.CreatedAt);
