@@ -132,6 +132,8 @@ public sealed class MigrationBaselineTests : IAsyncLifetime
 
         await using var verifyDb = CreateContext();
         var applied = await verifyDb.Database.GetAppliedMigrationsAsync();
-        Assert.Single(applied);
+        // Every migration the model defines, each recorded exactly once — not
+        // Assert.Single, which only held while InitialCreate was the sole one.
+        Assert.Equal(verifyDb.Database.GetMigrations(), applied);
     }
 }
