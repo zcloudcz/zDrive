@@ -423,4 +423,16 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get shareFooterTagline => 'Skyddad av zDrive';
+
+  @override
+  String get tagline => 'Dina filer, överallt.';
+
+  @override
+  String get authBenefitSync => 'Synkronisering på alla enheter';
+
+  @override
+  String get authBenefitShare => 'Dela filer och mappar säkert';
+
+  @override
+  String get authBenefitSecure => 'Alltid krypterad lagring';
 }

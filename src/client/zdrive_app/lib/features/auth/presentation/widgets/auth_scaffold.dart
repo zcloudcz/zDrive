@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../shared/l10n/app_localizations.dart';
+import '../../../../shared/theme/app_theme.dart';
 import '../../../../shared/widgets/brand_lockup.dart';
 
 /// Shared shell for the login and register pages (design spec 4.5, section
@@ -17,11 +18,6 @@ class AuthScaffold extends StatelessWidget {
   final PreferredSizeWidget? appBar;
 
   static const _brandPanelBreakpoint = 1000.0;
-
-  // Brand surfaces use the literal zcloud.cz petrol, not the raised
-  // `primary` tone used for interactive elements (spec section 8, owner
-  // decision 1).
-  static const _brandPetrol = Color(0xFF003840);
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +38,7 @@ class AuthScaffold extends StatelessWidget {
                 children: [
                   Expanded(
                     flex: 4,
-                    child: _BrandPanel(color: _brandPetrol, l10n: l10n),
+                    child: _BrandPanel(color: AppTheme.brandPetrol, l10n: l10n),
                   ),
                   Expanded(flex: 6, child: formColumn),
                 ],

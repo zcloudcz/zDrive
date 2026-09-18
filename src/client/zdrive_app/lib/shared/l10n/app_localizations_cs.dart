@@ -422,4 +422,16 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get shareFooterTagline => 'Zabezpečeno pomocí zDrive';
+
+  @override
+  String get tagline => 'Vaše soubory, kdekoli.';
+
+  @override
+  String get authBenefitSync => 'Synchronizace napříč všemi zařízeními';
+
+  @override
+  String get authBenefitShare => 'Bezpečné sdílení souborů a složek';
+
+  @override
+  String get authBenefitSecure => 'Vždy šifrované úložiště';
 }

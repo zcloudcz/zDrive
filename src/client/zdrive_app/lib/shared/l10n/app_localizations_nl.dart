@@ -427,4 +427,16 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get shareFooterTagline => 'Beveiligd door zDrive';
+
+  @override
+  String get tagline => 'Je bestanden, overal.';
+
+  @override
+  String get authBenefitSync => 'Synchronisatie op alle apparaten';
+
+  @override
+  String get authBenefitShare => 'Bestanden en mappen veilig delen';
+
+  @override
+  String get authBenefitSecure => 'Altijd versleutelde opslag';
 }

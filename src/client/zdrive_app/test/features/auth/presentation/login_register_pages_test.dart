@@ -9,6 +9,7 @@ import 'package:zdrive_app/core/auth/auth_bloc.dart';
 import 'package:zdrive_app/features/auth/presentation/login_page.dart';
 import 'package:zdrive_app/features/auth/presentation/register_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
+import 'package:zdrive_app/shared/theme/app_theme.dart';
 import 'package:zdrive_app/shared/widgets/brand_lockup.dart';
 
 class MockAuthBloc extends MockBloc<AuthEvent, AuthState> implements AuthBloc {}
@@ -76,7 +77,7 @@ void main() {
       // No brand-panel Container (petrol fill) at this width.
       expect(
         find.byWidgetPredicate(
-          (widget) => widget is Container && widget.color == const Color(0xFF003840),
+          (widget) => widget is Container && widget.color == AppTheme.brandPetrol,
         ),
         findsNothing,
       );
@@ -94,11 +95,26 @@ void main() {
       expect(find.byType(BrandLockup), findsNWidgets(2));
       expect(
         find.byWidgetPredicate(
-          (widget) => widget is Container && widget.color == const Color(0xFF003840),
+          (widget) => widget is Container && widget.color == AppTheme.brandPetrol,
         ),
         findsOneWidget,
       );
       expect(find.byType(TextFormField), findsNWidgets(2));
+
+      // The panel lockup must be the monochrome (white wordmark) variant —
+      // the default variant uses onSurface, which is close to black and
+      // would be unreadable on the petrol fill.
+      final panelLockup = tester.widget<BrandLockup>(
+        find.byType(BrandLockup).first,
+      );
+      expect(panelLockup.monochrome, isTrue);
+      final wordmark = tester.widget<Text>(
+        find.descendant(
+          of: find.byType(BrandLockup).first,
+          matching: find.text('zDrive'),
+        ),
+      );
+      expect(wordmark.style?.color, Colors.white);
     });
 
     testWidgets('loading state disables the button and shows progress',

@@ -413,4 +413,16 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get shareFooterTagline => '由 zDrive 提供安全保障';
+
+  @override
+  String get tagline => '您的文件，随时随地。';
+
+  @override
+  String get authBenefitSync => '跨所有设备同步';
+
+  @override
+  String get authBenefitShare => '安全共享文件和文件夹';
+
+  @override
+  String get authBenefitSecure => '始终加密存储';
 }

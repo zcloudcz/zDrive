@@ -420,4 +420,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get shareFooterTagline => 'Secured by zDrive';
+
+  @override
+  String get tagline => 'Your files, everywhere.';
+
+  @override
+  String get authBenefitSync => 'Sync across every device';
+
+  @override
+  String get authBenefitShare => 'Share files and folders securely';
+
+  @override
+  String get authBenefitSecure => 'Encrypted storage, always';
 }
