@@ -21,6 +21,10 @@ class Diagnostics {
     String? directory,
     int maxBytes = 2 * 1024 * 1024,
     Duration stallThreshold = const Duration(seconds: 10),
+    // Test-only: simulates a slow isolate startup, to prove `readyTimeout`
+    // tolerates it instead of silently abandoning a merely-slow writer.
+    Duration startupDelay = Duration.zero,
+    Duration readyTimeout = const Duration(seconds: 20),
   }) async {
     if (_writer != null) return;
     final ready = ReceivePort();
@@ -46,8 +50,15 @@ class Diagnostics {
         maxBytes,
         stallThreshold.inMilliseconds,
         version ?? 'unknown',
+        startupDelay.inMilliseconds,
       ]);
-      final result = await ready.first.timeout(const Duration(seconds: 5));
+      // A generous safety net, not a race: isolate group startup and JIT
+      // warm-up for the writer entrypoint can legitimately take several
+      // seconds under load (busy CI runners, cold caches). A tight timeout
+      // here does not "fail fast" on a broken writer -- it abandons a merely
+      // slow one, permanently and silently (every event/flush becomes a
+      // no-op for the rest of the session, since `_writer` stays null).
+      final result = await ready.first.timeout(readyTimeout);
       if (result is! SendPort) {
         throw StateError('Diagnostic writer unavailable');
       }
@@ -216,6 +227,7 @@ void _writeLogs(List<Object> args) {
   }
 
   final version = args[5] as String;
+  final startupDelayMs = args[6] as int;
   append({
     ...diagnosticRecord('app.started', {'pid': pid}),
     'version': RegExp(r'^[a-zA-Z0-9.+_-]{1,60}$').hasMatch(version)
@@ -223,6 +235,9 @@ void _writeLogs(List<Object> args) {
         : 'unknown',
     'os': Platform.operatingSystem,
   });
+  // Test-only: simulates isolate startup that is slower than a would-be
+  // too-tight `readyTimeout`, without waiting on real scheduler jitter.
+  if (startupDelayMs > 0) sleep(Duration(milliseconds: startupDelayMs));
   final clock = Stopwatch()..start();
   var lastHeartbeat = 0;
   var stalled = false;

@@ -39,6 +39,39 @@ void main() {
   });
 
   test(
+    'initialize tolerates writer startup slower than a tight ready timeout',
+    () async {
+      // Reproduces the CI flake directly: a writer isolate that is merely
+      // slow to start (busy runner, cold JIT) must not be abandoned as if it
+      // were broken. With a too-tight `readyTimeout`, `initialize()` gives
+      // up and `_writer` stays null forever -- every later event/flush is a
+      // silent no-op, and the exported log only ever has the `app.started`
+      // line the isolate wrote before being abandoned.
+      await Diagnostics.initialize(
+        directory: directory.path,
+        startupDelay: const Duration(milliseconds: 300),
+        readyTimeout: const Duration(milliseconds: 100),
+      );
+      Diagnostics.event('should_be_dropped');
+      await Diagnostics.flush();
+      final file = File('${directory.path}/diagnostic-0.jsonl');
+      expect(await file.readAsString(), isNot(contains('should_be_dropped')));
+      await Diagnostics.shutdown();
+
+      // The fix: a `readyTimeout` generous enough for the same startup delay
+      // connects the writer normally, so events are no longer dropped.
+      await Diagnostics.initialize(
+        directory: directory.path,
+        startupDelay: const Duration(milliseconds: 300),
+        readyTimeout: const Duration(seconds: 5),
+      );
+      Diagnostics.event('should_be_recorded');
+      await Diagnostics.flush();
+      expect(await file.readAsString(), contains('should_be_recorded'));
+    },
+  );
+
+  test(
     'concurrent writers retain independent sessions and can both export',
     skip: !Platform.isWindows
         ? 'File locks are process-wide on POSIX, so isolates cannot model separate writers.'

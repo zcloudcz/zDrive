@@ -249,6 +249,12 @@ class WindowsUpdateBackend implements UpdateBackend {
           }
         } on FormatException {
           /* Writer may still be finishing. */
+        } on FileSystemException {
+          // PowerShell's WriteAllText holds an exclusive handle for the
+          // duration of create+write+close. `exists()` can observe the file
+          // the instant it is created, before that handle is released, so a
+          // read here can hit a genuine Windows sharing violation. Treat it
+          // like "writer still finishing" and poll again.
         }
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
