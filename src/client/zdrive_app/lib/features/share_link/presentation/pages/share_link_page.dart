@@ -31,15 +31,20 @@ String formatShareExpiryDate(DateTime expiresAt, String locale) =>
 /// on top of [describeError]'s generic connection/5xx handling.
 String describeShareError(Object error, AppLocalizations l10n) {
   if (error is DioException) {
+    // The envelope's error code first: a 429 can also come from the gateway's
+    // rate limiter (no envelope) and a 413 from a body-size limit — neither
+    // means what the share-specific messages say.
+    final data = error.response?.data;
+    final code = data is Map && data['error'] is Map
+        ? (data['error'] as Map)['code']
+        : null;
+    if (code == 'QUOTA_EXCEEDED') return l10n.shareErrorQuotaExceeded;
+    if (code == 'TOO_MANY_PENDING_UPLOADS') return l10n.shareErrorTooManyUploads;
     switch (error.response?.statusCode) {
       case 403:
         return l10n.shareErrorNotAllowed;
       case 409:
         return l10n.shareErrorNameExists;
-      case 413:
-        return l10n.shareErrorQuotaExceeded;
-      case 429:
-        return l10n.shareErrorTooManyUploads;
     }
   }
   return describeError(error, l10n);
@@ -219,7 +224,7 @@ class ShareLinkView extends StatelessWidget {
                               final error = (state as ShareLinkLoaded).navigationError!;
                               ScaffoldMessenger.of(context)
                                 ..hideCurrentSnackBar()
-                                ..showSnackBar(SnackBar(content: Text(describeError(error, l10n))));
+                                ..showSnackBar(SnackBar(content: Text(describeShareError(error, l10n))));
                             },
                             child: BlocBuilder<ShareLinkCubit, ShareLinkState>(
                               builder: (context, state) {
@@ -551,7 +556,7 @@ class _ShareUploadProgressList extends StatelessWidget {
           if (errors[name] case final error?)
             Text(describeShareError(error, l10n), style: TextStyle(color: scheme.error))
           else ...[
-            LinearProgressIndicator(value: progress[name] == 0 ? 0.0 : progress[name]),
+            LinearProgressIndicator(value: progress[name]),
             Text(
               '${((progress[name] ?? 0) * 100).clamp(0, 100).round()}%',
               style: Theme.of(context).textTheme.bodySmall,

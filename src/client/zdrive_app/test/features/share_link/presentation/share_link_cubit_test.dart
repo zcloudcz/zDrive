@@ -606,6 +606,41 @@ void main() {
     final state = cubit.state as ShareLinkLoaded;
     expect(state.path, [subfolder]);
     expect(state.children, [child]);
+    // The upload is over: its progress row must not stay frozen in every
+    // folder just because the visitor navigated while it ran.
+    expect(state.uploadProgress, isEmpty);
+  });
+
+  test(
+      'a failing listing refresh after a SUCCESSFUL upload is not reported '
+      'as a failed upload', () async {
+    when(() => dataSource.getShareLink(token)).thenAnswer(
+        (_) async => (share: _share, file: fileShare(isFolder: true)));
+    var listings = 0;
+    when(() => dataSource.getChildren(token)).thenAnswer((_) async {
+      // First call = initial load; second = the refresh after the upload.
+      if (++listings == 1) return [subfolder];
+      throw Exception('listing timed out');
+    });
+    when(() => dataSource.getInfo(token)).thenAnswer((_) async => info(permission: 'Write'));
+    when(() => dataSource.uploadFile(
+          token,
+          parentId: null,
+          fileName: 'new.txt',
+          content: any(named: 'content'),
+          sizeBytes: 3,
+          overwrite: false,
+          onProgress: any(named: 'onProgress'),
+        )).thenAnswer((_) async => child);
+
+    final cubit = ShareLinkCubit(dataSource, token);
+    await cubit.load();
+    await cubit.uploadFile('new.txt', Stream.value([1, 2, 3]), 3);
+
+    final state = cubit.state as ShareLinkLoaded;
+    expect(listings, 2);
+    expect(state.uploadErrors, isEmpty);
+    expect(state.uploadProgress, isEmpty);
   });
 }
 

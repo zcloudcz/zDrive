@@ -307,7 +307,7 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
     try {
       await _dataSource.createFolder(token, parentId: _currentFolderId, name: name);
       if (isClosed || navId != _navId) return;
-      await _refreshChildren(navId);
+      await _refreshAfterWrite(navId);
     } catch (e) {
       if (isClosed || navId != _navId) return;
       final latest = state;
@@ -352,16 +352,23 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
           }
         },
       );
-      if (isClosed || navId != _navId) return;
+      if (isClosed) return;
+      // Clear the progress row BEFORE the navigation guard: the upload is
+      // over whether or not the visitor has since opened another folder,
+      // and a row left behind would sit frozen at its last percentage in
+      // every folder until reload.
       _clearUploadProgress(name);
+      if (navId != _navId) return;
       if (isSingleFileShare) {
         final latest = state;
         if (latest is ShareLinkLoaded) emit(latest.copyWith(root: updated));
       } else {
-        await _refreshChildren(navId);
+        await _refreshAfterWrite(navId);
       }
     } catch (e) {
-      if (isClosed || navId != _navId) return;
+      // Same reasoning as above: report the failure even after a navigation
+      // — upload errors/progress are page-wide, not per folder.
+      if (isClosed) return;
       final latest = state;
       if (latest is ShareLinkLoaded) {
         final progress = {...latest.uploadProgress}..remove(name);
@@ -378,11 +385,23 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
     try {
       await _dataSource.deleteItem(token, id);
       if (isClosed || navId != _navId) return;
-      await _refreshChildren(navId);
+      await _refreshAfterWrite(navId);
     } catch (e) {
       if (isClosed || navId != _navId) return;
       final latest = state;
       if (latest is ShareLinkLoaded) emit(latest.copyWith(navigationError: () => e));
+    }
+  }
+
+  /// Refreshes the listing after a write that already SUCCEEDED. A failing
+  /// refresh must not be reported as a failed write: the visitor would
+  /// retry, hit a 409 and be asked to overwrite the file they just uploaded.
+  /// The stale listing corrects itself on the next navigation.
+  Future<void> _refreshAfterWrite(int navId) async {
+    try {
+      await _refreshChildren(navId);
+    } catch (_) {
+      // Best effort by design — see above.
     }
   }
 

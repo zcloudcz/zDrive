@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:bloc_test/bloc_test.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -19,6 +20,41 @@ import '../../../shared/theme/app_theme_test.dart' show contrastRatio;
 class MockShareLinkCubit extends MockCubit<ShareLinkState> implements ShareLinkCubit {}
 
 void main() {
+  group('describeShareError', () {
+    DioException dio(int status, [Object? data]) => DioException(
+          requestOptions: RequestOptions(path: '/x'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/x'),
+            statusCode: status,
+            data: data,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+    final l10n = lookupAppLocalizations(const Locale('en'));
+
+    test('share-specific texts come from the envelope error code', () {
+      expect(
+        describeShareError(dio(429, {'error': {'code': 'TOO_MANY_PENDING_UPLOADS'}}), l10n),
+        l10n.shareErrorTooManyUploads,
+      );
+      expect(
+        describeShareError(dio(413, {'error': {'code': 'QUOTA_EXCEEDED'}}), l10n),
+        l10n.shareErrorQuotaExceeded,
+      );
+    });
+
+    test('a bare gateway 429 / 413 without an envelope gets the generic text', () {
+      expect(describeShareError(dio(429), l10n), isNot(l10n.shareErrorTooManyUploads));
+      expect(describeShareError(dio(413, 'Payload Too Large'), l10n),
+          isNot(l10n.shareErrorQuotaExceeded));
+    });
+
+    test('403 and 409 map by status', () {
+      expect(describeShareError(dio(403), l10n), l10n.shareErrorNotAllowed);
+      expect(describeShareError(dio(409), l10n), l10n.shareErrorNameExists);
+    });
+  });
+
   late MockShareLinkCubit cubit;
 
   setUp(() {
