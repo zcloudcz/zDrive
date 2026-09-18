@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/features/files/data/file_dtos.dart';
 import 'package:zdrive_app/features/share_link/data/share_link_data_source.dart';
+import 'package:zdrive_app/features/share_link/data/share_link_dtos.dart';
 import 'package:zdrive_app/features/share_link/presentation/share_link_cubit.dart';
 
 class MockShareLinkDataSource extends Mock implements ShareLinkDataSource {}
@@ -80,6 +81,22 @@ void main() {
           requestOptions: RequestOptions(path: '/shares/link/$token'),
         ),
       );
+
+  DioException withStatus(int status) => DioException(
+        requestOptions: RequestOptions(path: '/shares/link/$token'),
+        response: Response(
+          statusCode: status,
+          requestOptions: RequestOptions(path: '/shares/link/$token'),
+        ),
+      );
+
+  ShareInfoDto info({required String permission, bool allowDelete = false}) => ShareInfoDto(
+        permission: permission,
+        allowDelete: allowDelete,
+        root: fileShare(isFolder: true),
+      );
+
+  setUpAll(() => registerFallbackValue(const Stream<List<int>>.empty()));
 
   setUp(() {
     dataSource = MockShareLinkDataSource();
@@ -354,6 +371,242 @@ void main() {
       expect(state.navigationError, isNull);
     },
   );
+
+  blocTest<ShareLinkCubit, ShareLinkState>(
+    'canWrite/canDelete come from GET .../info',
+    setUp: () {
+      when(() => dataSource.getShareLink(token)).thenAnswer(
+          (_) async => (share: _share, file: fileShare(isFolder: true)));
+      when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+      when(() => dataSource.getInfo(token))
+          .thenAnswer((_) async => info(permission: 'Write', allowDelete: true));
+    },
+    build: () => ShareLinkCubit(dataSource, token),
+    act: (cubit) => cubit.load(),
+    verify: (cubit) {
+      final state = cubit.state as ShareLinkLoaded;
+      expect(state.canWrite, isTrue);
+      expect(state.canDelete, isTrue);
+    },
+  );
+
+  blocTest<ShareLinkCubit, ShareLinkState>(
+    'a 404 from GET .../info (older backend) falls back to read-only instead of breaking the page',
+    setUp: () {
+      when(() => dataSource.getShareLink(token)).thenAnswer(
+          (_) async => (share: _share, file: fileShare(isFolder: true)));
+      when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+      when(() => dataSource.getInfo(token)).thenThrow(notFound());
+    },
+    build: () => ShareLinkCubit(dataSource, token),
+    act: (cubit) => cubit.load(),
+    verify: (cubit) {
+      final state = cubit.state as ShareLinkLoaded;
+      expect(state.canWrite, isFalse);
+      expect(state.canDelete, isFalse);
+    },
+  );
+
+  blocTest<ShareLinkCubit, ShareLinkState>(
+    'a successful upload into a folder refreshes the listing and keeps the current path',
+    setUp: () {
+      when(() => dataSource.getShareLink(token)).thenAnswer(
+          (_) async => (share: _share, file: fileShare(isFolder: true)));
+      when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+      when(() => dataSource.getInfo(token))
+          .thenAnswer((_) async => info(permission: 'Write'));
+      when(() => dataSource.uploadFile(
+            token,
+            parentId: null,
+            fileName: 'new.txt',
+            content: any(named: 'content'),
+            sizeBytes: 3,
+            overwrite: false,
+            onProgress: any(named: 'onProgress'),
+          )).thenAnswer((_) async => child);
+      when(() => dataSource.getChildren(token, folderId: null))
+          .thenAnswer((_) async => [child, child]);
+    },
+    build: () => ShareLinkCubit(dataSource, token),
+    act: (cubit) async {
+      await cubit.load();
+      await cubit.uploadFile('new.txt', Stream.value([1, 2, 3]), 3);
+    },
+    verify: (cubit) {
+      final state = cubit.state as ShareLinkLoaded;
+      expect(state.path, isEmpty);
+      expect(state.children, [child, child]);
+      expect(state.uploadProgress, isEmpty);
+      expect(state.uploadErrors, isEmpty);
+    },
+  );
+
+  blocTest<ShareLinkCubit, ShareLinkState>(
+    'a 409 (name exists) surfaces as an upload error and does NOT auto-retry with overwrite',
+    setUp: () {
+      when(() => dataSource.getShareLink(token)).thenAnswer(
+          (_) async => (share: _share, file: fileShare(isFolder: true)));
+      when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+      when(() => dataSource.getInfo(token))
+          .thenAnswer((_) async => info(permission: 'Write'));
+      when(() => dataSource.uploadFile(
+            token,
+            parentId: null,
+            fileName: 'new.txt',
+            content: any(named: 'content'),
+            sizeBytes: 3,
+            overwrite: false,
+            onProgress: any(named: 'onProgress'),
+          )).thenThrow(withStatus(409));
+    },
+    build: () => ShareLinkCubit(dataSource, token),
+    act: (cubit) async {
+      await cubit.load();
+      await cubit.uploadFile('new.txt', Stream.value([1, 2, 3]), 3);
+    },
+    verify: (cubit) {
+      final state = cubit.state as ShareLinkLoaded;
+      expect((state.uploadErrors['new.txt'] as DioException).response?.statusCode, 409);
+      verifyNever(() => dataSource.uploadFile(
+            token,
+            parentId: null,
+            fileName: 'new.txt',
+            content: any(named: 'content'),
+            sizeBytes: 3,
+            overwrite: true,
+            onProgress: any(named: 'onProgress'),
+          ));
+    },
+  );
+
+  blocTest<ShareLinkCubit, ShareLinkState>(
+    'retrying with overwrite: true sends it through to the data source',
+    setUp: () {
+      when(() => dataSource.getShareLink(token)).thenAnswer(
+          (_) async => (share: _share, file: fileShare(isFolder: true)));
+      when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+      when(() => dataSource.getInfo(token))
+          .thenAnswer((_) async => info(permission: 'Write'));
+      when(() => dataSource.uploadFile(
+            token,
+            parentId: null,
+            fileName: 'new.txt',
+            content: any(named: 'content'),
+            sizeBytes: 3,
+            overwrite: true,
+            onProgress: any(named: 'onProgress'),
+          )).thenAnswer((_) async => child);
+      when(() => dataSource.getChildren(token, folderId: null)).thenAnswer((_) async => [child]);
+    },
+    build: () => ShareLinkCubit(dataSource, token),
+    act: (cubit) async {
+      await cubit.load();
+      await cubit.uploadFile('new.txt', Stream.value([1, 2, 3]), 3, overwrite: true);
+    },
+    verify: (cubit) {
+      verify(() => dataSource.uploadFile(
+            token,
+            parentId: null,
+            fileName: 'new.txt',
+            content: any(named: 'content'),
+            sizeBytes: 3,
+            overwrite: true,
+            onProgress: any(named: 'onProgress'),
+          )).called(1);
+      final state = cubit.state as ShareLinkLoaded;
+      expect(state.uploadErrors, isEmpty);
+    },
+  );
+
+  for (final status in [403, 413, 429]) {
+    blocTest<ShareLinkCubit, ShareLinkState>(
+      'a $status upload failure is captured as the raw error for the page to describe',
+      setUp: () {
+        when(() => dataSource.getShareLink(token)).thenAnswer(
+            (_) async => (share: _share, file: fileShare(isFolder: true)));
+        when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+        when(() => dataSource.getInfo(token))
+            .thenAnswer((_) async => info(permission: 'Write'));
+        when(() => dataSource.uploadFile(
+              token,
+              parentId: null,
+              fileName: 'new.txt',
+              content: any(named: 'content'),
+              sizeBytes: 3,
+              overwrite: false,
+              onProgress: any(named: 'onProgress'),
+            )).thenThrow(withStatus(status));
+      },
+      build: () => ShareLinkCubit(dataSource, token),
+      act: (cubit) async {
+        await cubit.load();
+        await cubit.uploadFile('new.txt', Stream.value([1, 2, 3]), 3);
+      },
+      verify: (cubit) {
+        final state = cubit.state as ShareLinkLoaded;
+        expect((state.uploadErrors['new.txt'] as DioException).response?.statusCode, status);
+      },
+    );
+  }
+
+  blocTest<ShareLinkCubit, ShareLinkState>(
+    'deleting an item refreshes the listing',
+    setUp: () {
+      when(() => dataSource.getShareLink(token)).thenAnswer(
+          (_) async => (share: _share, file: fileShare(isFolder: true)));
+      when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+      when(() => dataSource.getInfo(token))
+          .thenAnswer((_) async => info(permission: 'Write', allowDelete: true));
+      when(() => dataSource.deleteItem(token, child.id)).thenAnswer((_) async {});
+      when(() => dataSource.getChildren(token, folderId: null)).thenAnswer((_) async => []);
+    },
+    build: () => ShareLinkCubit(dataSource, token),
+    act: (cubit) async {
+      await cubit.load();
+      await cubit.deleteItem(child.id);
+    },
+    verify: (cubit) {
+      final state = cubit.state as ShareLinkLoaded;
+      expect(state.children, isEmpty);
+    },
+  );
+
+  test(
+      'a navigation during an in-flight upload makes its listing refresh '
+      'stale — the folder the visitor navigated to is not clobbered', () async {
+    when(() => dataSource.getShareLink(token)).thenAnswer(
+        (_) async => (share: _share, file: fileShare(isFolder: true)));
+    when(() => dataSource.getChildren(token)).thenAnswer((_) async => [subfolder]);
+    when(() => dataSource.getInfo(token)).thenAnswer((_) async => info(permission: 'Write'));
+    final uploadCompleter = Completer<FileDto>();
+    when(() => dataSource.uploadFile(
+          token,
+          parentId: null,
+          fileName: 'new.txt',
+          content: any(named: 'content'),
+          sizeBytes: 3,
+          overwrite: false,
+          onProgress: any(named: 'onProgress'),
+        )).thenAnswer((_) => uploadCompleter.future);
+    when(() => dataSource.getChildren(token, folderId: subfolder.id))
+        .thenAnswer((_) async => [child]);
+
+    final cubit = ShareLinkCubit(dataSource, token);
+    await cubit.load();
+    final uploadFuture = cubit.uploadFile('new.txt', Stream.value([1, 2, 3]), 3);
+    await cubit.openFolder(subfolder); // visitor navigates away while the upload is in flight
+    uploadCompleter.complete(child);
+    await uploadFuture;
+
+    // getChildren(folderId: null) happens exactly once — the initial load.
+    // The upload's own stale refresh (for the root, which the visitor has
+    // since left) must not fire a second one that would clobber the
+    // navigation's listing below.
+    verify(() => dataSource.getChildren(token, folderId: null)).called(1);
+    final state = cubit.state as ShareLinkLoaded;
+    expect(state.path, [subfolder]);
+    expect(state.children, [child]);
+  });
 }
 
 final _share = ShareDto(

@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../files/data/file_dtos.dart';
 import '../data/share_link_data_source.dart';
+import '../data/share_link_dtos.dart';
 
 // --- States ---
 
@@ -63,6 +64,17 @@ final class ShareLinkLoaded extends ShareLinkState {
   // but not otherwise carried by FileDto — null means the link never
   // expires. Shown on the share page as "Available until ...".
   final DateTime? expiresAt;
+  // From ShareInfoDto (GET .../info), fetched alongside `root` in
+  // ShareLinkCubit.load. Both default to false — an older backend that
+  // predates that endpoint (404) falls back to read-only rather than
+  // breaking the page.
+  final bool canWrite;
+  final bool canDelete;
+  // Keyed by the uploaded file's name, mirroring downloadProgress/
+  // downloadErrors above — an upload in this share has no file id yet
+  // until it completes.
+  final Map<String, double> uploadProgress;
+  final Map<String, Object> uploadErrors;
 
   const ShareLinkLoaded({
     required this.root,
@@ -72,6 +84,10 @@ final class ShareLinkLoaded extends ShareLinkState {
     this.downloadErrors = const {},
     this.navigationError,
     this.expiresAt,
+    this.canWrite = false,
+    this.canDelete = false,
+    this.uploadProgress = const {},
+    this.uploadErrors = const {},
   });
 
   FileDto get current => path.isEmpty ? root : path.last;
@@ -81,14 +97,17 @@ final class ShareLinkLoaded extends ShareLinkState {
   // "leave it as-is" (omit it) — the same pattern file_browser_bloc.dart
   // uses for FileBrowserLoaded.currentFolderId.
   ShareLinkLoaded copyWith({
+    FileDto? root,
     List<FileDto>? path,
     List<FileDto>? children,
     Map<String, double>? downloadProgress,
     Map<String, Object>? downloadErrors,
     Object? Function()? navigationError,
+    Map<String, double>? uploadProgress,
+    Map<String, Object>? uploadErrors,
   }) {
     return ShareLinkLoaded(
-      root: root,
+      root: root ?? this.root,
       path: path ?? this.path,
       children: children ?? this.children,
       downloadProgress: downloadProgress ?? this.downloadProgress,
@@ -96,6 +115,10 @@ final class ShareLinkLoaded extends ShareLinkState {
       navigationError:
           navigationError != null ? navigationError() : this.navigationError,
       expiresAt: expiresAt,
+      canWrite: canWrite,
+      canDelete: canDelete,
+      uploadProgress: uploadProgress ?? this.uploadProgress,
+      uploadErrors: uploadErrors ?? this.uploadErrors,
     );
   }
 
@@ -108,6 +131,10 @@ final class ShareLinkLoaded extends ShareLinkState {
         downloadErrors,
         navigationError,
         expiresAt,
+        canWrite,
+        canDelete,
+        uploadProgress,
+        uploadErrors,
       ];
 }
 
@@ -136,12 +163,15 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
       final result = await _dataSource.getShareLink(token);
       final children =
           result.file.isFolder ? await _dataSource.getChildren(token) : null;
+      final info = await _loadInfoOrNull();
       if (isClosed) return;
       emit(ShareLinkLoaded(
         root: result.file,
         path: const [],
         children: children,
         expiresAt: result.share.expiresAt,
+        canWrite: info?.canWrite ?? false,
+        canDelete: info?.allowDelete ?? false,
       ));
     } catch (e) {
       if (isClosed) return;
@@ -149,6 +179,17 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
       // openFolder/goToBreadcrumb use _applyNavigationResult instead, which
       // keeps the visitor on the folder they were on.
       _emitInitialLoadError(e);
+    }
+  }
+
+  /// A failed info call (404 on an older backend without the endpoint, or
+  /// any other hiccup) must not break the rest of `load()` — it only costs
+  /// the write/delete controls, which is exactly the read-only fallback.
+  Future<ShareInfoDto?> _loadInfoOrNull() async {
+    try {
+      return await _dataSource.getInfo(token);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -245,6 +286,131 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
       final progress = {...latest.downloadProgress}..remove(fileId);
       emit(latest.copyWith(downloadProgress: progress));
     }
+  }
+
+  /// The folder id write/delete/upload actions below operate on — the
+  /// folder currently being viewed, or null for the shared root.
+  String? get _currentFolderId {
+    final current = state;
+    if (current is! ShareLinkLoaded || current.path.isEmpty) return null;
+    return current.path.last.id;
+  }
+
+  /// Creates a folder in the folder currently being viewed. On success,
+  /// refreshes the listing (see [_refreshChildren]); on failure, surfaces
+  /// the error the same way a failed navigation does (a transient SnackBar,
+  /// not a full-page error) — a 409 there just means "pick another name".
+  Future<void> createFolder(String name) async {
+    final current = state;
+    if (current is! ShareLinkLoaded || current.children == null) return;
+    final navId = _navId;
+    try {
+      await _dataSource.createFolder(token, parentId: _currentFolderId, name: name);
+      if (isClosed || navId != _navId) return;
+      await _refreshChildren(navId);
+    } catch (e) {
+      if (isClosed || navId != _navId) return;
+      final latest = state;
+      if (latest is ShareLinkLoaded) emit(latest.copyWith(navigationError: () => e));
+    }
+  }
+
+  /// Uploads [name] into the folder currently being viewed — or, for a
+  /// share whose root is a single file, replaces that file directly (see
+  /// `ShareLinkDataSource.uploadFile`). Progress/errors are keyed by [name]
+  /// in [ShareLinkLoaded.uploadProgress]/[ShareLinkLoaded.uploadErrors], the
+  /// same way [download] keys by file id — an upload has no file id yet
+  /// until it completes, and re-running the same upload with `overwrite:
+  /// true` after a 409 reuses the same key.
+  Future<void> uploadFile(
+    String name,
+    Stream<List<int>> content,
+    int sizeBytes, {
+    bool overwrite = false,
+  }) async {
+    final current = state;
+    if (current is! ShareLinkLoaded) return;
+    final navId = _navId;
+    final isSingleFileShare = current.children == null;
+    emit(current.copyWith(
+      uploadProgress: {...current.uploadProgress, name: 0},
+      uploadErrors: {...current.uploadErrors}..remove(name),
+    ));
+    try {
+      final updated = await _dataSource.uploadFile(
+        token,
+        parentId: isSingleFileShare ? null : _currentFolderId,
+        fileName: name,
+        content: content,
+        sizeBytes: sizeBytes,
+        overwrite: overwrite,
+        onProgress: (progress) {
+          if (isClosed) return;
+          final latest = state;
+          if (latest is ShareLinkLoaded) {
+            emit(latest.copyWith(uploadProgress: {...latest.uploadProgress, name: progress}));
+          }
+        },
+      );
+      if (isClosed || navId != _navId) return;
+      _clearUploadProgress(name);
+      if (isSingleFileShare) {
+        final latest = state;
+        if (latest is ShareLinkLoaded) emit(latest.copyWith(root: updated));
+      } else {
+        await _refreshChildren(navId);
+      }
+    } catch (e) {
+      if (isClosed || navId != _navId) return;
+      final latest = state;
+      if (latest is ShareLinkLoaded) {
+        final progress = {...latest.uploadProgress}..remove(name);
+        emit(latest.copyWith(uploadProgress: progress, uploadErrors: {...latest.uploadErrors, name: e}));
+      }
+    }
+  }
+
+  /// Moves [id] to the owner's trash and refreshes the listing.
+  Future<void> deleteItem(String id) async {
+    final current = state;
+    if (current is! ShareLinkLoaded) return;
+    final navId = _navId;
+    try {
+      await _dataSource.deleteItem(token, id);
+      if (isClosed || navId != _navId) return;
+      await _refreshChildren(navId);
+    } catch (e) {
+      if (isClosed || navId != _navId) return;
+      final latest = state;
+      if (latest is ShareLinkLoaded) emit(latest.copyWith(navigationError: () => e));
+    }
+  }
+
+  void _clearUploadProgress(String name) {
+    final latest = state;
+    if (latest is ShareLinkLoaded) {
+      final progress = {...latest.uploadProgress}..remove(name);
+      emit(latest.copyWith(uploadProgress: progress));
+    }
+  }
+
+  /// Re-fetches the folder currently being viewed, WITHOUT going through
+  /// [ShareLinkLoading] — createFolder/uploadFile/deleteItem must not
+  /// replace the whole page with a loading state (the visitor keeps their
+  /// scroll position and breadcrumbs). Guarded by [navId] the same way
+  /// [_applyNavigationResult] guards a navigation: if the visitor moved to a
+  /// different folder while the write was in flight, this refresh is for a
+  /// folder they've since left and must not overwrite what they're looking
+  /// at now. A single-file share has no listing to refresh.
+  Future<void> _refreshChildren(int navId) async {
+    final latest = state;
+    if (latest is! ShareLinkLoaded || latest.children == null) return;
+    final folderId = latest.path.isEmpty ? null : latest.path.last.id;
+    final children = await _dataSource.getChildren(token, folderId: folderId);
+    if (isClosed || navId != _navId) return;
+    final refreshed = state;
+    if (refreshed is! ShareLinkLoaded) return;
+    emit(refreshed.copyWith(children: children));
   }
 
   void _emitInitialLoadError(Object error) {

@@ -432,6 +432,38 @@ class AppLocalizationsFi extends AppLocalizations {
   String get shareFooterTagline => 'zDriven suojaama';
 
   @override
+  String get shareReplaceFile => 'Korvaa tiedosto';
+
+  @override
+  String get shareDeleteConfirmMessage =>
+      'Tämä kohde siirretään omistajan roskakoriin.';
+
+  @override
+  String get shareOverwriteTitle => 'Korvataanko olemassa oleva tiedosto?';
+
+  @override
+  String shareOverwriteMessage(Object name) {
+    return 'Tiedosto nimeltä \"$name\" on jo olemassa. Lataaminen korvaa sen uudella versiolla.';
+  }
+
+  @override
+  String get shareReplaceConfirm => 'Korvaa';
+
+  @override
+  String get shareErrorNotAllowed => 'Tämä linkki ei salli sitä.';
+
+  @override
+  String get shareErrorNameExists =>
+      'Tämänniminen tiedosto tai kansio on jo olemassa.';
+
+  @override
+  String get shareErrorQuotaExceeded => 'Omistajan tallennustila on täynnä.';
+
+  @override
+  String get shareErrorTooManyUploads =>
+      'Liian monta latausta on vielä käsittelyssä. Yritä hetken kuluttua uudelleen.';
+
+  @override
   String get tagline => 'Tiedostosi, kaikkialla.';
 
   @override

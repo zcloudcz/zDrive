@@ -429,6 +429,38 @@ class AppLocalizationsSv extends AppLocalizations {
   String get shareFooterTagline => 'Skyddad av zDrive';
 
   @override
+  String get shareReplaceFile => 'Ersätt fil';
+
+  @override
+  String get shareDeleteConfirmMessage =>
+      'Det här objektet flyttas till ägarens papperskorg.';
+
+  @override
+  String get shareOverwriteTitle => 'Ersätt befintlig fil?';
+
+  @override
+  String shareOverwriteMessage(Object name) {
+    return 'En fil med namnet \"$name\" finns redan. Uppladdning ersätter den med en ny version.';
+  }
+
+  @override
+  String get shareReplaceConfirm => 'Ersätt';
+
+  @override
+  String get shareErrorNotAllowed => 'Den här länken tillåter inte det.';
+
+  @override
+  String get shareErrorNameExists =>
+      'En fil eller mapp med det här namnet finns redan.';
+
+  @override
+  String get shareErrorQuotaExceeded => 'Ägarens lagringsutrymme är fullt.';
+
+  @override
+  String get shareErrorTooManyUploads =>
+      'För många uppladdningar bearbetas fortfarande. Försök igen om en liten stund.';
+
+  @override
   String get tagline => 'Dina filer, överallt.';
 
   @override

@@ -433,6 +433,38 @@ class AppLocalizationsNl extends AppLocalizations {
   String get shareFooterTagline => 'Beveiligd door zDrive';
 
   @override
+  String get shareReplaceFile => 'Bestand vervangen';
+
+  @override
+  String get shareDeleteConfirmMessage =>
+      'Dit item wordt verplaatst naar de prullenbak van de eigenaar.';
+
+  @override
+  String get shareOverwriteTitle => 'Bestaand bestand vervangen?';
+
+  @override
+  String shareOverwriteMessage(Object name) {
+    return 'Er bestaat al een bestand met de naam \"$name\". Uploaden vervangt het door een nieuwe versie.';
+  }
+
+  @override
+  String get shareReplaceConfirm => 'Vervangen';
+
+  @override
+  String get shareErrorNotAllowed => 'Deze link staat dat niet toe.';
+
+  @override
+  String get shareErrorNameExists =>
+      'Er bestaat al een bestand of map met deze naam.';
+
+  @override
+  String get shareErrorQuotaExceeded => 'De opslag van de eigenaar is vol.';
+
+  @override
+  String get shareErrorTooManyUploads =>
+      'Er worden nog te veel uploads verwerkt. Probeer het straks opnieuw.';
+
+  @override
   String get tagline => 'Je bestanden, overal.';
 
   @override

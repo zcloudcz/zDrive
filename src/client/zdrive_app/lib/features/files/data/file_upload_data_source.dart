@@ -10,7 +10,10 @@ import '../../../core/network/api_constants.dart';
 import '../../../core/network/api_envelope.dart';
 import 'file_dtos.dart';
 
-String _chunkHash(Uint8List bytes) => sha256.convert(bytes).toString();
+// Top-level (not private to FileUploadDataSource) so ShareLinkDataSource's
+// public-share upload can hash chunks the same way instead of reimplementing
+// this one line.
+String chunkSha256Hash(Uint8List bytes) => sha256.convert(bytes).toString();
 
 /// Thrown when a downloaded chunk's content does not hash to the value
 /// recorded for it in the manifest — corruption or tampering in transit.
@@ -114,7 +117,7 @@ class FileUploadDataSource {
     void Function(int sent, int total)? onProgress,
     CancelToken? cancelToken,
   }) async {
-    final chunkHash = await compute(_chunkHash, bytes);
+    final chunkHash = await compute(chunkSha256Hash, bytes);
     final response = await _dio.put(
       '${ApiConstants.storage}/upload/$sessionId/chunk/$chunkIndex',
       data: Stream.fromIterable([bytes]),
@@ -160,47 +163,24 @@ class FileUploadDataSource {
     int sizeBytes, {
     void Function(double progress)? onProgress,
     CancelToken? cancelToken,
-  }) async {
-    if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
-    final totalChunks = sizeBytes == 0 ? 1 : (sizeBytes / chunkSize).ceil();
-    final session = await initUpload(fileId, fileName, totalChunks, cancelToken: cancelToken);
-
-    try {
-      if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
-      var index = 0;
-      var uploadedBytes = 0;
-      await for (final chunk in _splitIntoChunks(content)) {
-        if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
-        await uploadChunk(
-          session.sessionId,
-          index,
-          chunk,
-          cancelToken: cancelToken,
-          onProgress: onProgress == null
-              ? null
-              : (sent, total) {
-                  if (sizeBytes > 0) {
-                    onProgress((uploadedBytes + sent) / sizeBytes);
-                  }
-                },
-        );
-        uploadedBytes += chunk.length;
-        if (sizeBytes > 0) {
-          onProgress?.call((uploadedBytes / sizeBytes).clamp(0.0, 1.0));
-        }
-        index++;
-      }
-
-      if (uploadedBytes != sizeBytes) {
-        throw UploadSizeMismatchException(sizeBytes, uploadedBytes);
-      }
-
-      if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
-      return await completeUpload(session.sessionId, cancelToken: cancelToken);
-    } catch (_) {
-      await _abortUpload(session.sessionId);
-      rethrow;
-    }
+  }) {
+    return runChunkedUpload<UploadCompleteDto>(
+      init: (totalChunks) async =>
+          (await initUpload(fileId, fileName, totalChunks, cancelToken: cancelToken)).sessionId,
+      uploadChunk: (sessionId, index, chunk, {onProgress}) => uploadChunk(
+        sessionId,
+        index,
+        chunk,
+        onProgress: onProgress,
+        cancelToken: cancelToken,
+      ),
+      complete: (sessionId) => completeUpload(sessionId, cancelToken: cancelToken),
+      abort: _abortUpload,
+      content: content,
+      sizeBytes: sizeBytes,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
   }
 
   Future<void> _abortUpload(String sessionId) async {
@@ -218,41 +198,6 @@ class FileUploadDataSource {
       // Best effort: preserve the original upload/cancellation failure.
     } finally {
       timeout.cancel();
-    }
-  }
-
-  /// Buffers [source] into exactly [chunkSize]-byte windows (the last one
-  /// may be shorter), regardless of how the underlying platform stream
-  /// happens to deliver bytes — file_picker reads web files in 1 MB windows
-  /// and native files via dart:io's own buffer size, neither of which lines
-  /// up with chunkSize on its own. A source that yields nothing produces one
-  /// empty chunk, matching Chunking.cs's handling of zero-byte files (a
-  /// session needs totalChunks > 0).
-  static Stream<Uint8List> _splitIntoChunks(Stream<List<int>> source) async* {
-    var buffer = Uint8List(chunkSize);
-    var buffered = 0;
-    var yielded = false;
-
-    await for (final piece in source) {
-      var offset = 0;
-      while (offset < piece.length) {
-        final available = chunkSize - buffered;
-        final remaining = piece.length - offset;
-        final count = remaining < available ? remaining : available;
-        buffer.setRange(buffered, buffered + count, piece, offset);
-        buffered += count;
-        offset += count;
-        if (buffered == chunkSize) {
-          yield buffer;
-          yielded = true;
-          buffer = Uint8List(chunkSize);
-          buffered = 0;
-        }
-      }
-    }
-
-    if (buffered > 0 || !yielded) {
-      yield Uint8List.sublistView(buffer, 0, buffered);
     }
   }
 
@@ -312,6 +257,107 @@ class FileUploadDataSource {
   }
 }
 
+/// Orchestrates one chunked upload session — open it, stream [content]
+/// through it in [FileUploadDataSource.chunkSize] windows, complete it, and
+/// abort it on any failure — parameterised by the three network calls
+/// (init/uploadChunk/complete) plus abort, so [FileUploadDataSource.uploadFile]
+/// (authenticated) and `ShareLinkDataSource.uploadFile` (public share link)
+/// share this loop instead of each reimplementing it. The counterpart to
+/// [assembleVerifiedFileStream], which reassembles the same shape back.
+Future<TComplete> runChunkedUpload<TComplete>({
+  required Future<String> Function(int totalChunks) init,
+  required Future<void> Function(
+    String sessionId,
+    int index,
+    Uint8List chunk, {
+    void Function(int sent, int total)? onProgress,
+  })
+  uploadChunk,
+  required Future<TComplete> Function(String sessionId) complete,
+  required Future<void> Function(String sessionId) abort,
+  required Stream<List<int>> content,
+  required int sizeBytes,
+  void Function(double progress)? onProgress,
+  CancelToken? cancelToken,
+}) async {
+  if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
+  final totalChunks =
+      sizeBytes == 0 ? 1 : (sizeBytes / FileUploadDataSource.chunkSize).ceil();
+  final sessionId = await init(totalChunks);
+
+  try {
+    if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
+    var index = 0;
+    var uploadedBytes = 0;
+    await for (final chunk in _splitIntoChunks(content)) {
+      if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
+      await uploadChunk(
+        sessionId,
+        index,
+        chunk,
+        onProgress: onProgress == null
+            ? null
+            : (sent, total) {
+                if (sizeBytes > 0) {
+                  onProgress((uploadedBytes + sent) / sizeBytes);
+                }
+              },
+      );
+      uploadedBytes += chunk.length;
+      if (sizeBytes > 0) {
+        onProgress?.call((uploadedBytes / sizeBytes).clamp(0.0, 1.0));
+      }
+      index++;
+    }
+
+    if (uploadedBytes != sizeBytes) {
+      throw UploadSizeMismatchException(sizeBytes, uploadedBytes);
+    }
+
+    if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
+    return await complete(sessionId);
+  } catch (_) {
+    await abort(sessionId);
+    rethrow;
+  }
+}
+
+/// Buffers [source] into exactly [FileUploadDataSource.chunkSize]-byte
+/// windows (the last one may be shorter), regardless of how the underlying
+/// platform stream happens to deliver bytes — file_picker reads web files in
+/// 1 MB windows and native files via dart:io's own buffer size, neither of
+/// which lines up with chunkSize on its own. A source that yields nothing
+/// produces one empty chunk, matching Chunking.cs's handling of zero-byte
+/// files (a session needs totalChunks > 0).
+Stream<Uint8List> _splitIntoChunks(Stream<List<int>> source) async* {
+  const chunkSize = FileUploadDataSource.chunkSize;
+  var buffer = Uint8List(chunkSize);
+  var buffered = 0;
+  var yielded = false;
+
+  await for (final piece in source) {
+    var offset = 0;
+    while (offset < piece.length) {
+      final available = chunkSize - buffered;
+      final remaining = piece.length - offset;
+      final count = remaining < available ? remaining : available;
+      buffer.setRange(buffered, buffered + count, piece, offset);
+      buffered += count;
+      offset += count;
+      if (buffered == chunkSize) {
+        yield buffer;
+        yielded = true;
+        buffer = Uint8List(chunkSize);
+        buffered = 0;
+      }
+    }
+  }
+
+  if (buffered > 0 || !yielded) {
+    yield Uint8List.sublistView(buffer, 0, buffered);
+  }
+}
+
 /// Fetches a manifest, then each chunk it lists in order, verifying every
 /// chunk's SHA-256 and the assembled total size — the reassembly + integrity
 /// logic shared by [FileUploadDataSource.downloadFileStream] (authenticated
@@ -345,7 +391,7 @@ Stream<Uint8List> assembleVerifiedFileStream({
   for (final chunk in chunks) {
     final bytes = await fetchChunkBytes(chunk.hash);
 
-    final actualHash = await compute(_chunkHash, bytes);
+    final actualHash = await compute(chunkSha256Hash, bytes);
     if (actualHash != chunk.hash) {
       throw ChunkHashMismatchException(chunk.hash, actualHash);
     }
