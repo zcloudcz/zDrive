@@ -3,8 +3,10 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
+using ModelContextProtocol.AspNetCore;
 using Serilog;
 using ZDrive.ApiGateway;
+using ZDrive.ApiGateway.Mcp;
 using ZDrive.Shared.Extensions;
 using ZDrive.Shared.Middleware;
 
@@ -152,6 +154,31 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
+// MCP endpoint (Package C — see docs/superpowers/specs/2026-09-18-share-link-api-mcp-design.md).
+// The tools call FileService/StorageService's public share-link REST API
+// directly over HTTP, using the same base addresses YARP proxies to, read
+// straight from config so a deployed app-setting override
+// (ReverseProxy__Clusters__fileCluster__Destinations__fileService__Address)
+// is picked up automatically. Not routed through YARP — MapShareLinkMcp below
+// maps /mcp and /mcp/s/{token} as endpoints of this app itself.
+builder.Services.AddHttpContextAccessor();
+builder.Services.Configure<McpOptions>(builder.Configuration.GetSection("Mcp"));
+builder.Services.AddSingleton<ShareLinkApiClient>();
+builder.Services.AddHttpClient("mcpFileService", client =>
+{
+    client.BaseAddress = new Uri(GatewayMcp.GetFirstClusterAddress(builder.Configuration, "fileCluster"));
+    // The services have no AlwaysOn; a cold instance can take ~50s to answer the first request.
+    client.Timeout = TimeSpan.FromSeconds(100);
+});
+builder.Services.AddHttpClient("mcpStorageService", client =>
+{
+    client.BaseAddress = new Uri(GatewayMcp.GetFirstClusterAddress(builder.Configuration, "storageCluster"));
+    client.Timeout = TimeSpan.FromSeconds(100);
+});
+builder.Services.AddMcpServer()
+    .WithHttpTransport(o => o.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<ShareLinkTools>();
+
 // Health checks
 builder.Services.AddHealthChecks();
 
@@ -186,6 +213,7 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.MapReverseProxy();
+GatewayMcp.MapShareLinkMcp(app);
 
 // Health endpoints
 app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
