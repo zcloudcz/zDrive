@@ -158,6 +158,10 @@ class AppLocalizationsSv extends AppLocalizations {
   String get noFiles => 'Inga filer';
 
   @override
+  String get noFilesBody =>
+      'Ladda upp en fil eller skapa en mapp för att komma igång.';
+
+  @override
   String get createFolder => 'Skapa mapp';
 
   @override

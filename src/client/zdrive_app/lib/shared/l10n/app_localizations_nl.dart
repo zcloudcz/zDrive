@@ -160,6 +160,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get noFiles => 'Geen bestanden';
 
   @override
+  String get noFilesBody =>
+      'Upload een bestand of maak een map aan om te beginnen.';
+
+  @override
   String get createFolder => 'Map maken';
 
   @override

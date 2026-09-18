@@ -4,9 +4,15 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/auth_bloc.dart';
+import '../../../shared/widgets/brand_lockup.dart';
 import '../../../shared/widgets/windows_download_button.dart';
 import '../../../shared/widgets/app_settings_menu.dart';
 import '../../photos/photos_support.dart';
+
+/// Below this width the shell uses the bottom [NavigationBar] (as before);
+/// at or above it, a side [NavigationRail] takes over so desktop/web don't
+/// waste the bottom edge (design spec 4.5, P1 app shell).
+const double kNavigationRailBreakpoint = 840;
 
 class HomePage extends StatelessWidget {
   final StatefulNavigationShell navigationShell;
@@ -16,6 +22,18 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    // Single source of truth for both nav widgets so their destinations
+    // (order, labels, the Photos gate) cannot drift between them.
+    final destinations = buildHomeDestinations(l10n);
+    final isWide =
+        MediaQuery.sizeOf(context).width >= kNavigationRailBreakpoint;
+
+    void onDestinationSelected(int index) {
+      navigationShell.goBranch(
+        index,
+        initialLocation: index == navigationShell.currentIndex,
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -34,17 +52,38 @@ class HomePage extends StatelessWidget {
           ),
         ],
       ),
-      body: navigationShell,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: (index) {
-          navigationShell.goBranch(
-            index,
-            initialLocation: index == navigationShell.currentIndex,
-          );
-        },
-        destinations: buildHomeDestinations(l10n),
-      ),
+      body: isWide
+          ? Row(
+              children: [
+                NavigationRail(
+                  selectedIndex: navigationShell.currentIndex,
+                  onDestinationSelected: onDestinationSelected,
+                  labelType: NavigationRailLabelType.all,
+                  leading: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: BrandLockup(size: 24),
+                  ),
+                  destinations: [
+                    for (final destination in destinations)
+                      NavigationRailDestination(
+                        icon: destination.icon,
+                        selectedIcon: destination.selectedIcon,
+                        label: Text(destination.label),
+                      ),
+                  ],
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(child: navigationShell),
+              ],
+            )
+          : navigationShell,
+      bottomNavigationBar: isWide
+          ? null
+          : NavigationBar(
+              selectedIndex: navigationShell.currentIndex,
+              onDestinationSelected: onDestinationSelected,
+              destinations: destinations,
+            ),
     );
   }
 }

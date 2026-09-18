@@ -43,6 +43,7 @@
   "clearSearch": "Suche löschen",
   "refresh": "Aktualisieren",
   "noFiles": "Keine Dateien",
+  "noFilesBody": "Laden Sie eine Datei hoch oder erstellen Sie einen Ordner, um loszulegen.",
   "createFolder": "Ordner erstellen",
   "folderName": "Ordnername",
   "enterFolderName": "Ordnernamen eingeben",

@@ -43,6 +43,7 @@
   "clearSearch": "Rensa sökning",
   "refresh": "Uppdatera",
   "noFiles": "Inga filer",
+  "noFilesBody": "Ladda upp en fil eller skapa en mapp för att komma igång.",
   "createFolder": "Skapa mapp",
   "folderName": "Mappnamn",
   "enterFolderName": "Ange mappnamn",

@@ -35,7 +35,9 @@ class FileListItem extends StatelessWidget {
         file.isFolder
             ? formatRelativeTime(file.updatedAt, l10n.localeName)
             : '${formatFileSize(file.sizeBytes)} · ${formatRelativeTime(file.updatedAt, l10n.localeName)}',
-        style: Theme.of(context).textTheme.bodySmall,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
       ),
       trailing: PopupMenuButton<String>(
         onSelected: (value) {

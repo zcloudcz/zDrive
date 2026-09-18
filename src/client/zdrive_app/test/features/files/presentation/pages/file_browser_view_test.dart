@@ -60,7 +60,54 @@ void main() {
 
     await tester.pumpWidget(build());
 
-    expect(find.text('New'), findsOneWidget);
+    // Toolbar's "New" plus the empty state's own repeat of the same action.
+    expect(find.text('New'), findsNWidgets(2));
     expect(find.text('No files'), findsOneWidget);
+  });
+
+  testWidgets('the empty state action fires the same upload/create callbacks',
+      (tester) async {
+    whenListen(
+      bloc,
+      const Stream<FileBrowserState>.empty(),
+      initialState: const FileBrowserLoaded(files: [], breadcrumbs: []),
+    );
+
+    await tester.pumpWidget(build());
+
+    // Opening the empty state's "+ New" menu and picking "New folder"
+    // dispatches CreateFolder through the same bloc the toolbar uses — there
+    // is no separate flow behind the repeated action.
+    await tester.tap(find.text('New').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New folder'));
+    await tester.pumpAndSettle();
+
+    // The dialog reads a name from a text field before it dispatches, so
+    // just confirm the flow reached the dialog it shares with the toolbar.
+    expect(find.text('Create folder'), findsOneWidget);
+  });
+
+  testWidgets('loading shows skeletons, no CircularProgressIndicator',
+      (tester) async {
+    whenListen(
+      bloc,
+      const Stream<FileBrowserState>.empty(),
+      initialState: const FileBrowserLoading(),
+    );
+
+    await tester.pumpWidget(build());
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    // 6 skeleton rows, each with a circular leading placeholder.
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Container &&
+            widget.decoration is BoxDecoration &&
+            (widget.decoration as BoxDecoration).shape == BoxShape.circle,
+      ),
+      findsNWidgets(6),
+    );
   });
 }

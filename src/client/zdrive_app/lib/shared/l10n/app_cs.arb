@@ -49,6 +49,7 @@
   "gridView": "Zobrazit mřížku",
   "listView": "Zobrazit seznam",
   "noFiles": "Žádné soubory",
+  "noFilesBody": "Nahrajte soubor nebo vytvořte složku a začněte.",
   "createFolder": "Vytvořit složku",
   "folderName": "Název složky",
   "enterFolderName": "Zadejte název složky",

@@ -404,6 +404,12 @@ abstract class AppLocalizations {
   /// **'No files'**
   String get noFiles;
 
+  /// No description provided for @noFilesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload a file or create a folder to get started.'**
+  String get noFilesBody;
+
   /// No description provided for @createFolder.
   ///
   /// In en, this message translates to:

@@ -35,10 +35,12 @@ class FileGridItem extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Expanded(
+              // Solid fill, not a translucent wash over whatever sits behind
+              // it — the alpha wash read as muddy at low contrast (spec 4.5).
               child: Container(
-                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                color: colorScheme.surfaceContainerHighest,
                 child: Center(
-                  child: FileIcon(file: file, size: 48),
+                  child: FileIcon(file: file, size: 40),
                 ),
               ),
             ),
@@ -54,38 +56,39 @@ class FileGridItem extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
-                  SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: PopupMenuButton<String>(
-                      padding: EdgeInsets.zero,
-                      iconSize: 16,
-                      onSelected: (value) {
-                        switch (value) {
-                          case 'rename':
-                            onRename();
-                          case 'delete':
-                            onDelete();
-                          case 'share':
-                            onShare();
-                          case 'versions':
-                            onVersions();
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        PopupMenuItem(
-                            value: 'rename', child: Text(l10n.rename)),
-                        PopupMenuItem(
-                            value: 'share', child: Text(l10n.share)),
-                        // Folders have no content, so no version history.
-                        if (!file.isFolder)
-                          PopupMenuItem(
-                              value: 'versions',
-                              child: Text(l10n.versionHistory)),
-                        PopupMenuItem(
-                            value: 'delete', child: Text(l10n.delete)),
-                      ],
+                  PopupMenuButton<String>(
+                    padding: EdgeInsets.zero,
+                    iconSize: 16,
+                    // The glyph stays small, but the tap target must still
+                    // meet the 48dp minimum (spec 4.6 accessibility).
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(48, 48),
                     ),
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'rename':
+                          onRename();
+                        case 'delete':
+                          onDelete();
+                        case 'share':
+                          onShare();
+                        case 'versions':
+                          onVersions();
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                          value: 'rename', child: Text(l10n.rename)),
+                      PopupMenuItem(
+                          value: 'share', child: Text(l10n.share)),
+                      // Folders have no content, so no version history.
+                      if (!file.isFolder)
+                        PopupMenuItem(
+                            value: 'versions',
+                            child: Text(l10n.versionHistory)),
+                      PopupMenuItem(
+                          value: 'delete', child: Text(l10n.delete)),
+                    ],
                   ),
                 ],
               ),

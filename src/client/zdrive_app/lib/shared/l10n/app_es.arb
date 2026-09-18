@@ -43,6 +43,7 @@
   "clearSearch": "Borrar búsqueda",
   "refresh": "Actualizar",
   "noFiles": "No hay archivos",
+  "noFilesBody": "Sube un archivo o crea una carpeta para empezar.",
   "createFolder": "Crear carpeta",
   "folderName": "Nombre de la carpeta",
   "enterFolderName": "Introduce el nombre de la carpeta",

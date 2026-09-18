@@ -34,25 +34,9 @@ class FileActionsToolbar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
       child: Row(
         children: [
-          MenuAnchor(
-            menuChildren: [
-              MenuItemButton(
-                leadingIcon: const Icon(Icons.upload_file),
-                onPressed: onUploadFile,
-                child: Text(l10n.uploadFile),
-              ),
-              MenuItemButton(
-                leadingIcon: const Icon(Icons.create_new_folder),
-                onPressed: onCreateFolder,
-                child: Text(l10n.newFolder),
-              ),
-            ],
-            builder: (context, controller, _) => FilledButton.icon(
-              onPressed: () =>
-                  controller.isOpen ? controller.close() : controller.open(),
-              icon: const Icon(Icons.add),
-              label: Text(l10n.newItem),
-            ),
+          NewItemMenuButton(
+            onUploadFile: onUploadFile,
+            onCreateFolder: onCreateFolder,
           ),
           const Spacer(),
           // Pull-to-refresh (RefreshIndicator, in the listing) is not
@@ -79,6 +63,46 @@ class FileActionsToolbar extends StatelessWidget {
               },
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The "+ New" split-button menu (upload file / new folder). Extracted so
+/// the file browser's empty state can offer the exact same primary action
+/// as the toolbar (design spec 4.5) instead of a second, near-identical menu.
+class NewItemMenuButton extends StatelessWidget {
+  final VoidCallback onUploadFile;
+  final VoidCallback onCreateFolder;
+
+  const NewItemMenuButton({
+    super.key,
+    required this.onUploadFile,
+    required this.onCreateFolder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
+    return MenuAnchor(
+      menuChildren: [
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.upload_file),
+          onPressed: onUploadFile,
+          child: Text(l10n.uploadFile),
+        ),
+        MenuItemButton(
+          leadingIcon: const Icon(Icons.create_new_folder),
+          onPressed: onCreateFolder,
+          child: Text(l10n.newFolder),
+        ),
+      ],
+      builder: (context, controller, _) => FilledButton.icon(
+        onPressed: () =>
+            controller.isOpen ? controller.close() : controller.open(),
+        icon: const Icon(Icons.add),
+        label: Text(l10n.newItem),
       ),
     );
   }

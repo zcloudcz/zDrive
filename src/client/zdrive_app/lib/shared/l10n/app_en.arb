@@ -56,6 +56,7 @@
   "gridView": "Grid view",
   "listView": "List view",
   "noFiles": "No files",
+  "noFilesBody": "Upload a file or create a folder to get started.",
   "createFolder": "Create folder",
   "folderName": "Folder name",
   "enterFolderName": "Enter folder name",
