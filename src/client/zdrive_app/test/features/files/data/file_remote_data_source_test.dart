@@ -244,6 +244,30 @@ void main() {
         .called(1);
   });
 
+  test('createShare sends expiresAt as a UTC instant with a trailing Z',
+      () async {
+    // Regression: an offset-less local time ("2026-09-27T00:00:00.000") made
+    // the server answer 500 (Kind=Unspecified into timestamptz).
+    when(() => dio.post('/shares', data: any(named: 'data'))).thenAnswer(
+        (_) async => ok({
+              'id': 's1',
+              'fileId': 'f1',
+              'permission': 'read',
+              'linkToken': 'tok',
+              'expiresAt': null,
+            }, '/shares'));
+    final local = DateTime(2026, 9, 27, 23, 59, 59);
+
+    await ds.createShare('f1', 'read', local);
+
+    final data = verify(() => dio.post('/shares', data: captureAny(named: 'data')))
+        .captured
+        .single as Map<String, dynamic>;
+    final sent = data['expiresAt'] as String;
+    expect(sent.endsWith('Z'), isTrue);
+    expect(DateTime.parse(sent), local.toUtc());
+  });
+
   test('deleteFile succeeds on success envelope', () async {
     when(() => dio.delete('/files/f1', options: any(named: 'options')))
         .thenAnswer((_) async => ok(true, '/files/f1'));

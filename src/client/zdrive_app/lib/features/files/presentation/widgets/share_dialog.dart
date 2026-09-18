@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
 import '../../../../core/network/api_constants.dart';
+import '../../../../core/network/error_message.dart';
 import '../../domain/file_item.dart';
 
 class ShareDialog extends StatefulWidget {
@@ -159,7 +160,10 @@ class _ShareDialogState extends State<ShareDialog> {
       lastDate: now.add(const Duration(days: 365)),
     );
     if (picked != null) {
-      setState(() => _expiresAt = picked);
+      // The picker returns local midnight at the START of the chosen day;
+      // "valid until the 27th" should include the 27th, so expire at its end.
+      setState(() => _expiresAt = DateTime(
+            picked.year, picked.month, picked.day, 23, 59, 59));
     }
   }
 
@@ -181,7 +185,7 @@ class _ShareDialogState extends State<ShareDialog> {
       });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = describeError(e, AppLocalizations.of(context)!);
         _loading = false;
       });
     }
