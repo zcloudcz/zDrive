@@ -211,9 +211,12 @@ class FileRemoteDataSource {
   }
 
   /// Flips the blob-side manifest to a snapshot (StorageService).
+  ///
+  /// First StorageService call of the restore flow — may hit a cold start.
   Future<void> restoreStorageManifest(String fileId, String manifestHash) async {
     final response = await _dio.post(
       '${ApiConstants.storage}/files/$fileId/manifests/$manifestHash/restore',
+      options: Options(receiveTimeout: ApiConstants.storageColdStartTimeout),
     );
     ensureSuccess(response);
   }

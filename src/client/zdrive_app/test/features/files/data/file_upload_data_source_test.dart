@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/core/network/api_constants.dart';
 import 'package:zdrive_app/features/files/data/file_upload_data_source.dart';
 
 class MockDio extends Mock implements Dio {}
@@ -30,6 +31,7 @@ void main() {
       final hash = 'a' * 64;
       when(() => dio.get('/storage/download/f1/manifest',
         queryParameters: {'manifestHash': hash},
+        options: any(named: 'options'),
       )).thenAnswer((_) async => ok({
         'manifestHash': echo, 'totalSize': 3,
         'chunks': [{'index': 0, 'hash': 'chunk-hash'}],
@@ -41,7 +43,8 @@ void main() {
   }
 
   test('initUpload posts fileId/fileName/totalChunks to /storage/upload/init', () async {
-    when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer((_) async =>
+    when(() => dio.post(apiInit, data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async =>
         ok({'sessionId': 's1', 'sasUploadUrl': 'http://blob/upload'}, apiInit));
 
     final session = await ds.initUpload('f1', 'doc.txt', 1);
@@ -49,7 +52,21 @@ void main() {
     expect(session.sessionId, 's1');
     expect(session.sasUploadUrl, 'http://blob/upload');
     verify(() => dio.post(apiInit,
-        data: {'fileId': 'f1', 'fileName': 'doc.txt', 'totalChunks': 1})).called(1);
+        data: {'fileId': 'f1', 'fileName': 'doc.txt', 'totalChunks': 1},
+        options: any(named: 'options'))).called(1);
+  });
+
+  test('initUpload gives the first StorageService call a cold-start receiveTimeout', () async {
+    when(() => dio.post(apiInit, data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async =>
+        ok({'sessionId': 's1', 'sasUploadUrl': 'x'}, apiInit));
+
+    await ds.initUpload('f1', 'doc.txt', 1);
+
+    final opts = verify(() => dio.post(apiInit,
+        data: any(named: 'data'),
+        options: captureAny(named: 'options'))).captured.single as Options;
+    expect(opts.receiveTimeout, ApiConstants.storageColdStartTimeout);
   });
 
   test('uploadChunk PUTs raw bytes with the real SHA-256 in X-Chunk-Hash', () async {
@@ -93,7 +110,8 @@ void main() {
     // sizes/streams below — these tests care about totalChunks and the
     // byte-count check, not about individual chunk paths.
     void stubUploadSession() {
-      when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer(
+      when(() => dio.post(apiInit, data: any(named: 'data'), options: any(named: 'options')))
+          .thenAnswer(
           (_) async => ok({'sessionId': 's1', 'sasUploadUrl': 'x'}, apiInit));
       when(() => dio.put(
             any(),
@@ -116,7 +134,7 @@ void main() {
       }
 
       final totalChunksSent = verify(
-        () => dio.post(apiInit, data: captureAny(named: 'data')),
+        () => dio.post(apiInit, data: captureAny(named: 'data'), options: any(named: 'options')),
       ).captured.map((data) => (data as Map)['totalChunks']).toList();
 
       expect(totalChunksSent, [1, 1, 2, 3]);
@@ -190,7 +208,8 @@ void main() {
       final content = Uint8List.fromList(
           List.generate(FileUploadDataSource.chunkSize * 2 + 10, (i) => i % 256));
 
-      when(() => dio.post(apiInit, data: any(named: 'data'))).thenAnswer(
+      when(() => dio.post(apiInit, data: any(named: 'data'), options: any(named: 'options')))
+          .thenAnswer(
           (_) async => ok({'sessionId': 's1', 'sasUploadUrl': 'x'}, apiInit));
 
       final uploadedChunks = <int, Uint8List>{};
@@ -229,7 +248,8 @@ void main() {
       // Now serve those same chunks back through the manifest/download
       // endpoints downloadFile already exercises (see the group below), and
       // check the round trip reproduces the exact original bytes.
-      when(() => dio.get('/storage/download/f1/manifest')).thenAnswer((_) async => ok({
+      when(() => dio.get('/storage/download/f1/manifest', options: any(named: 'options')))
+          .thenAnswer((_) async => ok({
             'totalSize': content.length,
             'chunks': [
               for (final entry in uploadedChunks.entries)
@@ -259,7 +279,8 @@ void main() {
     // StorageService), camelCase like every other controller response — see
     // the doc comment on ManifestDto — not a SAS URL fetched cross-origin.
     void stubManifest(String fileId, List<Map<String, Object>> chunks, int totalSize) {
-      when(() => dio.get('/storage/download/$fileId/manifest')).thenAnswer((_) async => ok(
+      when(() => dio.get('/storage/download/$fileId/manifest', options: any(named: 'options')))
+          .thenAnswer((_) async => ok(
           {'totalSize': totalSize, 'chunks': chunks}, '/storage/download/$fileId/manifest'));
     }
 
@@ -273,6 +294,28 @@ void main() {
             requestOptions: RequestOptions(path: '/storage/download/$fileId/chunk/$hash/bytes'),
           ));
     }
+
+    test('getManifest gives the first StorageService call of the download '
+        'flow a cold-start receiveTimeout, but a follow-up chunk fetch keeps '
+        'the default', () async {
+      final chunk0 = Uint8List.fromList([1, 2, 3]);
+      final hash0 = sha256.convert(chunk0).toString();
+      stubManifest('f1', [
+        {'hash': hash0, 'index': 0},
+      ], chunk0.length);
+      stubChunk('f1', hash0, chunk0);
+
+      await ds.downloadFile('f1');
+
+      final manifestOpts = verify(() => dio.get('/storage/download/f1/manifest',
+          options: captureAny(named: 'options'))).captured.single as Options;
+      expect(manifestOpts.receiveTimeout, ApiConstants.storageColdStartTimeout);
+
+      final chunkOpts = verify(() => dio.get<List<int>>('/storage/download/f1/chunk/$hash0/bytes',
+          options: captureAny(named: 'options'))).captured.single as Options;
+      // null means "fall back to the client's default 15s", not "any other value".
+      expect(chunkOpts.receiveTimeout, isNull);
+    });
 
     test('reassembles chunks in manifest index order, not array order', () async {
       final chunk0 = Uint8List.fromList([1, 2, 3]);
