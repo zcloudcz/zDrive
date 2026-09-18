@@ -91,8 +91,9 @@ void main() {
       await tester.pumpWidget(build(const LoginPage()));
       await tester.pumpAndSettle();
 
-      // Two BrandLockups: one in the brand panel (mono), one above the form.
-      expect(find.byType(BrandLockup), findsNWidgets(2));
+      // Exactly one BrandLockup: the brand panel's (mono). The form column
+      // no longer repeats it (bug: brand appeared twice in the wide layout).
+      expect(find.byType(BrandLockup), findsOneWidget);
       expect(
         find.byWidgetPredicate(
           (widget) => widget is Container && widget.color == AppTheme.brandPetrol,
@@ -104,13 +105,11 @@ void main() {
       // The panel lockup must be the monochrome (white wordmark) variant —
       // the default variant uses onSurface, which is close to black and
       // would be unreadable on the petrol fill.
-      final panelLockup = tester.widget<BrandLockup>(
-        find.byType(BrandLockup).first,
-      );
+      final panelLockup = tester.widget<BrandLockup>(find.byType(BrandLockup));
       expect(panelLockup.monochrome, isTrue);
       final wordmark = tester.widget<Text>(
         find.descendant(
-          of: find.byType(BrandLockup).first,
+          of: find.byType(BrandLockup),
           matching: find.text('zDrive'),
         ),
       );

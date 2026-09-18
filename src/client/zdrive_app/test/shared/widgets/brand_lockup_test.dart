@@ -59,4 +59,23 @@ void main() {
     final style = tester.widget<Text>(find.text('zDrive')).style!;
     expect(style.color, AppTheme.light.colorScheme.onSurface);
   });
+
+  testWidgets(
+    'monochrome does not tint the mark image — the source asset is an opaque '
+    'tile, so tinting it paints every pixel solid white (regression: mark '
+    'rendered as a blank white square on the petrol header/login panel)',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: BrandLockup(monochrome: true))),
+      );
+
+      final image = tester.widget<Image>(find.byType(Image));
+      expect(image.color, isNull);
+      expect(image.colorBlendMode, isNull);
+      expect(find.ancestor(of: find.byType(Image), matching: find.byType(ColorFiltered)),
+          findsNothing);
+      expect(find.ancestor(of: find.byType(Image), matching: find.byType(ShaderMask)),
+          findsNothing);
+    },
+  );
 }
