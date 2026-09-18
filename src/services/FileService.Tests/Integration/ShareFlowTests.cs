@@ -109,4 +109,139 @@ public sealed class ShareFlowTests : IClassFixture<FileServiceFactory>
         share.ExpiresAt.Should().NotBeNull();
         share.Permission.Should().Be("Write");
     }
+
+    [Fact]
+    public async Task ShareLink_PasswordProtected_ReturnsForbidden()
+    {
+        var createResponse = await _client.PostAsJsonAsync("/api/v1/files", new
+        {
+            name = "secret.txt",
+            isFolder = false
+        });
+        var file = (await createResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var shareResponse = await _client.PostAsJsonAsync("/api/v1/shares", new
+        {
+            fileId = file.Id,
+            permission = Permission.Read,
+            password = "hunter2"
+        });
+        var share = (await shareResponse.Content.ReadFromJsonAsync<ApiResponse<ShareDto>>())!.Data!;
+
+        var unauthClient = _factory.CreateClient();
+        var linkResponse = await unauthClient.GetAsync($"/api/v1/shares/link/{share.LinkToken}");
+
+        linkResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task DirectShare_NotReachableViaLinkEndpoint_ReturnsNotFound()
+    {
+        var createResponse = await _client.PostAsJsonAsync("/api/v1/files", new
+        {
+            name = "direct-share.txt",
+            isFolder = false
+        });
+        var file = (await createResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var shareResponse = await _client.PostAsJsonAsync("/api/v1/shares", new
+        {
+            fileId = file.Id,
+            sharedWith = Guid.NewGuid(),
+            permission = Permission.Read
+        });
+        var share = (await shareResponse.Content.ReadFromJsonAsync<ApiResponse<ShareDto>>())!.Data!;
+
+        var unauthClient = _factory.CreateClient();
+        var linkResponse = await unauthClient.GetAsync($"/api/v1/shares/link/{share.LinkToken}");
+
+        linkResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task SharedFolder_ListChildren_NestedAndOutside()
+    {
+        var rootResponse = await _client.PostAsJsonAsync("/api/v1/files", new { name = "shared-root", isFolder = true });
+        var root = (await rootResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var nestedResponse = await _client.PostAsJsonAsync("/api/v1/files", new { name = "nested", isFolder = true, parentId = root.Id });
+        var nested = (await nestedResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var leafResponse = await _client.PostAsJsonAsync("/api/v1/files", new { name = "leaf.txt", isFolder = false, parentId = nested.Id });
+        var leaf = (await leafResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var outsideResponse = await _client.PostAsJsonAsync("/api/v1/files", new { name = "outside", isFolder = true });
+        var outside = (await outsideResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var shareResponse = await _client.PostAsJsonAsync("/api/v1/shares", new { fileId = root.Id, permission = Permission.Read });
+        var share = (await shareResponse.Content.ReadFromJsonAsync<ApiResponse<ShareDto>>())!.Data!;
+
+        var unauthClient = _factory.CreateClient();
+
+        // Default folderId (the shared root) lists "nested".
+        var rootChildren = await unauthClient.GetFromJsonAsync<ApiResponse<List<FileDto>>>(
+            $"/api/v1/shares/link/{share.LinkToken}/children");
+        rootChildren!.Data.Should().ContainSingle(f => f.Id == nested.Id);
+
+        // A nested subfolder inside the share lists its own children.
+        var nestedChildren = await unauthClient.GetFromJsonAsync<ApiResponse<List<FileDto>>>(
+            $"/api/v1/shares/link/{share.LinkToken}/children?folderId={nested.Id}");
+        nestedChildren!.Data.Should().ContainSingle(f => f.Id == leaf.Id);
+
+        // A real folder that's just not under the shared root -> 404, not 403.
+        var outsideResult = await unauthClient.GetAsync(
+            $"/api/v1/shares/link/{share.LinkToken}/children?folderId={outside.Id}");
+        outsideResult.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        // Soft-deleted descendant -> 404.
+        await _client.DeleteAsync($"/api/v1/files/{nested.Id}");
+        var deletedResult = await unauthClient.GetAsync(
+            $"/api/v1/shares/link/{share.LinkToken}/children?folderId={nested.Id}");
+        deletedResult.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DownloadGrant_RootAndNestedFile_ValidatesAndCarriesOwnerIds()
+    {
+        var rootResponse = await _client.PostAsJsonAsync("/api/v1/files", new
+        {
+            name = "shared-root-2",
+            isFolder = true
+        });
+        var root = (await rootResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var manifestHash = new string('a', 64);
+        var nestedResponse = await _client.PostAsJsonAsync("/api/v1/files", new
+        {
+            name = "downloadable.bin",
+            isFolder = false,
+            parentId = root.Id,
+            sizeBytes = 1024L,
+            manifestHash
+        });
+        var nested = (await nestedResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var outsideResponse = await _client.PostAsJsonAsync("/api/v1/files", new { name = "outside.bin", isFolder = false, manifestHash });
+        var outside = (await outsideResponse.Content.ReadFromJsonAsync<ApiResponse<FileDto>>())!.Data!;
+
+        var shareResponse = await _client.PostAsJsonAsync("/api/v1/shares", new { fileId = root.Id, permission = Permission.Read });
+        var share = (await shareResponse.Content.ReadFromJsonAsync<ApiResponse<ShareDto>>())!.Data!;
+
+        var unauthClient = _factory.CreateClient();
+
+        var grantResponse = await unauthClient.PostAsJsonAsync(
+            $"/api/v1/shares/link/{share.LinkToken}/download-grant", new { fileId = nested.Id });
+        grantResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var grant = (await grantResponse.Content.ReadFromJsonAsync<ApiResponse<ShareDownloadGrantDto>>())!.Data!;
+        grant.FileId.Should().Be(nested.Id);
+        grant.ManifestHash.Should().Be(manifestHash);
+
+        var forFolder = await unauthClient.PostAsJsonAsync(
+            $"/api/v1/shares/link/{share.LinkToken}/download-grant", new { fileId = root.Id });
+        forFolder.StatusCode.Should().Be(HttpStatusCode.NotFound); // root is a folder here, not a file
+
+        var forOutside = await unauthClient.PostAsJsonAsync(
+            $"/api/v1/shares/link/{share.LinkToken}/download-grant", new { fileId = outside.Id });
+        forOutside.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
 }

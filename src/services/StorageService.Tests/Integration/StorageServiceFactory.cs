@@ -41,6 +41,11 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
     // with this key and the service is configured to validate against it.
     public RSA Rsa { get; } = RSA.Create(2048);
 
+    // Base64 of 32 'a' bytes — long enough to pass ShareDownloadGrantOptions.TryGetKey.
+    // Must match FileServiceFactory's key so a grant minted by one test host
+    // validates against the other.
+    public const string TestShareGrantKey = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
@@ -53,6 +58,9 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
             services.PostConfigure<JwtBearerOptions>(
                 JwtBearerDefaults.AuthenticationScheme,
                 options => options.TokenValidationParameters.IssuerSigningKey = new RsaSecurityKey(Rsa));
+
+            services.PostConfigure<ZDrive.Shared.Auth.ShareDownloadGrantOptions>(
+                options => options.DownloadGrantKey = TestShareGrantKey);
         });
 
         builder.ConfigureServices(services =>

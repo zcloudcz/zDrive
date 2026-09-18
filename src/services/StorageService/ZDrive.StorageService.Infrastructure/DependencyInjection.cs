@@ -28,6 +28,11 @@ public static class DependencyInjection
 
         services.AddScoped<IStorageDbContext>(sp => sp.GetRequiredService<StorageDbContext>());
 
+        // Public share download grants (defaults to an empty key — see
+        // ShareDownloadGrantOptions.TryGetKey for the fail-closed behavior)
+        services.Configure<ShareDownloadGrantOptions>(
+            configuration.GetSection(ShareDownloadGrantOptions.SectionName));
+
         // Azure Blob Storage — same fail-fast policy as the JWT key below: the
         // Azurite fallback only applies in Development, never silently in prod.
         var blobConnectionString = configuration.GetConnectionString("AzureBlobStorage")

@@ -85,6 +85,49 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
     }
 
     /// <summary>
+    /// Public share-link endpoints (anonymous manifest/chunk downloads by
+    /// visitors with no JWT) must not carry the gateway's default
+    /// AuthorizationPolicy, and must use their own "publicShare" rate-limit
+    /// budget rather than sharing "fixed" or "auth" with unrelated traffic.
+    /// </summary>
+    [Theory]
+    [InlineData("sharesLinkRoute", "/api/v1/shares/link/{**catch-all}", "fileCluster")]
+    [InlineData("storageSharedRoute", "/api/v1/storage/shared/{**catch-all}", "storageCluster")]
+    public void PublicShareRoute_IsAnonymousWithPublicShareRateLimit(string routeId, string path, string clusterId)
+    {
+        var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();
+
+        var route = config.Routes.Should().ContainSingle(
+            r => r.RouteId == routeId, "the public share route must be present").Subject;
+
+        route.Match.Path.Should().Be(path);
+        route.ClusterId.Should().Be(clusterId);
+        route.AuthorizationPolicy.Should().BeNull("a share-link visitor carries no JWT");
+        route.RateLimiterPolicy.Should().Be("publicShare");
+    }
+
+    /// <summary>
+    /// YARP orders routes by template specificity, so the more specific
+    /// "link"/"shared" routes above must win over the catch-all authenticated
+    /// routes for the same prefix — otherwise every anonymous share request
+    /// would 401 against the "shares-route"/"storage-route" AuthorizationPolicy,
+    /// which is the exact bug this feature fixes.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/v1/shares/link/abc123")]
+    public async Task ShareLinkPath_WithoutToken_DoesNotReturnUnauthorized(string path)
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync(path);
+
+        // FileService isn't actually running behind this test gateway, so the
+        // proxy attempt itself fails — the point is that it gets far enough to
+        // try, instead of being rejected by the gateway's own authorization.
+        response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>
     /// A route naming a cluster that does not exist is not a startup error in
     /// YARP — the request simply fails at proxy time, and the status-code tests
     /// above still pass because an unmatched cluster never reaches them. Every

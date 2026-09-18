@@ -31,6 +31,10 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
 
     public const int MaxVersionsPerFile = 3;
 
+    // Must match StorageServiceFactory.TestShareGrantKey — grants minted here
+    // are validated over there in the shared-download integration tests.
+    public const string TestShareGrantKey = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=";
+
     public Guid TestUserId { get; } = Guid.NewGuid();
     public Guid TestTenantId { get; } = Guid.NewGuid();
 
@@ -69,6 +73,9 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
             // creating dozens of versions (see VersionFlowTests).
             services.PostConfigure<ZDrive.FileService.Application.Options.VersioningOptions>(
                 options => options.MaxVersionsPerFile = MaxVersionsPerFile);
+
+            services.PostConfigure<ZDrive.Shared.Auth.ShareDownloadGrantOptions>(
+                options => options.DownloadGrantKey = TestShareGrantKey);
         });
     }
 

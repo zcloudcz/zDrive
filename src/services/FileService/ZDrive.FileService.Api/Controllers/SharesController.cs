@@ -2,9 +2,11 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ZDrive.FileService.Application.Commands.CreateShare;
+using ZDrive.FileService.Application.Commands.CreateShareDownloadGrant;
 using ZDrive.FileService.Application.Commands.RevokeShare;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Application.Queries.GetShareByToken;
+using ZDrive.FileService.Application.Queries.ListSharedChildren;
 using ZDrive.FileService.Domain.Enums;
 using ZDrive.Shared.Auth;
 using ZDrive.Shared.DTOs;
@@ -54,6 +56,27 @@ public sealed class SharesController : ControllerBase
         var result = await _mediator.Send(new GetShareByTokenQuery(token), ct);
         return Ok(ApiResponse<SharedFileDto>.Ok(result));
     }
+
+    [HttpGet("link/{token}/children")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<List<FileDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSharedChildren(string token, [FromQuery] Guid? folderId, CancellationToken ct)
+    {
+        var result = await _mediator.Send(new ListSharedChildrenQuery(token, folderId), ct);
+        return Ok(ApiResponse<List<FileDto>>.Ok(result));
+    }
+
+    [HttpPost("link/{token}/download-grant")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<ShareDownloadGrantDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreateShareDownloadGrant(
+        string token, [FromBody] CreateShareDownloadGrantRequest request, CancellationToken ct)
+    {
+        var result = await _mediator.Send(new CreateShareDownloadGrantCommand(token, request.FileId), ct);
+        return Ok(ApiResponse<ShareDownloadGrantDto>.Ok(result));
+    }
 }
 
 public sealed record CreateShareRequest(
@@ -62,3 +85,5 @@ public sealed record CreateShareRequest(
     Permission Permission,
     string? Password = null,
     DateTime? ExpiresAt = null);
+
+public sealed record CreateShareDownloadGrantRequest(Guid FileId);

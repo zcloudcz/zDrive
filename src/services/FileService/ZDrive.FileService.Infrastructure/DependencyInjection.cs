@@ -41,6 +41,11 @@ public static class DependencyInjection
         services.Configure<ZDrive.FileService.Application.Options.VersioningOptions>(
             configuration.GetSection(ZDrive.FileService.Application.Options.VersioningOptions.SectionName));
 
+        // Public share download grants (defaults to an empty key — see
+        // ShareDownloadGrantOptions.TryGetKey for the fail-closed behavior)
+        services.Configure<ShareDownloadGrantOptions>(
+            configuration.GetSection(ShareDownloadGrantOptions.SectionName));
+
         // Authentication (validates JWTs issued by AuthService)
         var publicKeyPem = configuration["Jwt:RsaPublicKeyPem"];
         if (string.IsNullOrWhiteSpace(publicKeyPem))

@@ -119,6 +119,22 @@ builder.Services.AddRateLimiter(options =>
     // A fixed window is used (instead of e.g. a ConcurrencyLimiter) so it
     // keeps producing the same RetryAfter metadata the OnRejected handler
     // above already relies on.
+    // Public share-link endpoints (anonymous manifest/chunk downloads): a
+    // 1 GB shared file is ~250 chunk requests from one visitor, so this
+    // needs its own budget the same way "chunk" does for authenticated
+    // uploads. Partitioned the same way "auth" is (GetPartitionKey falls
+    // back to caller IP since these requests carry no JWT) — same
+    // X-Forwarded-For caveat applies.
+    options.AddPolicy("publicShare", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 300,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        }));
+
     options.AddPolicy("chunk", httpContext => RateLimitPartition.GetFixedWindowLimiter(
         RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
         _ => new FixedWindowRateLimiterOptions
