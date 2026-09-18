@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -13,6 +14,11 @@ class Diagnostics {
   static SendPort? _writer;
   static Isolate? _isolate;
   static ReceivePort? _acks;
+  // Stays open for the writer isolate's whole life (unlike the one-shot
+  // `ready` port in initialize()), so a crash/exit *after* readiness is
+  // still observed -- otherwise events would pile up behind `_pending`'s
+  // cap and silently vanish into `_dropped` while everything looked fine.
+  static ReceivePort? _lifecycle;
   static Timer? _heartbeat;
   static int _pending = 0;
   static int _dropped = 0;
@@ -23,18 +29,19 @@ class Diagnostics {
   // bounded, so a writer that never starts cannot grow this without limit
   // -- and flushed in order once the ready signal arrives, however late.
   // Only a writer that genuinely fails (spawn error, uncaught isolate
-  // error, exit before ready) disables logging, via [_writerFailed].
+  // error, exit before or after ready) disables logging, via [_writerFailed].
   static final Queue<Map<String, Object?>> _preReadyQueue = Queue();
   static int _preReadyDropped = 0;
   static const _preReadyQueueCap = 2000;
   static bool _writerFailed = false;
   static Completer<void>? _readyOrFailed;
   static bool _slowStartFlagged = false;
-  static Duration _readyTimeout = const Duration(seconds: 20);
+  static bool _draining = false;
+  static Duration _readyTimeout = const Duration(seconds: 5);
   // Bumped on every initialize()/shutdown() cycle. A killed-but-still-
   // starting isolate can deliver its (late) ready/exit message after a
-  // *later* initialize() call has already set up fresh state; the callback
-  // below checks this to discard such a stale result instead of clobbering
+  // *later* initialize() call has already set up fresh state; callbacks
+  // below check this to discard such a stale result instead of clobbering
   // the newer session.
   static int _generation = 0;
 
@@ -44,12 +51,11 @@ class Diagnostics {
     int maxBytes = 2 * 1024 * 1024,
     Duration stallThreshold = const Duration(seconds: 10),
     // Test-only: simulates a slow isolate startup.
-    Duration startupDelay = Duration.zero,
-    // How long `flush()` waits before flagging the writer as slow to start
-    // (a `diagnostics.slow_writer_start` event, itself queued for once the
-    // writer is up). Purely observability -- flush() keeps waiting for the
-    // writer past this point regardless; it is never treated as a failure.
-    Duration readyTimeout = const Duration(seconds: 20),
+    @visibleForTesting Duration startupDelay = Duration.zero,
+    // Bounds how long flush()/exportLogs() wait for the writer to report
+    // ready (see _awaitWriter). Exposed for tests; production code should
+    // not need to override the default.
+    @visibleForTesting Duration readyTimeout = const Duration(seconds: 5),
   }) async {
     if (_writer != null || _isolate != null) return;
     _writerFailed = false;
@@ -59,6 +65,8 @@ class Diagnostics {
     _readyOrFailed = readyOrFailed;
     final generation = ++_generation;
     final ready = ReceivePort();
+    final lifecycle = ReceivePort();
+    _lifecycle = lifecycle;
     try {
       final base =
           directory ??
@@ -74,9 +82,10 @@ class Diagnostics {
         ..listen((_) {
           if (_pending > 0) _pending--;
         });
-      // The same port doubles as onError/onExit: a genuine isolate failure
-      // delivers a message that is not a SendPort, handled below exactly
-      // like an explicit "unavailable" result.
+      // onError/onExit go to `lifecycle`, not `ready`: a genuine isolate
+      // failure (crash, or exit before ever reporting ready) must be
+      // distinguishable from -- and raceable against -- the writer's own
+      // explicit readiness signal on `ready`.
       _isolate = await Isolate.spawn(
         _writeLogs,
         [
@@ -88,33 +97,84 @@ class Diagnostics {
           version ?? 'unknown',
           startupDelay.inMilliseconds,
         ],
-        onError: ready.sendPort,
-        onExit: ready.sendPort,
+        onError: lifecycle.sendPort,
+        onExit: lifecycle.sendPort,
       );
       unawaited(
-        ready.first.then((result) {
+        () async {
+          // A single, persistent listener on `lifecycle`: its first message
+          // races against `ready` below (via `firstFailure`) to decide the
+          // initial outcome, and the SAME listener keeps running afterward
+          // to catch a *later* crash/exit -- a ReceivePort only allows one
+          // subscription, so `.first` (which itself listens) cannot be used
+          // here as well without "Stream has already been listened to".
+          final firstFailure = Completer<Object?>();
+          final lifecycleSub = lifecycle.listen((message) {
+            if (!firstFailure.isCompleted) {
+              firstFailure.complete(message);
+              return;
+            }
+            if (generation != _generation) return;
+            _writerFailed = true;
+            _writer = null;
+            _heartbeat?.cancel();
+            _heartbeat = null;
+          });
+          Object? result;
+          try {
+            result = await Future.any([ready.first, firstFailure.future]);
+          } catch (_) {
+            result = null;
+          }
           ready.close();
-          if (generation != _generation) return; // superseded, see above
+          if (generation != _generation) {
+            await lifecycleSub.cancel();
+            lifecycle.close();
+            return;
+          }
           if (result is SendPort) {
             _writer = result;
             _heartbeat = Timer.periodic(
               const Duration(seconds: 2),
               (_) => _writer?.send('heartbeat'),
             );
-            _drainPreReadyQueue();
+            await _drainPreReadyQueue();
+            if (!readyOrFailed.isCompleted) readyOrFailed.complete();
+            // lifecycleSub keeps running: a later message hits the `else`
+            // branch above and marks the facility failed.
           } else {
+            // Genuine failure (spawn's onError/onExit) before the writer
+            // ever reported ready.
             _writerFailed = true;
             _isolate = null;
+            await lifecycleSub.cancel();
+            lifecycle.close();
+            if (!readyOrFailed.isCompleted) readyOrFailed.complete();
           }
-          if (!readyOrFailed.isCompleted) readyOrFailed.complete();
-        }),
+        }(),
       );
     } catch (_) {
       _writerFailed = true;
       if (!readyOrFailed.isCompleted) readyOrFailed.complete();
       ready.close();
+      lifecycle.close();
       await shutdown();
     }
+  }
+
+  /// Test-only: simulates the writer isolate dying unexpectedly (crash,
+  /// OOM, killed by the OS) *after* it already reported ready, to exercise
+  /// the `_lifecycle` failure path without a real crash.
+  @visibleForTesting
+  static void killWriterForTest() {
+    // A real `Isolate.kill()`'s onExit notification is not guaranteed to be
+    // prompt -- it can wait for the isolate's own next scheduled event
+    // (e.g. its 2s heartbeat-stall timer), which would make this seam flaky
+    // for no reason relevant to what it is testing. Deliver the same
+    // synthetic signal `onExit` would, directly and immediately; still kill
+    // the isolate too, for realism and cleanup.
+    _lifecycle?.sendPort.send(null);
+    _isolate?.kill(priority: Isolate.immediate);
   }
 
   static void event(String name, [Map<String, Object?> fields = const {}]) {
@@ -134,7 +194,10 @@ class Diagnostics {
 
   static void _send(Map<String, Object?> record) {
     if (_writerFailed) return;
-    if (_writer != null) {
+    // While a drain is running, new events still queue behind whatever it
+    // has not yet sent -- sending directly here would let them overtake
+    // earlier, still-buffered events and break ordering.
+    if (_writer != null && !_draining) {
       _sendToWriter(record);
       return;
     }
@@ -162,42 +225,77 @@ class Diagnostics {
     _writer!.send(record);
   }
 
-  static void _drainPreReadyQueue() {
-    if (_preReadyDropped > 0) {
-      _sendToWriter(
-        diagnosticRecord('diagnostics.dropped', {'count': _preReadyDropped}),
-      );
-      _preReadyDropped = 0;
+  // Drains the buffer built up before the writer was ready. Exempt from
+  // `_sendToWriter`'s normal 256 in-flight cap: that cap exists to bound
+  // memory from a sender that could otherwise queue unboundedly forever;
+  // draining does not have that shape; it is a single pass over a buffer
+  // that was already bounded at `_preReadyQueueCap` when it was filled, so
+  // it cannot itself grow further while draining (`_send` refuses to bypass
+  // it during a drain, see `_draining`). Gating on the 256 cap as well
+  // would mean polling for round-tripped acks mid-drain to make progress,
+  // which is slow and protects nothing not already covered by that bound.
+  // Order is preserved: this is the only place that removes from
+  // `_preReadyQueue`, in FIFO order, synchronously.
+  static Future<void> _drainPreReadyQueue() async {
+    _draining = true;
+    try {
+      if (_preReadyDropped > 0) {
+        _sendDuringDrain(
+          diagnosticRecord('diagnostics.dropped', {'count': _preReadyDropped}),
+        );
+        _preReadyDropped = 0;
+      }
+      while (_preReadyQueue.isNotEmpty) {
+        if (_writerFailed) return; // writer died mid-drain; stop, don't hang
+        _sendDuringDrain(_preReadyQueue.removeFirst());
+      }
+    } finally {
+      _draining = false;
     }
-    while (_preReadyQueue.isNotEmpty) {
-      _sendToWriter(_preReadyQueue.removeFirst());
+  }
+
+  static void _sendDuringDrain(Map<String, Object?> record) {
+    if (_dropped > 0) {
+      record['droppedEvents'] = _dropped;
+      _dropped = 0;
     }
+    _pending++;
+    _writer!.send(record);
   }
 
   // Shared by exportLogs()/flush(): both need the writer to actually be up
   // before they mean anything, and both are callable while it is still
-  // starting (cold JIT, busy CI runner) -- which is not a failure. `_readyTimeout`
-  // only flags a slow start once, as an event queued for whenever the
-  // writer does come up; callers still wait for the real outcome (ready,
-  // or genuinely failed via spawn error / isolate error / exit) afterwards.
-  // A fixed bound that gave up here would silently lose events queued so
-  // far, which is exactly the bug this replaces.
+  // starting (cold JIT, busy CI runner) -- which is not a failure.
+  // Bounded so exit-path callers (flush()/exportLogs(), and quit() which
+  // awaits flush() before restarting) never hang: the writer now reports
+  // ready before it ever touches the shared `diagnostic.lock` (see
+  // _writeLogs), but a lock held by another instance sharing this
+  // directory (tray + updater-spawned instance under
+  // %LOCALAPPDATA%\zDrive\logs, or a synced/SMB dir) can still delay
+  // isolate startup itself past this bound in principle. On timeout this
+  // never disables the facility -- it just flags the slow start once (an
+  // event queued like any other) and returns; events keep buffering, and a
+  // later ready signal still drains them.
   static Future<void> _awaitWriter() async {
-    if (_writer != null || _writerFailed) return;
-    if (!_slowStartFlagged) {
-      try {
-        await _readyOrFailed?.future.timeout(_readyTimeout);
-      } on TimeoutException {
+    // `_writer` is set the moment the writer reports ready, but the drain
+    // of whatever was buffered before that runs after, asynchronously (see
+    // _drainPreReadyQueue). Racing ahead of it here -- straight to the
+    // writer, bypassing the still-draining queue -- would let flush()'s
+    // own message overtake buffered events still waiting their turn.
+    if ((_writer != null && !_draining) || _writerFailed) return;
+    try {
+      await _readyOrFailed?.future.timeout(_readyTimeout);
+    } on TimeoutException {
+      if (!_slowStartFlagged) {
         _slowStartFlagged = true;
         _send(diagnosticRecord('diagnostics.slow_writer_start', {}));
       }
     }
-    await _readyOrFailed?.future;
   }
 
   static Future<String?> exportLogs() async {
     await _awaitWriter();
-    if (_writer == null) return null;
+    if (_writer == null || _draining) return null;
     final reply = ReceivePort();
     try {
       _writer!.send(reply.sendPort);
@@ -213,7 +311,7 @@ class Diagnostics {
   /// A broken or busy filesystem must never indefinitely hold up the app.
   static Future<void> flush() async {
     await _awaitWriter();
-    if (_writer == null) return;
+    if (_writer == null || _draining) return;
     final reply = ReceivePort();
     try {
       _writer!.send(['flush', reply.sendPort]);
@@ -252,6 +350,9 @@ class Diagnostics {
     _preReadyDropped = 0;
     _writerFailed = false;
     _slowStartFlagged = false;
+    _draining = false;
+    _lifecycle?.close();
+    _lifecycle = null;
     if (_readyOrFailed != null && !_readyOrFailed!.isCompleted) {
       _readyOrFailed!.complete();
     }
@@ -275,11 +376,12 @@ void _writeLogs(List<Object> args) {
     try {
       // Retry briefly on this worker only, never block the UI isolate. Releasing
       // the lease after each operation allows every running app to write/export.
-      // Pre-ready events now arrive in one synchronous burst once the writer
-      // comes up (drained from the buffer -- see Diagnostics._drainPreReadyQueue),
-      // instead of trickling in one at a time; two writers sharing a
-      // directory can collide on this lock more densely than before, so the
-      // retry budget is wider than a single append's own contention needed.
+      // Pre-ready events now arrive in one fully synchronous, uncapped burst
+      // once the writer comes up (drained from the buffer -- see
+      // Diagnostics._drainPreReadyQueue), instead of trickling in one at a
+      // time; two writers sharing a directory can collide on this lock much
+      // more densely than before, so the retry budget is far wider than a
+      // single append's own contention needed.
       for (var attempt = 0; ; attempt++) {
         try {
           lease = File(
@@ -290,7 +392,7 @@ void _writeLogs(List<Object> args) {
         } on FileSystemException {
           lease?.closeSync();
           lease = null;
-          if (attempt == 19) rethrow;
+          if (attempt == 199) rethrow;
           sleep(const Duration(milliseconds: 10));
         }
       }
@@ -336,32 +438,15 @@ void _writeLogs(List<Object> args) {
 
   final version = args[5] as String;
   final startupDelayMs = args[6] as int;
-  append({
-    ...diagnosticRecord('app.started', {'pid': pid}),
-    'version': RegExp(r'^[a-zA-Z0-9.+_-]{1,60}$').hasMatch(version)
-        ? version
-        : 'unknown',
-    'os': Platform.operatingSystem,
-  });
   // Test-only: simulates isolate startup that is slower than a would-be
   // too-tight `readyTimeout`, without waiting on real scheduler jitter.
+  // Deliberately before `ready.send` below -- it stands in for real
+  // isolate/JIT startup cost, which does delay readiness.
   if (startupDelayMs > 0) sleep(Duration(milliseconds: startupDelayMs));
   final clock = Stopwatch()..start();
   var lastHeartbeat = 0;
   var stalled = false;
-  final watchdog = Timer.periodic(
-    Duration(milliseconds: threshold.clamp(50, 2000)),
-    (_) {
-      if (!stalled && clock.elapsedMilliseconds - lastHeartbeat > threshold) {
-        stalled = true;
-        append(
-          diagnosticRecord('ui.heartbeat_stalled', {
-            'gapMs': clock.elapsedMilliseconds - lastHeartbeat,
-          }),
-        );
-      }
-    },
-  );
+  late final Timer watchdog;
   inbox.listen((message) {
     if (message is List && message.first == 'shutdown') {
       watchdog.cancel();
@@ -416,5 +501,32 @@ void _writeLogs(List<Object> args) {
       }
     }
   });
+  // Report ready before ever touching `diagnostic.lock`: readiness must not
+  // depend on winning it. A caller stuck behind another instance holding
+  // that lock (tray + updater-spawned instance sharing
+  // %LOCALAPPDATA%\zDrive\logs, or a synced/SMB directory) would otherwise
+  // never see `ready`, leaving flush()/exportLogs() nothing to bound their
+  // wait against (see Diagnostics._awaitWriter). The lock wait now only
+  // delays this isolate's writes, which that bound already tolerates.
   ready.send(inbox.sendPort);
+  append({
+    ...diagnosticRecord('app.started', {'pid': pid}),
+    'version': RegExp(r'^[a-zA-Z0-9.+_-]{1,60}$').hasMatch(version)
+        ? version
+        : 'unknown',
+    'os': Platform.operatingSystem,
+  });
+  watchdog = Timer.periodic(
+    Duration(milliseconds: threshold.clamp(50, 2000)),
+    (_) {
+      if (!stalled && clock.elapsedMilliseconds - lastHeartbeat > threshold) {
+        stalled = true;
+        append(
+          diagnosticRecord('ui.heartbeat_stalled', {
+            'gapMs': clock.elapsedMilliseconds - lastHeartbeat,
+          }),
+        );
+      }
+    },
+  );
 }

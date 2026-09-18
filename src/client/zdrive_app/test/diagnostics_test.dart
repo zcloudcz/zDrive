@@ -39,14 +39,16 @@ void main() {
   });
 
   test(
-    'events logged before the writer is ready are buffered and flushed in '
-    'order once it starts, however late',
+    'a writer stuck behind a lock never reports ready in time: flush() and '
+    'exportLogs() return within the bound, and a later ready still drains '
+    'the buffer',
     () async {
-      // Reproduces the CI flake directly: a writer isolate that is merely
-      // slow to start (busy runner, cold JIT) must never be treated as
-      // broken. `readyTimeout` is kept tiny here on purpose -- it only
-      // flags the slow start as an event once the writer is up; it must
-      // never cause events to be dropped or flush() to give up early.
+      // Reproduces the exit-path hang directly: a writer isolate that is
+      // merely slow to start (busy runner, cold JIT, or stuck behind
+      // another instance's `diagnostic.lock`) must never make flush() /
+      // exportLogs() -- and therefore quit() -- hang. `readyTimeout` is
+      // kept tiny here on purpose so the bound, not the real 150ms
+      // startup, is what's being timed.
       await Diagnostics.initialize(
         directory: directory.path,
         startupDelay: const Duration(milliseconds: 150),
@@ -55,19 +57,81 @@ void main() {
       // Logged while the writer isolate is still starting up -- must be
       // buffered in memory, not dropped.
       Diagnostics.event('before.ready', {'sequence': 0});
-      // flush() must wait for the writer to actually become ready and
-      // drain the buffer, past the (tiny, already-elapsed) `readyTimeout`.
+      final elapsed = Stopwatch()..start();
       await Diagnostics.flush();
-      Diagnostics.event('after.ready', {'sequence': 1});
+      // Returned at the (tiny) bound, not after the real 150ms startup --
+      // this is the "no hang" guarantee, not just "eventually finishes".
+      expect(elapsed.elapsedMilliseconds, lessThan(150));
+      expect(await Diagnostics.exportLogs(), isNull);
+      // The writer does become ready eventually; once it has, a later
+      // flush() must still drain what was buffered.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       await Diagnostics.flush();
       final file = File('${directory.path}/diagnostic-0.jsonl');
-      final text = await file.readAsString();
-      expect(text, contains('"sequence":0'));
-      expect(text, contains('"sequence":1'));
-      expect(
-        text.indexOf('before.ready') < text.indexOf('after.ready'),
-        isTrue,
+      expect(await file.readAsString(), contains('"sequence":0'));
+    },
+  );
+
+  test(
+    'a burst buffered before the writer is ready all reaches disk, in '
+    'order, once drained -- not just the first 256',
+    () async {
+      // The drain used to be one synchronous loop with no regard for the
+      // writer's own in-flight cap (256): only the first ~256 of a big
+      // buffer would actually send, and the rest silently joined
+      // `_dropped` -- the same silent-loss bug one layer down.
+      await Diagnostics.initialize(
+        directory: directory.path,
+        startupDelay: const Duration(milliseconds: 100),
       );
+      for (var i = 0; i < 1000; i++) {
+        Diagnostics.event('burst', {'sequence': i});
+      }
+      // 1000 real synchronous disk writes can take longer than a single
+      // flush() round-trip's own 2s cap (unrelated to the drain fix under
+      // test); retry rather than block indefinitely.
+      var text = '';
+      for (var attempt = 0; attempt < 20; attempt++) {
+        await Diagnostics.flush();
+        text = await File(
+          '${directory.path}/diagnostic-0.jsonl',
+        ).readAsString();
+        if (const LineSplitter()
+                .convert(text)
+                .where((l) => l.contains('"event":"burst"'))
+                .length ==
+            1000) {
+          break;
+        }
+      }
+      expect(text, isNot(contains('diagnostics.dropped')));
+      final sequences = const LineSplitter()
+          .convert(text)
+          .map((line) => jsonDecode(line) as Map)
+          .where((record) => record['event'] == 'burst')
+          .map((record) => record['sequence'] as int)
+          .toList();
+      expect(sequences.length, 1000);
+      expect(sequences, List.generate(1000, (i) => i));
+    },
+  );
+
+  test(
+    'a writer that dies after reporting ready disables the facility -- '
+    'flush() completes quickly instead of hanging',
+    () async {
+      await Diagnostics.initialize(directory: directory.path);
+      await Diagnostics.flush(); // writer confirmed ready
+      Diagnostics.killWriterForTest();
+      // The synthetic signal still crosses an isolate boundary (SendPort ->
+      // ReceivePort), which is not guaranteed to land within a single
+      // zero-duration event-loop turn under load; a short real delay is
+      // more reliable than polling with no completion signal to poll for.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final elapsed = Stopwatch()..start();
+      await Diagnostics.flush();
+      expect(elapsed.elapsedMilliseconds, lessThan(1000));
+      expect(await Diagnostics.exportLogs(), isNull);
     },
   );
 

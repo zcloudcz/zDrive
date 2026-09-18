@@ -238,6 +238,10 @@ class WindowsUpdateBackend implements UpdateBackend {
     unawaited(process.stderr.drain<void>());
     await process.stdin.close();
     final deadline = Stopwatch()..start();
+    // Kept so a *permanent* sharing violation (e.g. access denied) is
+    // diagnosable in the final error, instead of looking identical to a
+    // plain timeout.
+    FileSystemException? lastSharingViolation;
     while (!_closed && deadline.elapsed < const Duration(seconds: 15)) {
       if (await marker.exists()) {
         try {
@@ -249,20 +253,24 @@ class WindowsUpdateBackend implements UpdateBackend {
           }
         } on FormatException {
           /* Writer may still be finishing. */
-        } on FileSystemException {
+        } on FileSystemException catch (e) {
           // PowerShell's WriteAllText holds an exclusive handle for the
           // duration of create+write+close. `exists()` can observe the file
           // the instant it is created, before that handle is released, so a
           // read here can hit a genuine Windows sharing violation. Treat it
           // like "writer still finishing" and poll again.
+          lastSharingViolation = e;
         }
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
-    throw const ProcessException(
+    throw ProcessException(
       'powershell.exe',
       [],
-      'Update handoff timed out',
+      lastSharingViolation == null
+          ? 'Update handoff timed out'
+          : 'Update handoff timed out (last error reading the marker: '
+                '$lastSharingViolation)',
     );
   }
 
