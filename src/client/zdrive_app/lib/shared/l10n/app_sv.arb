@@ -128,5 +128,9 @@
   "download": "Ladda ner",
   "shareAvailableUntil": "Tillgänglig till {date}",
   "shareWhatIsZDrive": "Vad är zDrive?",
-  "shareFooterTagline": "Skyddad av zDrive"
+  "shareFooterTagline": "Skyddad av zDrive",
+  "tagline": "Dina filer, överallt.",
+  "authBenefitSync": "Synkronisering på alla enheter",
+  "authBenefitShare": "Dela filer och mappar säkert",
+  "authBenefitSecure": "Alltid krypterad lagring"
 }

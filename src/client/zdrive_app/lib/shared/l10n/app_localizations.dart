@@ -887,6 +887,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Secured by zDrive'**
   String get shareFooterTagline;
+
+  /// No description provided for @tagline.
+  ///
+  /// In en, this message translates to:
+  /// **'Your files, everywhere.'**
+  String get tagline;
+
+  /// No description provided for @authBenefitSync.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync across every device'**
+  String get authBenefitSync;
+
+  /// No description provided for @authBenefitShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share files and folders securely'**
+  String get authBenefitShare;
+
+  /// No description provided for @authBenefitSecure.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted storage, always'**
+  String get authBenefitSecure;
 }
 
 class _AppLocalizationsDelegate

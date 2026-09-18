@@ -204,6 +204,10 @@
   "download": "Download",
   "shareAvailableUntil": "Available until {date}",
   "shareWhatIsZDrive": "What is zDrive?",
-  "shareFooterTagline": "Secured by zDrive"
+  "shareFooterTagline": "Secured by zDrive",
+  "tagline": "Your files, everywhere.",
+  "authBenefitSync": "Sync across every device",
+  "authBenefitShare": "Share files and folders securely",
+  "authBenefitSecure": "Encrypted storage, always"
 
 }

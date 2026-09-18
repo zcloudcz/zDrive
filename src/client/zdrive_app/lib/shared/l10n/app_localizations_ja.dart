@@ -417,4 +417,16 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get shareFooterTagline => 'zDriveによって保護されています';
+
+  @override
+  String get tagline => 'あなたのファイルを、どこでも。';
+
+  @override
+  String get authBenefitSync => 'すべてのデバイスで同期';
+
+  @override
+  String get authBenefitShare => 'ファイルとフォルダを安全に共有';
+
+  @override
+  String get authBenefitSecure => '常に暗号化されたストレージ';
 }

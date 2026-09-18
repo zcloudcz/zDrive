@@ -428,4 +428,16 @@ class AppLocalizationsSk extends AppLocalizations {
 
   @override
   String get shareFooterTagline => 'Zabezpečené pomocou zDrive';
+
+  @override
+  String get tagline => 'Vaše súbory, kdekoľvek.';
+
+  @override
+  String get authBenefitSync => 'Synchronizácia naprieč všetkými zariadeniami';
+
+  @override
+  String get authBenefitShare => 'Bezpečné zdieľanie súborov a priečinkov';
+
+  @override
+  String get authBenefitSecure => 'Vždy šifrované úložisko';
 }

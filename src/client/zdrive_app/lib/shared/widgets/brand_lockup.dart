@@ -61,7 +61,19 @@ class BrandLockup extends StatelessWidget {
           SizedBox(width: size * 0.4),
           // The outer Semantics already declares the 'zDrive' label; exclude
           // the Text's own implicit label so it isn't merged in twice.
-          ExcludeSemantics(child: Text('zDrive', style: titleStyle)),
+          // Flexible lets the wordmark shrink/ellipsize instead of
+          // overflowing the Row when the mark is large and the available
+          // width is narrow (e.g. 320px at 200% text scaling).
+          Flexible(
+            child: ExcludeSemantics(
+              child: Text(
+                'zDrive',
+                style: titleStyle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
         ],
       ),
     );
