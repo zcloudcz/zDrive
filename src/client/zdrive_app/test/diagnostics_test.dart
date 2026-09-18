@@ -87,9 +87,16 @@ void main() {
       for (var i = 0; i < 1000; i++) {
         Diagnostics.event('burst', {'sequence': i});
       }
-      // 1000 real synchronous disk writes can take longer than a single
-      // flush() round-trip's own 2s cap (unrelated to the drain fix under
-      // test); retry rather than block indefinitely.
+      // Draining the 1000-event buffer sends them uncapped, so `_pending`
+      // can land well above the normal 256 in-flight cap right after --
+      // these 50 must still queue and go out as acks free capacity, not be
+      // dropped for losing the race against `_pending`.
+      for (var i = 1000; i < 1050; i++) {
+        Diagnostics.event('burst', {'sequence': i});
+      }
+      // 1050 real synchronous disk writes can take longer than a single
+      // flush() round-trip's own 2s cap (unrelated to the fix under test);
+      // retry rather than block indefinitely.
       var text = '';
       for (var attempt = 0; attempt < 20; attempt++) {
         await Diagnostics.flush();
@@ -100,7 +107,7 @@ void main() {
                 .convert(text)
                 .where((l) => l.contains('"event":"burst"'))
                 .length ==
-            1000) {
+            1050) {
           break;
         }
       }
@@ -111,26 +118,43 @@ void main() {
           .where((record) => record['event'] == 'burst')
           .map((record) => record['sequence'] as int)
           .toList();
-      expect(sequences.length, 1000);
-      expect(sequences, List.generate(1000, (i) => i));
+      expect(sequences.length, 1050);
+      expect(sequences, List.generate(1050, (i) => i));
     },
   );
 
   test(
-    'a writer that dies after reporting ready disables the facility -- '
-    'flush() completes quickly instead of hanging',
+    'a single onExit message after ready is enough to detect a writer '
+    'death -- flush() then reports failure without hanging',
     () async {
       await Diagnostics.initialize(directory: directory.path);
       await Diagnostics.flush(); // writer confirmed ready
+      // Exactly one message: a real crash/exit delivers exactly one onExit
+      // notification. Delivery is not instantaneous (isolate teardown,
+      // cross-isolate message crossing), and can be delayed further by the
+      // isolate's own next scheduled event (its heartbeat-stall timer);
+      // this wait is generous but bounded, not a guess dressed up as "the
+      // bug used to need a second message to be observed at all".
       Diagnostics.killWriterForTest();
-      // The synthetic signal still crosses an isolate boundary (SendPort ->
-      // ReceivePort), which is not guaranteed to land within a single
-      // zero-duration event-loop turn under load; a short real delay is
-      // more reliable than polling with no completion signal to poll for.
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(seconds: 3));
       final elapsed = Stopwatch()..start();
       await Diagnostics.flush();
       expect(elapsed.elapsedMilliseconds, lessThan(1000));
+      expect(await Diagnostics.exportLogs(), isNull);
+    },
+  );
+
+  test(
+    'a spawn failure disables the facility instead of buffering forever',
+    () async {
+      await Diagnostics.initialize(
+        directory: directory.path,
+        failToSpawn: true,
+      );
+      Diagnostics.event('should_be_dropped_cheaply');
+      final elapsed = Stopwatch()..start();
+      await Diagnostics.flush();
+      expect(elapsed.elapsedMilliseconds, lessThan(500));
       expect(await Diagnostics.exportLogs(), isNull);
     },
   );

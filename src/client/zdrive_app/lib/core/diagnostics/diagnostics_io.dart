@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:meta/meta.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -56,6 +56,8 @@ class Diagnostics {
     // ready (see _awaitWriter). Exposed for tests; production code should
     // not need to override the default.
     @visibleForTesting Duration readyTimeout = const Duration(seconds: 5),
+    // Test-only: simulates Isolate.spawn itself throwing.
+    @visibleForTesting bool failToSpawn = false,
   }) async {
     if (_writer != null || _isolate != null) return;
     _writerFailed = false;
@@ -81,7 +83,11 @@ class Diagnostics {
       _acks = ReceivePort()
         ..listen((_) {
           if (_pending > 0) _pending--;
+          // Capacity just freed: anything that queued while `_pending` was
+          // at the cap (right after a big drain, say) can now go out.
+          _pumpQueue();
         });
+      if (failToSpawn) throw const FileSystemException('simulated spawn failure');
       // onError/onExit go to `lifecycle`, not `ready`: a genuine isolate
       // failure (crash, or exit before ever reporting ready) must be
       // distinguishable from -- and raceable against -- the writer's own
@@ -108,10 +114,20 @@ class Diagnostics {
           // to catch a *later* crash/exit -- a ReceivePort only allows one
           // subscription, so `.first` (which itself listens) cannot be used
           // here as well without "Stream has already been listened to".
+          //
+          // `readyDecided` -- not `firstFailure.isCompleted` -- is what
+          // routes a message to the "mark failed" branch. A real crash
+          // delivers exactly ONE onExit message; gating on the completer's
+          // own completed-ness meant that single message always landed in
+          // the first branch (racing `ready`, which had already resolved
+          // it) and was silently swallowed -- `_writerFailed` was never
+          // set. `readyDecided` reflects "has the initial race resolved
+          // yet", independent of which future actually completed it.
+          var readyDecided = false;
           final firstFailure = Completer<Object?>();
           final lifecycleSub = lifecycle.listen((message) {
-            if (!firstFailure.isCompleted) {
-              firstFailure.complete(message);
+            if (!readyDecided) {
+              if (!firstFailure.isCompleted) firstFailure.complete(message);
               return;
             }
             if (generation != _generation) return;
@@ -126,6 +142,7 @@ class Diagnostics {
           } catch (_) {
             result = null;
           }
+          readyDecided = true;
           ready.close();
           if (generation != _generation) {
             await lifecycleSub.cancel();
@@ -154,27 +171,29 @@ class Diagnostics {
         }(),
       );
     } catch (_) {
-      _writerFailed = true;
       if (!readyOrFailed.isCompleted) readyOrFailed.complete();
       ready.close();
       lifecycle.close();
       await shutdown();
+      // shutdown() resets _writerFailed to false -- correct for its normal
+      // "clean slate, an explicit initialize() may retry freely" job, but a
+      // spawn failure specifically must stay disabled: otherwise every
+      // event buffers into _preReadyQueue forever, for a writer that will
+      // never come and drain it. Set it after shutdown(), not before, so it
+      // sticks. flush()/exportLogs() then report failure immediately and
+      // event()/error() drop cheaply, until a later initialize() retries.
+      _writerFailed = true;
     }
   }
 
   /// Test-only: simulates the writer isolate dying unexpectedly (crash,
   /// OOM, killed by the OS) *after* it already reported ready, to exercise
-  /// the `_lifecycle` failure path without a real crash.
+  /// the `_lifecycle` failure path with the exact single onExit message a
+  /// real crash delivers (no synthetic second message -- that would hide a
+  /// listener that only reacts correctly to a *second* arrival).
   @visibleForTesting
   static void killWriterForTest() {
-    // A real `Isolate.kill()`'s onExit notification is not guaranteed to be
-    // prompt -- it can wait for the isolate's own next scheduled event
-    // (e.g. its 2s heartbeat-stall timer), which would make this seam flaky
-    // for no reason relevant to what it is testing. Deliver the same
-    // synthetic signal `onExit` would, directly and immediately; still kill
-    // the isolate too, for realism and cleanup.
-    _lifecycle?.sendPort.send(null);
-    _isolate?.kill(priority: Isolate.immediate);
+    _isolate?.kill();
   }
 
   static void event(String name, [Map<String, Object?> fields = const {}]) {
@@ -196,20 +215,42 @@ class Diagnostics {
     if (_writerFailed) return;
     // While a drain is running, new events still queue behind whatever it
     // has not yet sent -- sending directly here would let them overtake
-    // earlier, still-buffered events and break ordering.
-    if (_writer != null && !_draining) {
+    // earlier, still-buffered events and break ordering. Same if the
+    // in-flight cap is currently full (e.g. right after a drain sent a
+    // couple thousand events uncapped, see _drainPreReadyQueue): queuing
+    // instead of dropping means those events go out as soon as acks free
+    // capacity (_pumpQueue, called from the `_acks` listener), rather than
+    // being lost the moment they lose the race against `_pending`.
+    // `_preReadyQueue.isEmpty`: never send directly while older events are
+    // still queued, or the new one would overtake them.
+    if (_writer != null &&
+        !_draining &&
+        _pending < 256 &&
+        _preReadyQueue.isEmpty) {
       _sendToWriter(record);
       return;
     }
-    // Writer not ready yet: buffer instead of dropping. Bounded so a writer
-    // that never starts (still waiting, or about to fail) cannot leak
-    // memory; oldest entries make way, and the drop count is reported as
-    // one summary event once the writer is finally reachable.
+    // Writer not ready yet, draining, or momentarily out of in-flight
+    // capacity: buffer instead of dropping. Bounded so a writer that never
+    // starts (still waiting, or about to fail) cannot leak memory; oldest
+    // entries make way, and the drop count is reported as one summary
+    // event once the writer is finally reachable.
     if (_preReadyQueue.length >= _preReadyQueueCap) {
       _preReadyQueue.removeFirst();
       _preReadyDropped++;
     }
     _preReadyQueue.add(record);
+  }
+
+  // Sends as much of the buffer as current in-flight capacity allows, in
+  // order. Called whenever capacity might have just freed (an ack landing)
+  // -- the counterpart to `_send` queuing instead of dropping when the cap
+  // was full.
+  static void _pumpQueue() {
+    if (_writer == null || _draining || _writerFailed) return;
+    while (_preReadyQueue.isNotEmpty && _pending < 256) {
+      _sendToWriter(_preReadyQueue.removeFirst());
+    }
   }
 
   static void _sendToWriter(Map<String, Object?> record) {
@@ -251,6 +292,9 @@ class Diagnostics {
       }
     } finally {
       _draining = false;
+      // Anything `_send` queued during the (synchronous, so vanishingly
+      // short) drain window goes out now if capacity allows.
+      _pumpQueue();
     }
   }
 
