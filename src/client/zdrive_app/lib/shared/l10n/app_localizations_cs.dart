@@ -113,6 +113,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get folders => 'Složky';
 
   @override
+  String get newItem => 'Nové';
+
+  @override
   String get newFolder => 'Nová složka';
 
   @override
@@ -144,6 +147,12 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get refresh => 'Obnovit';
+
+  @override
+  String get gridView => 'Zobrazit mřížku';
+
+  @override
+  String get listView => 'Zobrazit seznam';
 
   @override
   String get noFiles => 'Žádné soubory';
