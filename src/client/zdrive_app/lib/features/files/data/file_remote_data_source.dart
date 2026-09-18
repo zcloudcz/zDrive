@@ -158,7 +158,9 @@ class FileRemoteDataSource {
       data: {
         'fileId': fileId,
         'permission': permission,
-        if (expiresAt != null) 'expiresAt': expiresAt.toIso8601String(),
+        // Always UTC with a trailing Z: an offset-less local time made the
+        // server store a Kind=Unspecified value and answer 500.
+        if (expiresAt != null) 'expiresAt': expiresAt.toUtc().toIso8601String(),
         'allowDelete': allowDelete,
       },
     );
