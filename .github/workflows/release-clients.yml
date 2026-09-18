@@ -4,8 +4,19 @@ on:
   push:
     tags: ['v*']
   pull_request:
+    # Full Android/iOS/Windows builds only for PRs that can break a build:
+    # native platform folders, dependencies and the packaging scripts. This
+    # used to match all of src/client/**, so every Dart-only change (a colour,
+    # a string) queued for macOS and Windows runners and re-ran the whole test
+    # suite on Windows — 6–9 minutes plus queueing per PR. Dart code is covered
+    # by flutter-ci.yml; a tag release still builds and tests everything.
     paths:
-      - 'src/client/**'
+      - 'src/client/zdrive_app/android/**'
+      - 'src/client/zdrive_app/ios/**'
+      - 'src/client/zdrive_app/windows/**'
+      - 'src/client/zdrive_app/pubspec.yaml'
+      - 'src/client/zdrive_app/pubspec.lock'
+      - 'scripts/*Windows*'
       - 'scripts/*Android*'
       - 'scripts/*Ios*'
       - 'scripts/*TestFlight*'
