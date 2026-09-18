@@ -430,6 +430,38 @@ class AppLocalizationsSk extends AppLocalizations {
   String get shareFooterTagline => 'Zabezpečené pomocou zDrive';
 
   @override
+  String get shareReplaceFile => 'Nahradiť súbor';
+
+  @override
+  String get shareDeleteConfirmMessage =>
+      'Táto položka bude presunutá do koša vlastníka.';
+
+  @override
+  String get shareOverwriteTitle => 'Nahradiť existujúci súbor?';
+
+  @override
+  String shareOverwriteMessage(Object name) {
+    return 'Súbor s názvom \"$name\" už existuje. Nahratím vznikne jeho nová verzia.';
+  }
+
+  @override
+  String get shareReplaceConfirm => 'Nahradiť';
+
+  @override
+  String get shareErrorNotAllowed => 'Tento odkaz to neumožňuje.';
+
+  @override
+  String get shareErrorNameExists =>
+      'Súbor alebo priečinok s týmto názvom už existuje.';
+
+  @override
+  String get shareErrorQuotaExceeded => 'Úložisko vlastníka je plné.';
+
+  @override
+  String get shareErrorTooManyUploads =>
+      'Stále sa spracúva príliš veľa nahrávaní. Skúste to o chvíľu znova.';
+
+  @override
   String get tagline => 'Vaše súbory, kdekoľvek.';
 
   @override

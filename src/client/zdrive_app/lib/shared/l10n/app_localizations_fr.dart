@@ -434,6 +434,39 @@ class AppLocalizationsFr extends AppLocalizations {
   String get shareFooterTagline => 'Sécurisé par zDrive';
 
   @override
+  String get shareReplaceFile => 'Remplacer le fichier';
+
+  @override
+  String get shareDeleteConfirmMessage =>
+      'Cet élément sera déplacé vers la corbeille du propriétaire.';
+
+  @override
+  String get shareOverwriteTitle => 'Remplacer le fichier existant ?';
+
+  @override
+  String shareOverwriteMessage(Object name) {
+    return 'Un fichier nommé \"$name\" existe déjà. Le téléverser le remplacera par une nouvelle version.';
+  }
+
+  @override
+  String get shareReplaceConfirm => 'Remplacer';
+
+  @override
+  String get shareErrorNotAllowed => 'Ce lien ne le permet pas.';
+
+  @override
+  String get shareErrorNameExists =>
+      'Un fichier ou dossier portant ce nom existe déjà.';
+
+  @override
+  String get shareErrorQuotaExceeded =>
+      'Le stockage du propriétaire est plein.';
+
+  @override
+  String get shareErrorTooManyUploads =>
+      'Trop de téléversements sont encore en cours de traitement. Réessayez dans un instant.';
+
+  @override
   String get tagline => 'Vos fichiers, partout.';
 
   @override

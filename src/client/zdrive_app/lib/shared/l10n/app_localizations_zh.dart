@@ -418,6 +418,35 @@ class AppLocalizationsZh extends AppLocalizations {
   String get shareFooterTagline => '由 zDrive 提供安全保障';
 
   @override
+  String get shareReplaceFile => '替换文件';
+
+  @override
+  String get shareDeleteConfirmMessage => '此项目将移动到所有者的回收站。';
+
+  @override
+  String get shareOverwriteTitle => '替换现有文件？';
+
+  @override
+  String shareOverwriteMessage(Object name) {
+    return '名为“$name”的文件已存在。上传将以新版本替换它。';
+  }
+
+  @override
+  String get shareReplaceConfirm => '替换';
+
+  @override
+  String get shareErrorNotAllowed => '此链接不允许该操作。';
+
+  @override
+  String get shareErrorNameExists => '已存在同名的文件或文件夹。';
+
+  @override
+  String get shareErrorQuotaExceeded => '所有者的存储空间已满。';
+
+  @override
+  String get shareErrorTooManyUploads => '仍有太多上传正在处理。请稍后重试。';
+
+  @override
   String get tagline => '您的文件，随时随地。';
 
   @override

@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,7 @@ import '../../../../shared/l10n/relative_time.dart';
 import '../../../../shared/theme/app_theme.dart';
 import '../../../../shared/widgets/brand_lockup.dart';
 import '../../../files/data/file_dtos.dart';
+import '../../../files/presentation/widgets/create_folder_dialog.dart';
 import '../../../files/presentation/widgets/file_icon_data.dart';
 import '../../../files/presentation/widgets/file_size_format.dart';
 import '../../data/share_link_data_source.dart';
@@ -22,6 +25,132 @@ import '../share_link_cubit.dart';
 /// only exercising it through the widget tree.
 String formatShareExpiryDate(DateTime expiresAt, String locale) =>
     DateFormat.yMMMd(locale).format(expiresAt.toLocal());
+
+/// Maps a write/delete/upload error from the share write API to user-facing
+/// text — the status codes the backend contract documents for those calls,
+/// on top of [describeError]'s generic connection/5xx handling.
+String describeShareError(Object error, AppLocalizations l10n) {
+  if (error is DioException) {
+    // The envelope's error code first: a 429 can also come from the gateway's
+    // rate limiter (no envelope) and a 413 from a body-size limit — neither
+    // means what the share-specific messages say.
+    final data = error.response?.data;
+    final code = data is Map && data['error'] is Map
+        ? (data['error'] as Map)['code']
+        : null;
+    if (code == 'QUOTA_EXCEEDED') return l10n.shareErrorQuotaExceeded;
+    if (code == 'TOO_MANY_PENDING_UPLOADS') return l10n.shareErrorTooManyUploads;
+    switch (error.response?.statusCode) {
+      case 403:
+        return l10n.shareErrorNotAllowed;
+      case 409:
+        return l10n.shareErrorNameExists;
+    }
+  }
+  return describeError(error, l10n);
+}
+
+/// Picks a file (same package/options as the authenticated file browser's
+/// upload — `file_browser_page.dart`'s `_pickAndUploadFile`) and uploads it
+/// through [ShareLinkCubit.uploadFile]. [replaceFileName] set means "replace
+/// this exact file" (the single-file-share card's Replace button) — always
+/// `overwrite: true`, no name to pick since the target is fixed. Left null
+/// (the folder actions row's Upload button), the picked file's own name is
+/// used and a 409 (name already exists) prompts to confirm before retrying
+/// with `overwrite: true` — this app never silently overwrites.
+Future<void> pickAndUploadShareFile(BuildContext context, {String? replaceFileName}) async {
+  final result = await FilePicker.platform.pickFiles(withData: false, withReadStream: true);
+  if (result == null || result.files.isEmpty) return;
+  final picked = result.files.first;
+  final stream = picked.readStream;
+  if (stream == null) return;
+  if (!context.mounted) return;
+
+  await _uploadShareFile(
+    context,
+    replaceFileName ?? picked.name,
+    stream,
+    picked.size,
+    overwrite: replaceFileName != null,
+  );
+}
+
+/// Runs one upload attempt and, only for a fresh (non-overwrite) attempt
+/// that came back with a 409, asks to confirm replacing it. Safe to retry
+/// [content] as-is: a 409 comes from the upload-grant request, which
+/// `ShareLinkDataSource.uploadFile` sends before the content stream is ever
+/// read, so nothing has been consumed from it yet.
+Future<void> _uploadShareFile(
+  BuildContext context,
+  String name,
+  Stream<List<int>> content,
+  int sizeBytes, {
+  required bool overwrite,
+}) async {
+  final cubit = context.read<ShareLinkCubit>();
+  await cubit.uploadFile(name, content, sizeBytes, overwrite: overwrite);
+  if (!context.mounted || overwrite) return;
+
+  final state = cubit.state;
+  final error = state is ShareLinkLoaded ? state.uploadErrors[name] : null;
+  if (error is! DioException || error.response?.statusCode != 409) return;
+
+  final l10n = AppLocalizations.of(context)!;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(l10n.shareOverwriteTitle),
+      content: Text(l10n.shareOverwriteMessage(name)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: Text(l10n.shareReplaceConfirm),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true && context.mounted) {
+    await _uploadShareFile(context, name, content, sizeBytes, overwrite: true);
+  }
+}
+
+Future<void> _showShareCreateFolderDialog(BuildContext context) async {
+  final name = await showDialog<String>(
+    context: context,
+    builder: (_) => const CreateFolderDialog(),
+  );
+  if (name != null && context.mounted) {
+    context.read<ShareLinkCubit>().createFolder(name);
+  }
+}
+
+Future<void> _showShareDeleteConfirm(BuildContext context, FileDto file) async {
+  final l10n = AppLocalizations.of(context)!;
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(l10n.confirmDelete),
+      content: Text('${file.name}\n\n${l10n.shareDeleteConfirmMessage}'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: Text(l10n.delete),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true && context.mounted) {
+    context.read<ShareLinkCubit>().deleteItem(file.id);
+  }
+}
 
 /// Public, unauthenticated page behind `/s/:token` — shows the file or
 /// folder a share link points at and lets a visitor without an account
@@ -95,7 +224,7 @@ class ShareLinkView extends StatelessWidget {
                               final error = (state as ShareLinkLoaded).navigationError!;
                               ScaffoldMessenger.of(context)
                                 ..hideCurrentSnackBar()
-                                ..showSnackBar(SnackBar(content: Text(describeError(error, l10n))));
+                                ..showSnackBar(SnackBar(content: Text(describeShareError(error, l10n))));
                             },
                             child: BlocBuilder<ShareLinkCubit, ShareLinkState>(
                               builder: (context, state) {
@@ -121,6 +250,9 @@ class ShareLinkView extends StatelessWidget {
                                       expiresAt: state.expiresAt,
                                       progress: state.downloadProgress[state.root.id],
                                       error: state.downloadErrors[state.root.id],
+                                      canReplace: state.canWrite,
+                                      uploadProgress: state.uploadProgress[state.root.name],
+                                      uploadError: state.uploadErrors[state.root.name],
                                     ),
                                   ShareLinkLoaded() => _FolderView(state: state),
                                 };
@@ -324,6 +456,17 @@ class _FolderView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _Breadcrumbs(state: state),
+            if (state.canWrite) ...[
+              const SizedBox(height: 8),
+              const _ShareActionsRow(),
+            ],
+            if (state.uploadProgress.isNotEmpty || state.uploadErrors.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _ShareUploadProgressList(
+                progress: state.uploadProgress,
+                errors: state.uploadErrors,
+              ),
+            ],
             const SizedBox(height: 8),
             Expanded(
               child: children.isEmpty
@@ -349,6 +492,7 @@ class _FolderView extends StatelessWidget {
                           file: file,
                           progress: state.downloadProgress[file.id],
                           error: state.downloadErrors[file.id],
+                          canDelete: state.canDelete,
                         );
                       },
                     ),
@@ -356,6 +500,71 @@ class _FolderView extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Upload + New folder, shown above the listing only for a link that allows
+/// Write — two explicit buttons rather than the authenticated file browser's
+/// "+ New" menu (`NewItemMenuButton`), since a share page has only these two
+/// actions and a menu would just add a tap.
+class _ShareActionsRow extends StatelessWidget {
+  const _ShareActionsRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        FilledButton.icon(
+          onPressed: () => pickAndUploadShareFile(context),
+          icon: const Icon(Icons.upload_file),
+          label: Text(l10n.uploadFile),
+        ),
+        OutlinedButton.icon(
+          onPressed: () => _showShareCreateFolderDialog(context),
+          icon: const Icon(Icons.create_new_folder),
+          label: Text(l10n.newFolder),
+        ),
+      ],
+    );
+  }
+}
+
+/// Determinate progress row per active/failed upload, keyed by file name
+/// (mirrors [_ShareChildRow]'s per-file download progress) — never an
+/// indeterminate spinner (this page's tests assert none).
+class _ShareUploadProgressList extends StatelessWidget {
+  final Map<String, double> progress;
+  final Map<String, Object> errors;
+
+  const _ShareUploadProgressList({required this.progress, required this.errors});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    final names = {...progress.keys, ...errors.keys};
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final name in names) ...[
+          Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+          if (errors[name] case final error?)
+            Text(describeShareError(error, l10n), style: TextStyle(color: scheme.error))
+          else ...[
+            LinearProgressIndicator(value: progress[name]),
+            Text(
+              '${((progress[name] ?? 0) * 100).clamp(0, 100).round()}%',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          const SizedBox(height: 8),
+        ],
+      ],
     );
   }
 }
@@ -392,12 +601,18 @@ class _SingleFileCard extends StatelessWidget {
   final DateTime? expiresAt;
   final double? progress;
   final Object? error;
+  final bool canReplace;
+  final double? uploadProgress;
+  final Object? uploadError;
 
   const _SingleFileCard({
     required this.file,
     this.expiresAt,
     this.progress,
     this.error,
+    this.canReplace = false,
+    this.uploadProgress,
+    this.uploadError,
   });
 
   @override
@@ -490,6 +705,33 @@ class _SingleFileCard extends StatelessWidget {
                 icon: const Icon(Icons.download),
                 label: Text(l10n.download),
               ),
+            if (canReplace) ...[
+              const SizedBox(height: 12),
+              if (uploadError != null) ...[
+                Text(describeShareError(uploadError!, l10n), style: TextStyle(color: scheme.error)),
+                const SizedBox(height: 8),
+              ],
+              if (uploadProgress != null)
+                SizedBox(
+                  width: 200,
+                  child: Column(
+                    children: [
+                      LinearProgressIndicator(value: uploadProgress == 0 ? 0.0 : uploadProgress),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${(uploadProgress! * 100).clamp(0, 100).round()}%',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: () => pickAndUploadShareFile(context, replaceFileName: file.name),
+                  icon: const Icon(Icons.upload_file),
+                  label: Text(l10n.shareReplaceFile),
+                ),
+            ],
           ],
         ),
       ),
@@ -501,12 +743,43 @@ class _ShareChildRow extends StatelessWidget {
   final FileDto file;
   final double? progress;
   final Object? error;
+  final bool canDelete;
 
-  const _ShareChildRow({required this.file, this.progress, this.error});
+  const _ShareChildRow({
+    required this.file,
+    this.progress,
+    this.error,
+    this.canDelete = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final downloadAction = file.isFolder
+        ? null
+        : progress != null
+            // A percentage, not an indeterminate spinner (4.6/teeth
+            // check): fits a list row better than a progress ring anyway.
+            ? SizedBox(
+                width: 40,
+                child: Text(
+                  '${(progress! * 100).clamp(0, 100).round()}%',
+                  textAlign: TextAlign.end,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              )
+            : IconButton(
+                icon: const Icon(Icons.download),
+                tooltip: l10n.download,
+                onPressed: () => context.read<ShareLinkCubit>().download(file),
+              );
+    final deleteAction = canDelete
+        ? IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: '${l10n.delete} ${file.name}',
+            onPressed: () => _showShareDeleteConfirm(context, file),
+          )
+        : null;
     return ListTile(
       leading: Icon(iconForFile(isFolder: file.isFolder, mimeType: file.mimeType)),
       title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -520,24 +793,12 @@ class _ShareChildRow extends StatelessWidget {
                   ? TextStyle(color: Theme.of(context).colorScheme.error)
                   : null,
             ),
-      trailing: file.isFolder
+      trailing: downloadAction == null && deleteAction == null
           ? null
-          : progress != null
-              // A percentage, not an indeterminate spinner (4.6/teeth
-              // check): fits a list row better than a progress ring anyway.
-              ? SizedBox(
-                  width: 40,
-                  child: Text(
-                    '${(progress! * 100).clamp(0, 100).round()}%',
-                    textAlign: TextAlign.end,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                )
-              : IconButton(
-                  icon: const Icon(Icons.download),
-                  tooltip: l10n.download,
-                  onPressed: () => context.read<ShareLinkCubit>().download(file),
-                ),
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [?downloadAction, ?deleteAction],
+            ),
       onTap: file.isFolder ? () => context.read<ShareLinkCubit>().openFolder(file) : null,
     );
   }

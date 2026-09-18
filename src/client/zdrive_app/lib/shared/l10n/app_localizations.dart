@@ -888,6 +888,60 @@ abstract class AppLocalizations {
   /// **'Secured by zDrive'**
   String get shareFooterTagline;
 
+  /// No description provided for @shareReplaceFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace file'**
+  String get shareReplaceFile;
+
+  /// No description provided for @shareDeleteConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This item will be moved to the owner\'s trash.'**
+  String get shareDeleteConfirmMessage;
+
+  /// No description provided for @shareOverwriteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace existing file?'**
+  String get shareOverwriteTitle;
+
+  /// No description provided for @shareOverwriteMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'A file named \"{name}\" already exists. Uploading will replace it with a new version.'**
+  String shareOverwriteMessage(Object name);
+
+  /// No description provided for @shareReplaceConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace'**
+  String get shareReplaceConfirm;
+
+  /// No description provided for @shareErrorNotAllowed.
+  ///
+  /// In en, this message translates to:
+  /// **'This link does not allow that.'**
+  String get shareErrorNotAllowed;
+
+  /// No description provided for @shareErrorNameExists.
+  ///
+  /// In en, this message translates to:
+  /// **'A file or folder with this name already exists.'**
+  String get shareErrorNameExists;
+
+  /// No description provided for @shareErrorQuotaExceeded.
+  ///
+  /// In en, this message translates to:
+  /// **'The owner\'s storage is full.'**
+  String get shareErrorQuotaExceeded;
+
+  /// No description provided for @shareErrorTooManyUploads.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many uploads are still processing. Try again shortly.'**
+  String get shareErrorTooManyUploads;
+
   /// No description provided for @tagline.
   ///
   /// In en, this message translates to:

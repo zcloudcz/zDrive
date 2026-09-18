@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:bloc_test/bloc_test.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -19,6 +20,41 @@ import '../../../shared/theme/app_theme_test.dart' show contrastRatio;
 class MockShareLinkCubit extends MockCubit<ShareLinkState> implements ShareLinkCubit {}
 
 void main() {
+  group('describeShareError', () {
+    DioException dio(int status, [Object? data]) => DioException(
+          requestOptions: RequestOptions(path: '/x'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/x'),
+            statusCode: status,
+            data: data,
+          ),
+          type: DioExceptionType.badResponse,
+        );
+    final l10n = lookupAppLocalizations(const Locale('en'));
+
+    test('share-specific texts come from the envelope error code', () {
+      expect(
+        describeShareError(dio(429, {'error': {'code': 'TOO_MANY_PENDING_UPLOADS'}}), l10n),
+        l10n.shareErrorTooManyUploads,
+      );
+      expect(
+        describeShareError(dio(413, {'error': {'code': 'QUOTA_EXCEEDED'}}), l10n),
+        l10n.shareErrorQuotaExceeded,
+      );
+    });
+
+    test('a bare gateway 429 / 413 without an envelope gets the generic text', () {
+      expect(describeShareError(dio(429), l10n), isNot(l10n.shareErrorTooManyUploads));
+      expect(describeShareError(dio(413, 'Payload Too Large'), l10n),
+          isNot(l10n.shareErrorQuotaExceeded));
+    });
+
+    test('403 and 409 map by status', () {
+      expect(describeShareError(dio(403), l10n), l10n.shareErrorNotAllowed);
+      expect(describeShareError(dio(409), l10n), l10n.shareErrorNameExists);
+    });
+  });
+
   late MockShareLinkCubit cubit;
 
   setUp(() {
@@ -394,6 +430,127 @@ void main() {
           path: const [],
           children: null,
           expiresAt: DateTime(2026, 9, 30),
+        ),
+      );
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await tester.pumpWidget(build());
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('a Read link (canWrite/canDelete both false) shows no upload/new-folder/delete controls',
+      (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(root: folder, path: const [], children: [child]),
+    );
+
+    await tester.pumpWidget(build());
+    final l10n = AppLocalizations.of(tester.element(find.byType(ShareLinkView)))!;
+
+    // Teeth check 1: if the page ignored canWrite/canDelete and always
+    // showed the controls, this assertion is what fails.
+    expect(find.widgetWithText(FilledButton, l10n.uploadFile), findsNothing);
+    expect(find.widgetWithText(OutlinedButton, l10n.newFolder), findsNothing);
+    expect(find.byIcon(Icons.delete_outline), findsNothing);
+  });
+
+  testWidgets('a Write link shows Upload + New folder but no delete',
+      (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(
+        root: folder,
+        path: const [],
+        children: [child],
+        canWrite: true,
+      ),
+    );
+
+    await tester.pumpWidget(build());
+    final l10n = AppLocalizations.of(tester.element(find.byType(ShareLinkView)))!;
+
+    expect(find.widgetWithText(FilledButton, l10n.uploadFile), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, l10n.newFolder), findsOneWidget);
+    expect(find.byIcon(Icons.delete_outline), findsNothing);
+  });
+
+  testWidgets('a Write + allowDelete link shows upload, new folder, and delete',
+      (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(
+        root: folder,
+        path: const [],
+        children: [child],
+        canWrite: true,
+        canDelete: true,
+      ),
+    );
+
+    await tester.pumpWidget(build());
+    final l10n = AppLocalizations.of(tester.element(find.byType(ShareLinkView)))!;
+
+    expect(find.widgetWithText(FilledButton, l10n.uploadFile), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, l10n.newFolder), findsOneWidget);
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+  });
+
+  testWidgets('deleting a child asks for confirmation before calling the cubit',
+      (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(
+        root: folder,
+        path: const [],
+        children: [child],
+        canWrite: true,
+        canDelete: true,
+      ),
+    );
+    when(() => cubit.deleteItem(child.id)).thenAnswer((_) async {});
+
+    await tester.pumpWidget(build());
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+
+    // Teeth check 2: if the confirm dialog were skipped, deleteItem would
+    // already have been called by this point — the dialog assertion below
+    // proves it hasn't been.
+    expect(find.byType(AlertDialog), findsOneWidget);
+    verifyNever(() => cubit.deleteItem(child.id));
+
+    final l10n = AppLocalizations.of(tester.element(find.byType(ShareLinkView)))!;
+    await tester.tap(find.widgetWithText(FilledButton, l10n.delete));
+    await tester.pumpAndSettle();
+
+    verify(() => cubit.deleteItem(child.id)).called(1);
+  });
+
+  testWidgets(
+    'no overflow at a narrow width with text scaled to 200% — actions row shown',
+    (tester) async {
+      whenListen(
+        cubit,
+        const Stream<ShareLinkState>.empty(),
+        initialState: ShareLinkLoaded(
+          root: folder,
+          path: const [],
+          children: [child],
+          canWrite: true,
+          canDelete: true,
         ),
       );
       tester.view.physicalSize = const Size(320, 800);

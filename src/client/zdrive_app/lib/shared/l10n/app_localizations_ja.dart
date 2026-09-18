@@ -419,6 +419,36 @@ class AppLocalizationsJa extends AppLocalizations {
   String get shareFooterTagline => 'zDriveによって保護されています';
 
   @override
+  String get shareReplaceFile => 'ファイルを置き換える';
+
+  @override
+  String get shareDeleteConfirmMessage => 'このアイテムは所有者のゴミ箱に移動されます。';
+
+  @override
+  String get shareOverwriteTitle => '既存のファイルを置き換えますか?';
+
+  @override
+  String shareOverwriteMessage(Object name) {
+    return '「$name」という名前のファイルは既に存在します。アップロードすると新しいバージョンに置き換わります。';
+  }
+
+  @override
+  String get shareReplaceConfirm => '置き換える';
+
+  @override
+  String get shareErrorNotAllowed => 'このリンクではその操作は許可されていません。';
+
+  @override
+  String get shareErrorNameExists => '同じ名前のファイルまたはフォルダーが既に存在します。';
+
+  @override
+  String get shareErrorQuotaExceeded => '所有者のストレージが満杯です。';
+
+  @override
+  String get shareErrorTooManyUploads =>
+      '処理中のアップロードが多すぎます。しばらくしてからもう一度お試しください。';
+
+  @override
   String get tagline => 'あなたのファイルを、どこでも。';
 
   @override
