@@ -306,6 +306,98 @@ public sealed class ShareLinkToolsTests
         (await act.Should().ThrowAsync<McpException>()).WithMessage($"*{expectedFragment}*");
     }
 
+    /// <summary>
+    /// A single-file link's "children" call always 404s (a file has no
+    /// children). list_files must turn that into a specific, actionable
+    /// message instead of the generic not-found text — detected via one
+    /// extra get_info call, only on this no-folderId 404 path.
+    /// </summary>
+    [Fact]
+    public async Task ListFiles_SingleFileLink_NoFolderId_ExplainsItSharesAFileNotAFolder()
+    {
+        const string backendDetail = "FileNode with key 'deadbeef' was not found.";
+        var fileHandler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/info")
+            ? Ok(new { permission = "Read", allowDelete = false, expiresAt = (DateTimeOffset?)null,
+                root = new { id = FileId, parentId = (Guid?)null, name = "solo.txt", isFolder = false, sizeBytes = 5, updatedAt = DateTime.UtcNow },
+                quota = (object?)null })
+            : FakeHttpMessageHandler.Json(HttpStatusCode.NotFound,
+                JsonSerializer.Serialize(new { success = false, error = new { code = "NOT_FOUND", message = backendDetail } })));
+        var storageHandler = new FakeHttpMessageHandler(_ => throw new InvalidOperationException("list_files must not call StorageService"));
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.list_files(null, CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<McpException>();
+        thrown.WithMessage("*single file, not a folder*");
+        thrown.Which.Message.Should().NotContain(backendDetail, "the raw backend text must never leak through");
+    }
+
+    /// <summary>
+    /// A generic 404 (unrelated to the single-file-link case — a folderId was
+    /// given and it just doesn't exist inside the share) must fall back to the
+    /// generic not-found tool message, never the backend's raw entity text.
+    /// </summary>
+    [Fact]
+    public async Task ListFiles_UnknownFolderId_UsesGenericNotFoundMessage()
+    {
+        const string backendDetail = "FileNode with key 'deadbeef' was not found.";
+        var fileHandler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(
+            HttpStatusCode.NotFound, JsonSerializer.Serialize(new { success = false, error = new { code = "NOT_FOUND", message = backendDetail } })));
+        var storageHandler = new FakeHttpMessageHandler(_ => throw new InvalidOperationException("list_files must not call StorageService"));
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.list_files(ParentId, CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<McpException>();
+        thrown.WithMessage("*Not found inside this link*");
+        thrown.Which.Message.Should().NotContain(backendDetail, "the raw backend text must never leak through");
+
+        // Only the one call — a folderId was given, so the single-file-link check never runs.
+        fileHandler.Requests.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// A non-404 failure (here a 500) on the root children call must surface
+    /// unchanged — the single-file-link check only ever applies to a 404, and
+    /// must not fire (and so must not spend an extra get_info call) for any
+    /// other status.
+    /// </summary>
+    [Fact]
+    public async Task ListFiles_NoFolderId_BackendReturns500_SurfacesOriginalErrorWithoutCallingInfo()
+    {
+        var fileHandler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/info")
+            ? throw new InvalidOperationException("must not call get_info for a non-404 failure")
+            : new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var storageHandler = new FakeHttpMessageHandler(_ => throw new InvalidOperationException("list_files must not call StorageService"));
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.list_files(null, CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<McpException>();
+        thrown.WithMessage("*failed (500)*");
+        fileHandler.Requests.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// If the follow-up get_info call itself fails, the ORIGINAL 404 must still
+    /// be what the caller sees — not the get_info failure, which would hide the
+    /// real (and more informative) error.
+    /// </summary>
+    [Fact]
+    public async Task ListFiles_NoFolderId_Returns404AndInfoAlsoFails_SurfacesOriginalNotFound()
+    {
+        var fileHandler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/info")
+            ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+        var storageHandler = new FakeHttpMessageHandler(_ => throw new InvalidOperationException("list_files must not call StorageService"));
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.list_files(null, CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<McpException>();
+        thrown.WithMessage("*Not found inside this link*");
+    }
+
     [Fact]
     public async Task WriteFile_QuotaExceeded_PassesBackendMessageThrough()
     {
