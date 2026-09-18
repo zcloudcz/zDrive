@@ -117,6 +117,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get folders => 'Ordner';
 
   @override
+  String get newItem => 'Neu';
+
+  @override
   String get newFolder => 'Neuer Ordner';
 
   @override
@@ -148,6 +151,12 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get refresh => 'Aktualisieren';
+
+  @override
+  String get gridView => 'Rasteransicht';
+
+  @override
+  String get listView => 'Listenansicht';
 
   @override
   String get noFiles => 'Keine Dateien';

@@ -115,6 +115,9 @@ class AppLocalizationsNl extends AppLocalizations {
   String get folders => 'Mappen';
 
   @override
+  String get newItem => 'Nieuw';
+
+  @override
   String get newFolder => 'Nieuwe map';
 
   @override
@@ -146,6 +149,12 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get refresh => 'Vernieuwen';
+
+  @override
+  String get gridView => 'Rasterweergave';
+
+  @override
+  String get listView => 'Lijstweergave';
 
   @override
   String get noFiles => 'Geen bestanden';

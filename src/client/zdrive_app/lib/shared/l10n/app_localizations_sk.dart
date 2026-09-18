@@ -114,6 +114,9 @@ class AppLocalizationsSk extends AppLocalizations {
   String get folders => 'Priečinky';
 
   @override
+  String get newItem => 'Nové';
+
+  @override
   String get newFolder => 'Nový priečinok';
 
   @override
@@ -145,6 +148,12 @@ class AppLocalizationsSk extends AppLocalizations {
 
   @override
   String get refresh => 'Obnoviť';
+
+  @override
+  String get gridView => 'Zobraziť mriežku';
+
+  @override
+  String get listView => 'Zobraziť zoznam';
 
   @override
   String get noFiles => 'Žiadne súbory';

@@ -115,6 +115,9 @@ class AppLocalizationsFi extends AppLocalizations {
   String get folders => 'Kansiot';
 
   @override
+  String get newItem => 'Uusi';
+
+  @override
   String get newFolder => 'Uusi kansio';
 
   @override
@@ -146,6 +149,12 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get refresh => 'Päivitä';
+
+  @override
+  String get gridView => 'Ruudukkonäkymä';
+
+  @override
+  String get listView => 'Luettelonäkymä';
 
   @override
   String get noFiles => 'Ei tiedostoja';
