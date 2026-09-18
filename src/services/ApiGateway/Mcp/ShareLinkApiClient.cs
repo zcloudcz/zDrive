@@ -179,14 +179,17 @@ public sealed class ShareLinkApiClient
     private static async Task<McpException> BuildToolErrorAsync(HttpResponseMessage response, CancellationToken ct)
     {
         string? backendMessage = null;
+        string? backendErrorCode = null;
         try
         {
             var body = await response.Content.ReadFromJsonAsync<ApiResponse<object>>(JsonOptions, ct);
             backendMessage = body?.Error?.Message;
+            backendErrorCode = body?.Error?.Code;
         }
         catch
         {
-            // Response body wasn't the ApiResponse envelope (e.g. an empty 404) — fall back below.
+            // Response body wasn't the ApiResponse envelope (e.g. an empty 404, or a
+            // gateway/ingress rate-limit response) — fall back below.
         }
 
         var message = response.StatusCode switch
@@ -199,10 +202,21 @@ public sealed class ShareLinkApiClient
             // The only status whose backend message we pass through: Package B's 413 body
             // states the limit/used numbers, which a fixed message here couldn't reproduce.
             HttpStatusCode.RequestEntityTooLarge => backendMessage ?? "Storage quota exceeded.",
-            HttpStatusCode.TooManyRequests => "The limit of pending uploads was reached, retry later.",
+            // A 429 isn't always Package A's pending-uploads cap — the gateway/ingress rate
+            // limiter can also answer 429 on any call, with no ApiResponse envelope at all.
+            // Only use the specific wording when the envelope actually says so.
+            HttpStatusCode.TooManyRequests => backendErrorCode == "TOO_MANY_PENDING_UPLOADS"
+                ? "The limit of pending uploads was reached, retry later."
+                : "Too many requests — wait a moment and retry.",
             _ => backendMessage ?? $"Backend request failed ({(int)response.StatusCode})."
         };
 
-        return new McpException(message);
+        var exception = new McpException(message);
+        // Stashed so callers that need to branch on the original status (e.g.
+        // list_files distinguishing a single-file link's 404 from any other
+        // failure) don't have to re-parse the message text — no new public
+        // exception type needed for one internal consumer.
+        exception.Data["StatusCode"] = response.StatusCode;
+        return exception;
     }
 }

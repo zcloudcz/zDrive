@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Net;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -66,21 +68,34 @@ public sealed class ShareLinkTools
         {
             children = await _api.GetChildrenAsync(Token, folderId, ct);
         }
-        catch (McpException) when (folderId is null)
+        // Only a 404 on the root itself (folderId null) can mean "this link shares a
+        // single FILE, which has no children" — any other failure (403, 5xx, ...) must
+        // surface unchanged, so the status is checked, not just "any error here".
+        catch (McpException ex) when (folderId is null && ex.Data["StatusCode"] is HttpStatusCode.NotFound)
         {
-            // The only way GetChildrenAsync can fail when folderId is null (i.e. we asked
-            // for the shared root's children) is a link that shares a single FILE — the
-            // backend 404s because a file has no children. Confirm via get_info (one extra
-            // cheap call, only on this path) and give a friendly answer instead of the
-            // generic "not found" the client would otherwise see.
-            var info = await _api.GetInfoAsync(Token, ct);
+            // Confirm via get_info (one extra cheap call, only on this path) and give a
+            // friendly answer instead of the generic "not found" the client would
+            // otherwise see. If get_info itself fails, the original 404 is still the
+            // more informative error — it must not be replaced by a get_info failure.
+            ShareInfoDto info;
+            try
+            {
+                info = await _api.GetInfoAsync(Token, ct);
+            }
+            catch
+            {
+                ExceptionDispatchInfo.Capture(ex).Throw();
+                throw; // unreachable, satisfies flow analysis
+            }
+
             if (!info.Root.IsFolder)
             {
                 throw new McpException(
                     "This link shares a single file, not a folder. Use get_info to see it and read_file with its id.");
             }
 
-            throw;
+            ExceptionDispatchInfo.Capture(ex).Throw();
+            throw; // unreachable, satisfies flow analysis
         }
 
         var compact = children.Select(f => new { f.Id, f.Name, f.IsFolder, f.SizeBytes, modifiedAt = f.UpdatedAt });

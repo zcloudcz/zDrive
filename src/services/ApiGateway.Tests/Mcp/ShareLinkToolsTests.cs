@@ -356,6 +356,48 @@ public sealed class ShareLinkToolsTests
         fileHandler.Requests.Should().ContainSingle();
     }
 
+    /// <summary>
+    /// A non-404 failure (here a 500) on the root children call must surface
+    /// unchanged — the single-file-link check only ever applies to a 404, and
+    /// must not fire (and so must not spend an extra get_info call) for any
+    /// other status.
+    /// </summary>
+    [Fact]
+    public async Task ListFiles_NoFolderId_BackendReturns500_SurfacesOriginalErrorWithoutCallingInfo()
+    {
+        var fileHandler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/info")
+            ? throw new InvalidOperationException("must not call get_info for a non-404 failure")
+            : new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var storageHandler = new FakeHttpMessageHandler(_ => throw new InvalidOperationException("list_files must not call StorageService"));
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.list_files(null, CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<McpException>();
+        thrown.WithMessage("*failed (500)*");
+        fileHandler.Requests.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// If the follow-up get_info call itself fails, the ORIGINAL 404 must still
+    /// be what the caller sees — not the get_info failure, which would hide the
+    /// real (and more informative) error.
+    /// </summary>
+    [Fact]
+    public async Task ListFiles_NoFolderId_Returns404AndInfoAlsoFails_SurfacesOriginalNotFound()
+    {
+        var fileHandler = new FakeHttpMessageHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/info")
+            ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+        var storageHandler = new FakeHttpMessageHandler(_ => throw new InvalidOperationException("list_files must not call StorageService"));
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.list_files(null, CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<McpException>();
+        thrown.WithMessage("*Not found inside this link*");
+    }
+
     [Fact]
     public async Task WriteFile_QuotaExceeded_PassesBackendMessageThrough()
     {
