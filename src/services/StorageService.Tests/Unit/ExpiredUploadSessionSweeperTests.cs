@@ -11,7 +11,11 @@ namespace ZDrive.StorageService.Tests.Unit;
 /// itself needs Postgres — see the Integration tier). No hand-rolled
 /// IStorageDbContext fake: this pure function is the whole decision the
 /// sweeper makes per session, so testing it directly is the smallest correct
-/// seam, not a shortcut around one.
+/// seam, not a shortcut around one. SweepOnceAsync's candidate query now
+/// filters on the same (Status == Active, ExpiresAt < now) condition in SQL
+/// directly rather than pulling every Active session — ShouldSweep is still
+/// the authoritative re-check taken under each session's row lock, so this
+/// predicate is exactly what both the SQL filter and that re-check agree on.
 /// </summary>
 [Trait("Category", "Unit")]
 public sealed class ExpiredUploadSessionSweeperTests

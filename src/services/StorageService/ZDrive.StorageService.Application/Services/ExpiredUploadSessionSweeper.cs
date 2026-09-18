@@ -89,15 +89,21 @@ public sealed class ExpiredUploadSessionSweeper : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<IStorageDbContext>();
         var blobStorage = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
 
-        // Filtered in-memory by ShouldSweep rather than in the query itself —
-        // "Active" narrows it to a small set server-side, and DateTime
-        // comparisons against DateTime.UtcNow translate fine either way, but
-        // keeping the actual sweep condition as one testable method avoids
-        // ever having two copies of "what counts as expired" drift apart.
-        // This first pass is only a candidate list — the authoritative check
-        // happens again per session, under its own lock, in SweepSessionAsync.
+        // Filtered in SQL, not by pulling every Active session and checking
+        // ShouldSweep in memory: with hundreds of clients mid-upload, "every
+        // Active session" is most of the table, and SweepSessionAsync takes
+        // a row lock per candidate — the same lock UploadChunk/CompleteUpload
+        // hold across blob I/O, so a large in-memory-filtered candidate list
+        // means needless lock contention against live uploads that aren't
+        // even expired. DateTime.UtcNow matches the clock every other expiry
+        // check in this flow uses (UploadChunk/CompleteUpload compare
+        // session.ExpiresAt against it directly). This first pass is only a
+        // candidate list — the authoritative check (ShouldSweep) still runs
+        // again per session, under its own lock, in SweepSessionAsync, since
+        // a session can complete between this query and that lock.
+        var now = DateTime.UtcNow;
         var candidateIds = await db.UploadSessions
-            .Where(s => s.Status == UploadSessionStatus.Active)
+            .Where(s => s.Status == UploadSessionStatus.Active && s.ExpiresAt < now)
             .Select(s => s.Id)
             .ToListAsync(ct);
 

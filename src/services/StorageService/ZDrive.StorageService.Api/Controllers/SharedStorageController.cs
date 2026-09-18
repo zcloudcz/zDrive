@@ -175,7 +175,7 @@ public sealed class SharedStorageController : ControllerBase
 
         var payload = ValidateUploadGrantOrThrow(grant);
         var result = await _mediator.Send(
-            new AbortUploadCommand(sessionId, payload.OwnerUserId, payload.TenantId, payload.FileId), ct);
+            new AbortUploadCommand(sessionId, payload.OwnerUserId, payload.TenantId, IsShared: true, payload.FileId), ct);
         return Ok(ApiResponse<bool>.Ok(result));
     }
 
