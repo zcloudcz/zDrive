@@ -15,8 +15,11 @@ class BrandLockup extends StatelessWidget {
   /// [Theme]'s `titleLarge` style rather than a derived font size.
   final double size;
 
-  /// Use the monochrome (all-white) mark, for placement on a dark/petrol
-  /// background where the full-colour mark's petrol field would disappear.
+  /// On-dark placement (e.g. the petrol header/panel): the wordmark is drawn
+  /// white. The mark image is never tinted — it is an opaque tile (petrol
+  /// field + white line art + amber arc), and tinting it paints every pixel
+  /// solid white. Left untinted, its own petrol field merges into a
+  /// `#003840` background and the line art/arc stay visible.
   final bool monochrome;
 
   @override
@@ -51,10 +54,6 @@ class BrandLockup extends StatelessWidget {
                 // sharp when downscaled to the AppBar's ~28-32px; medium
                 // filtering keeps that downscale crisp instead of blurring it.
                 filterQuality: FilterQuality.medium,
-                // ponytail: monochrome variant reuses the colour mark tinted
-                // white; a dedicated mono asset is only worth it if the tint
-                // ever looks wrong against a real dark background.
-                color: monochrome ? Colors.white : null,
               ),
             ),
           ),

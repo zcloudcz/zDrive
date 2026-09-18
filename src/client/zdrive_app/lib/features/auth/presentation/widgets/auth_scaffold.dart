@@ -27,13 +27,17 @@ class AuthScaffold extends StatelessWidget {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= _brandPanelBreakpoint;
             final formColumn = Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
-                child: _AuthColumn(l10n: l10n, child: child),
+                // The brand panel already carries the lockup + tagline in the
+                // wide layout — showing them again here duplicated the brand
+                // (bug: two lockups on screen at once).
+                child: _AuthColumn(l10n: l10n, showBrand: !isWide, child: child),
               ),
             );
-            if (constraints.maxWidth >= _brandPanelBreakpoint) {
+            if (isWide) {
               return Row(
                 children: [
                   Expanded(
@@ -52,12 +56,14 @@ class AuthScaffold extends StatelessWidget {
   }
 }
 
-/// Lockup + tagline above the form card — shown on every screen size (the
-/// wireframe in spec 4.5 keeps it in the form column even on wide layouts).
+/// Lockup + tagline above the form card, shown only in the narrow layout —
+/// the wide layout's brand panel already carries them, so repeating them
+/// here would show the brand twice on screen.
 class _AuthColumn extends StatelessWidget {
-  const _AuthColumn({required this.l10n, required this.child});
+  const _AuthColumn({required this.l10n, required this.showBrand, required this.child});
 
   final AppLocalizations l10n;
+  final bool showBrand;
   final Widget child;
 
   @override
@@ -68,16 +74,18 @@ class _AuthColumn extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const BrandLockup(size: 48),
-          const SizedBox(height: 8),
-          Text(
-            l10n.tagline,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
+          if (showBrand) ...[
+            const BrandLockup(size: 48),
+            const SizedBox(height: 8),
+            Text(
+              l10n.tagline,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+          ],
           Card(
             elevation: 0,
             color: colors.surfaceContainerLow,
