@@ -22,6 +22,13 @@ public sealed class ShareLinkTools
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int ChunkSize = 4 * 1024 * 1024;
 
+    // ponytail: each inline transfer costs ~3-4x the file's size in RAM (raw bytes +
+    // base64 string + the JSON-RPC envelope around it), and the gateway fronts every
+    // other request on the same memory-bound plan — 2 concurrent transfers is a
+    // deliberately small cap, not a measured one. Raise it (or make it configurable)
+    // if MCP transfer throughput actually matters.
+    private static readonly SemaphoreSlim TransferConcurrencyGate = new(2, 2);
+
     private readonly ShareLinkApiClient _api;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly McpOptions _options;
@@ -63,41 +70,89 @@ public sealed class ShareLinkTools
     [McpServerTool, Description("Read a file's content by id (ids come from list_files, files have no paths). encoding \"auto\" (default) returns text for valid UTF-8 content and base64 otherwise; \"text\" or \"base64\" force that encoding. Files over the inline size limit are refused — use the REST API for those.")]
     public async Task<string> read_file(Guid fileId, string encoding = "auto", CancellationToken ct = default)
     {
-        var grant = await _api.CreateDownloadGrantAsync(Token, fileId, ct);
-        var manifest = await _api.GetSharedManifestAsync(grant.Grant, ct);
-
-        if (manifest.TotalSize > _options.MaxInlineBytes)
+        await TransferConcurrencyGate.WaitAsync(ct);
+        try
         {
-            throw new McpException(
-                $"File is {manifest.TotalSize} bytes, over the {_options.MaxInlineBytes}-byte inline limit — use the REST API to download it instead.");
+            var grant = await _api.CreateDownloadGrantAsync(Token, fileId, ct);
+            var manifest = await _api.GetSharedManifestAsync(grant.Grant, ct);
+
+            if (manifest.TotalSize > _options.MaxInlineBytes)
+            {
+                throw new McpException(
+                    $"File is {manifest.TotalSize} bytes, over the {_options.MaxInlineBytes}-byte inline limit — use the REST API to download it instead.");
+            }
+
+            var bytes = await DownloadVerifiedAsync(grant.Grant, manifest, ct);
+
+            var (content, usedEncoding) = encoding switch
+            {
+                "text" => (Encoding.UTF8.GetString(bytes), "text"),
+                "base64" => (Convert.ToBase64String(bytes), "base64"),
+                "auto" or "" or null => TryDecodeStrictUtf8(bytes, out var decoded) ? (decoded, "text") : (Convert.ToBase64String(bytes), "base64"),
+                _ => throw new McpException("encoding must be \"auto\", \"text\" or \"base64\".")
+            };
+
+            _logger.LogInformation("MCP tool {Tool} succeeded, {Bytes} bytes, encoding {Encoding}", nameof(read_file), bytes.LongLength, usedEncoding);
+
+            return JsonSerializer.Serialize(
+                new { fileId, name = grant.FileName, sizeBytes = bytes.LongLength, encoding = usedEncoding, content },
+                JsonOptions);
+        }
+        finally
+        {
+            TransferConcurrencyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Downloads every chunk in the manifest, verifies each one's SHA-256, and
+    /// checks the assembled result against the manifest's declared total size —
+    /// mirroring assembleVerifiedFileStream in the Flutter client
+    /// (file_upload_data_source.dart), which the public share-link download path
+    /// must apply the same corruption checks as. A MemoryStream (not a
+    /// pre-sized byte[]) is used deliberately: the manifest carries no
+    /// per-chunk size, so a corrupt/malicious manifest whose chunks would
+    /// overflow the declared total must be caught explicitly (below) rather
+    /// than relying on an ArgumentException from a fixed-size array copy.
+    /// </summary>
+    private async Task<byte[]> DownloadVerifiedAsync(string grant, ManifestDto manifest, CancellationToken ct)
+    {
+        var chunks = manifest.Chunks.OrderBy(c => c.Index).ToList();
+
+        // Indices must be exactly 0..n-1: unique, contiguous, zero-based. Chunks are a
+        // fixed size, so without this a manifest repeating one index — [{0,A},{0,A}] —
+        // would assemble to A||A at exactly the size A||B would have been, with every
+        // individual chunk still hashing correctly.
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            if (chunks[i].Index != i)
+                throw new McpException("File content is incomplete: the chunk manifest is not contiguous.");
         }
 
-        var bytes = new byte[manifest.TotalSize];
-        var offset = 0;
-        foreach (var chunk in manifest.Chunks.OrderBy(c => c.Index))
+        using var buffer = new MemoryStream();
+        foreach (var chunk in chunks)
         {
-            var chunkBytes = await _api.DownloadSharedChunkAsync(grant.Grant, chunk.Hash, ct);
+            var chunkBytes = await _api.DownloadSharedChunkAsync(grant, chunk.Hash, ct);
             var actualHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(chunkBytes)).ToLowerInvariant();
             if (!string.Equals(actualHash, chunk.Hash, StringComparison.OrdinalIgnoreCase))
                 throw new McpException("A downloaded chunk failed integrity verification.");
 
-            chunkBytes.CopyTo(bytes, offset);
-            offset += chunkBytes.Length;
+            // Reject before copying: a chunk that would push the assembled size past
+            // the manifest's declared total means the manifest itself is not trustworthy.
+            if (buffer.Length + chunkBytes.Length > manifest.TotalSize)
+                throw new McpException("File content is incomplete: the chunk manifest does not match its declared size.");
+
+            buffer.Write(chunkBytes);
         }
 
-        var (content, usedEncoding) = encoding switch
-        {
-            "text" => (Encoding.UTF8.GetString(bytes), "text"),
-            "base64" => (Convert.ToBase64String(bytes), "base64"),
-            "auto" or "" or null => TryDecodeStrictUtf8(bytes, out var decoded) ? (decoded, "text") : (Convert.ToBase64String(bytes), "base64"),
-            _ => throw new McpException("encoding must be \"auto\", \"text\" or \"base64\".")
-        };
+        // Per-chunk hashing only proves each chunk's own bytes are intact — it says
+        // nothing about whether the *set* of chunks is complete. Together with the
+        // index check above (which catches duplicates/gaps at equal total size), this
+        // catches a truncated manifest and an empty chunk list for a non-empty file.
+        if (buffer.Length != manifest.TotalSize)
+            throw new McpException("File content is incomplete: the chunk manifest does not match its declared size.");
 
-        _logger.LogInformation("MCP tool {Tool} succeeded, {Bytes} bytes, encoding {Encoding}", nameof(read_file), bytes.LongLength, usedEncoding);
-
-        return JsonSerializer.Serialize(
-            new { fileId, name = grant.FileName, sizeBytes = bytes.LongLength, encoding = usedEncoding, content },
-            JsonOptions);
+        return buffer.ToArray();
     }
 
     [McpServerTool, Description("Create a file with the given content, or overwrite an existing one (overwrite=true required). content is text or base64 per encoding. parentId is a folder id from list_files (omit for the shared root). Content over the inline size limit is refused — use the REST API for those.")]
@@ -117,37 +172,45 @@ public sealed class ShareLinkTools
                 $"Content is {bytes.LongLength} bytes, over the {_options.MaxInlineBytes}-byte inline limit — use the REST API to upload it instead.");
         }
 
-        var grant = await _api.CreateUploadGrantAsync(Token, parentId, name, bytes.LongLength, overwrite, ct);
-        var totalChunks = Math.Max(1, (int)Math.Ceiling(bytes.LongLength / (double)ChunkSize));
-        var session = await _api.InitSharedUploadAsync(grant.Grant, name, totalChunks, ct);
-
+        await TransferConcurrencyGate.WaitAsync(ct);
         try
         {
-            for (var index = 0; index < totalChunks; index++)
+            var grant = await _api.CreateUploadGrantAsync(Token, parentId, name, bytes.LongLength, overwrite, ct);
+            var totalChunks = Math.Max(1, (int)Math.Ceiling(bytes.LongLength / (double)ChunkSize));
+            var session = await _api.InitSharedUploadAsync(grant.Grant, name, totalChunks, ct);
+
+            try
             {
-                var chunkOffset = index * ChunkSize;
-                var chunkLength = Math.Min(ChunkSize, bytes.Length - chunkOffset);
-                var chunk = bytes.AsSpan(chunkOffset, chunkLength).ToArray();
-                var hashHex = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(chunk)).ToLowerInvariant();
-                await _api.UploadSharedChunkAsync(grant.Grant, session.SessionId, index, hashHex, chunk, ct);
+                for (var index = 0; index < totalChunks; index++)
+                {
+                    var chunkOffset = index * ChunkSize;
+                    var chunkLength = Math.Min(ChunkSize, bytes.Length - chunkOffset);
+                    var chunk = bytes.AsSpan(chunkOffset, chunkLength).ToArray();
+                    var hashHex = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(chunk)).ToLowerInvariant();
+                    await _api.UploadSharedChunkAsync(grant.Grant, session.SessionId, index, hashHex, chunk, ct);
+                }
             }
+            catch
+            {
+                // A partially-uploaded session left behind holds server resources
+                // (and, worse, a stray manifest reference) for no reason once the
+                // caller already knows this write failed — abort it rather than
+                // leaving cleanup to the grant's TTL.
+                await _api.AbortSharedUploadAsync(grant.Grant, session.SessionId, ct);
+                throw;
+            }
+
+            var complete = await _api.CompleteSharedUploadAsync(grant.Grant, session.SessionId, ct);
+            var file = await _api.RecordVersionAsync(Token, grant.FileId, complete.Receipt, ct);
+
+            _logger.LogInformation("MCP tool {Tool} succeeded, {Bytes} bytes, {Chunks} chunks", nameof(write_file), bytes.LongLength, totalChunks);
+
+            return JsonSerializer.Serialize(new { file.Id, file.Name, file.IsFolder, file.SizeBytes, file.ParentId }, JsonOptions);
         }
-        catch
+        finally
         {
-            // A partially-uploaded session left behind holds server resources
-            // (and, worse, a stray manifest reference) for no reason once the
-            // caller already knows this write failed — abort it rather than
-            // leaving cleanup to the grant's TTL.
-            await _api.AbortSharedUploadAsync(grant.Grant, session.SessionId, ct);
-            throw;
+            TransferConcurrencyGate.Release();
         }
-
-        var complete = await _api.CompleteSharedUploadAsync(grant.Grant, session.SessionId, ct);
-        var file = await _api.RecordVersionAsync(Token, grant.FileId, complete.Receipt, ct);
-
-        _logger.LogInformation("MCP tool {Tool} succeeded, {Bytes} bytes, {Chunks} chunks", nameof(write_file), bytes.LongLength, totalChunks);
-
-        return JsonSerializer.Serialize(new { file.Id, file.Name, file.IsFolder, file.SizeBytes, file.ParentId }, JsonOptions);
     }
 
     [McpServerTool, Description("Create a folder. parentId is a folder id from list_files (omit for the shared root).")]

@@ -17,6 +17,17 @@ public sealed class FakeHttpMessageHandler : HttpMessageHandler
     public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) =>
         _responder = request => Task.FromResult(responder(request));
 
+    private FakeHttpMessageHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> asyncResponder, bool _) =>
+        _responder = asyncResponder;
+
+    /// <summary>
+    /// For tests that need the responder to genuinely suspend (e.g. waiting on
+    /// a gate) rather than complete synchronously — the sync-Func overload
+    /// above wraps its result in Task.FromResult, so a blocking call inside it
+    /// would block the calling thread instead of yielding.
+    /// </summary>
+    public static FakeHttpMessageHandler Async(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder) => new(responder, true);
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         // ShareLinkApiClient disposes each HttpRequestMessage right after

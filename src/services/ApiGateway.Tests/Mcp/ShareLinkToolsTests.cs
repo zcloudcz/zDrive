@@ -105,6 +105,123 @@ public sealed class ShareLinkToolsTests
         (await act.Should().ThrowAsync<McpException>()).WithMessage("*inline limit*");
     }
 
+    private static string HashHex(byte[] bytes) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+
+    private (FakeHttpMessageHandler File, FakeHttpMessageHandler Storage) BuildReadFileHandlers(
+        long totalSize, IReadOnlyList<(int Index, byte[] Bytes)> chunks)
+    {
+        var fileHandler = new FakeHttpMessageHandler(_ => Ok(new
+        {
+            grant = "download-grant", expiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            fileId = FileId, fileName = "f.bin", sizeBytes = totalSize, manifestHash = "hash"
+        }));
+
+        var storageHandler = new FakeHttpMessageHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/manifest"))
+            {
+                return Ok(new
+                {
+                    totalSize,
+                    chunks = chunks.Select(c => new { hash = HashHex(c.Bytes), index = c.Index })
+                });
+            }
+
+            // /chunk/{hash}/bytes — find by hash suffix in the path.
+            var match = chunks.Single(c => request.RequestUri!.AbsolutePath.Contains(HashHex(c.Bytes)));
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(match.Bytes) };
+        });
+
+        return (fileHandler, storageHandler);
+    }
+
+    [Fact]
+    public async Task ReadFile_EmptyChunkListWithPositiveTotalSize_ThrowsIncompleteContent()
+    {
+        var (fileHandler, storageHandler) = BuildReadFileHandlers(totalSize: 10, chunks: []);
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.read_file(FileId, "auto", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<McpException>()).WithMessage("*incomplete*");
+    }
+
+    [Fact]
+    public async Task ReadFile_ChunksSumLessThanTotalSize_ThrowsIncompleteContent()
+    {
+        var chunk = new byte[] { 1, 2, 3 };
+        var (fileHandler, storageHandler) = BuildReadFileHandlers(totalSize: 10, chunks: [(0, chunk)]);
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.read_file(FileId, "auto", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<McpException>()).WithMessage("*incomplete*");
+    }
+
+    [Fact]
+    public async Task ReadFile_ChunksSumGreaterThanTotalSize_ThrowsIncompleteContentBeforeOverflow()
+    {
+        var chunk = new byte[] { 1, 2, 3, 4, 5 };
+        // totalSize (3) is smaller than the one chunk (5 bytes) — must be rejected, not
+        // overflow a pre-sized buffer.
+        var (fileHandler, storageHandler) = BuildReadFileHandlers(totalSize: 3, chunks: [(0, chunk)]);
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var act = () => tools.read_file(FileId, "auto", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<McpException>()).WithMessage("*incomplete*");
+    }
+
+    [Fact]
+    public async Task ReadFile_ValidManifest_AssemblesChunksInOrder()
+    {
+        var chunk0 = new byte[] { 1, 2, 3 };
+        var chunk1 = new byte[] { 4, 5 };
+        var (fileHandler, storageHandler) = BuildReadFileHandlers(totalSize: 5, chunks: [(0, chunk0), (1, chunk1)]);
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var result = await tools.read_file(FileId, "base64", CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(result);
+        var contentBase64 = doc.RootElement.GetProperty("content").GetString();
+        Convert.FromBase64String(contentBase64!).Should().Equal(chunk0.Concat(chunk1));
+    }
+
+    [Fact]
+    public async Task ReadFile_ThirdConcurrentCall_WaitsForAnEarlierOneToFinish()
+    {
+        var releaseFirstTwo = new TaskCompletionSource();
+        var thirdCallStarted = new TaskCompletionSource();
+        var inFlight = 0;
+
+        var fileHandler = new FakeHttpMessageHandler(_ => Ok(new
+        {
+            grant = "g", expiresAt = DateTimeOffset.UtcNow.AddHours(1), fileId = FileId, fileName = "f.bin", sizeBytes = 0, manifestHash = "h"
+        }));
+        // Must genuinely suspend (not block the calling thread) while waiting on the gate,
+        // or the synchronous FakeHttpMessageHandler overload would serialize these three
+        // calls on the test's own thread before any concurrency could be observed.
+        var storageHandler = FakeHttpMessageHandler.Async(async _ =>
+        {
+            if (Interlocked.Increment(ref inFlight) >= 3) thirdCallStarted.TrySetResult();
+            await releaseFirstTwo.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            return Ok(new { totalSize = 0, chunks = Array.Empty<object>() });
+        });
+        var tools = BuildTools(fileHandler, storageHandler);
+
+        var call1 = tools.read_file(FileId, "auto", CancellationToken.None);
+        var call2 = tools.read_file(FileId, "auto", CancellationToken.None);
+        var call3 = tools.read_file(FileId, "auto", CancellationToken.None);
+
+        // Give the first two calls a moment to grab both semaphore permits and block inside the handler.
+        await Task.Delay(200);
+        thirdCallStarted.Task.IsCompleted.Should().BeFalse("the third concurrent read_file must wait for a permit, not run immediately");
+
+        releaseFirstTwo.SetResult();
+        await Task.WhenAll(call1, call2, call3);
+    }
+
     [Fact]
     public async Task WriteFile_ContentOverFourMebibytes_SplitsIntoTwoChunksWithHashHeaders()
     {

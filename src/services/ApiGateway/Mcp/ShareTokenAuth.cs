@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 
 namespace ZDrive.ApiGateway.Mcp;
@@ -27,6 +29,21 @@ public static class ShareTokenAuth
         async (filterContext, next) =>
         {
             var context = filterContext.HttpContext;
+
+            // Kestrel's default 30 MB request body limit would reject a base64
+            // write_file body near the advertised 25 MiB inline limit before the
+            // tool ever runs, with a bare transport 413 instead of the tool's own
+            // limit error. Raised here — scoped to these two MCP endpoints only,
+            // never the app-wide Kestrel limit — using the same MaxInlineBytes the
+            // tools themselves enforce, plus slack for base64 expansion (4/3) and
+            // JSON-RPC envelope overhead.
+            var maxRequestBodySizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+            if (maxRequestBodySizeFeature is { IsReadOnly: false })
+            {
+                var mcpOptions = context.RequestServices.GetRequiredService<IOptions<McpOptions>>().Value;
+                maxRequestBodySizeFeature.MaxRequestBodySize = mcpOptions.MaxInlineBytes * 4 / 3 + 1024 * 1024;
+            }
+
             var token = tokenFromHeader
                 ? ExtractBearerToken(context.Request.Headers.Authorization)
                 : context.Request.RouteValues["token"] as string;
@@ -47,6 +64,12 @@ public static class ShareTokenAuth
                     return Results.Empty;
                 case ShareValidationResult.Forbidden:
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Results.Empty;
+                case ShareValidationResult.Unavailable:
+                    // Distinct from NotFound: a backend outage must not look like a bad
+                    // token to the caller, which would otherwise retry the wrong thing forever.
+                    context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    await context.Response.WriteAsync("share service unavailable, retry", context.RequestAborted);
                     return Results.Empty;
             }
 

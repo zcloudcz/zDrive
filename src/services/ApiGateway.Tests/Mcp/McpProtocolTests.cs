@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Headers;
 using FluentAssertions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -39,5 +41,25 @@ public sealed class McpProtocolTests
         var text = result.Content.OfType<TextContentBlock>().Single().Text;
         result.IsError.Should().NotBe(true, "tool call failed: {0}", text);
         text.Should().Contain("notes.txt");
+    }
+
+    [Fact]
+    public async Task McpRequest_BackendUnavailableDuringTokenValidation_Returns503WithPlainBody()
+    {
+        await using var factory = new McpTestFactory();
+        var httpClient = factory.CreateClient();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", McpTestFactory.UnavailableToken);
+        request.Content = new StringContent(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""", System.Text.Encoding.UTF8, "application/json");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        var response = await httpClient.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Be("share service unavailable, retry");
     }
 }

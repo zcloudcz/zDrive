@@ -10,7 +10,8 @@ public enum ShareValidationResult
 {
     Ok,
     NotFound,
-    Forbidden
+    Forbidden,
+    Unavailable
 }
 
 /// <summary>
@@ -26,14 +27,15 @@ public sealed class ShareLinkApiClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly HttpClient _fileService;
-    private readonly HttpClient _storageService;
+    // Not captured once in the constructor: IHttpClientFactory owns handler
+    // rotation (DNS refresh, pooled connection recycling), which a singleton
+    // holding the HttpClient instances forever would opt out of.
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public ShareLinkApiClient(IHttpClientFactory httpClientFactory)
-    {
-        _fileService = httpClientFactory.CreateClient("mcpFileService");
-        _storageService = httpClientFactory.CreateClient("mcpStorageService");
-    }
+    public ShareLinkApiClient(IHttpClientFactory httpClientFactory) => _httpClientFactory = httpClientFactory;
+
+    private HttpClient FileService => _httpClientFactory.CreateClient("mcpFileService");
+    private HttpClient StorageService => _httpClientFactory.CreateClient("mcpStorageService");
 
     /// <summary>
     /// The cheap pre-check the contract requires before handing a request to
@@ -41,48 +43,67 @@ public sealed class ShareLinkApiClient
     /// Reuses the existing (already-on-master) GET shares/link/{token} —
     /// deliberately NOT the write-API's GET .../info, which doesn't exist yet
     /// on this branch and would fail validation for reasons unrelated to the
-    /// token itself.
+    /// token itself. A backend outage (connection failure, 5xx, timeout) is
+    /// reported separately from NotFound — it must not be answered with the
+    /// same "unknown token" status the caller would otherwise retry forever
+    /// against.
     /// </summary>
     public async Task<ShareValidationResult> ValidateTokenAsync(string token, CancellationToken ct)
     {
-        var response = await _fileService.GetAsync($"/api/v1/shares/link/{Enc(token)}", ct);
+        HttpResponseMessage response;
+        try
+        {
+            response = await FileService.GetAsync($"/api/v1/shares/link/{Enc(token)}", ct);
+        }
+        catch (HttpRequestException)
+        {
+            return ShareValidationResult.Unavailable;
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // HttpClient.Timeout fires this without cancelling our own token — distinct from the
+            // caller actually cancelling the request, which should propagate instead of being swallowed.
+            return ShareValidationResult.Unavailable;
+        }
+
         if (response.StatusCode == HttpStatusCode.NotFound) return ShareValidationResult.NotFound;
         if (response.StatusCode == HttpStatusCode.Forbidden) return ShareValidationResult.Forbidden;
+        if ((int)response.StatusCode >= 500) return ShareValidationResult.Unavailable;
         response.EnsureSuccessStatusCode();
         return ShareValidationResult.Ok;
     }
 
     public Task<ShareInfoDto> GetInfoAsync(string token, CancellationToken ct) =>
-        SendAsync<ShareInfoDto>(HttpMethod.Get, _fileService, $"/api/v1/shares/link/{Enc(token)}/info", null, ct);
+        SendAsync<ShareInfoDto>(HttpMethod.Get, FileService, $"/api/v1/shares/link/{Enc(token)}/info", null, ct);
 
     public Task<List<FileDto>> GetChildrenAsync(string token, Guid? folderId, CancellationToken ct)
     {
         var query = folderId is { } id ? $"?folderId={id}" : string.Empty;
-        return SendAsync<List<FileDto>>(HttpMethod.Get, _fileService, $"/api/v1/shares/link/{Enc(token)}/children{query}", null, ct);
+        return SendAsync<List<FileDto>>(HttpMethod.Get, FileService, $"/api/v1/shares/link/{Enc(token)}/children{query}", null, ct);
     }
 
     public Task<ShareDownloadGrantDto> CreateDownloadGrantAsync(string token, Guid fileId, CancellationToken ct) =>
-        SendAsync<ShareDownloadGrantDto>(HttpMethod.Post, _fileService, $"/api/v1/shares/link/{Enc(token)}/download-grant", new { fileId }, ct);
+        SendAsync<ShareDownloadGrantDto>(HttpMethod.Post, FileService, $"/api/v1/shares/link/{Enc(token)}/download-grant", new { fileId }, ct);
 
     public Task<ManifestDto> GetSharedManifestAsync(string grant, CancellationToken ct) =>
-        SendWithGrantAsync<ManifestDto>(HttpMethod.Get, _storageService, "/api/v1/storage/shared/manifest", grant, null, ct);
+        SendWithGrantAsync<ManifestDto>(HttpMethod.Get, StorageService, "/api/v1/storage/shared/manifest", grant, null, ct);
 
     public async Task<byte[]> DownloadSharedChunkAsync(string grant, string hash, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/storage/shared/chunk/{Enc(hash)}/bytes");
         request.Headers.Add("X-Share-Grant", grant);
-        var response = await _storageService.SendAsync(request, ct);
+        var response = await StorageService.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode) throw await BuildToolErrorAsync(response, ct);
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
     public Task<ShareUploadGrantDto> CreateUploadGrantAsync(
         string token, Guid? parentId, string fileName, long sizeBytes, bool overwrite, CancellationToken ct) =>
-        SendAsync<ShareUploadGrantDto>(HttpMethod.Post, _fileService, $"/api/v1/shares/link/{Enc(token)}/upload-grant",
+        SendAsync<ShareUploadGrantDto>(HttpMethod.Post, FileService, $"/api/v1/shares/link/{Enc(token)}/upload-grant",
             new { parentId, fileName, sizeBytes, overwrite }, ct);
 
     public Task<UploadSessionDto> InitSharedUploadAsync(string grant, string fileName, int totalChunks, CancellationToken ct) =>
-        SendWithGrantAsync<UploadSessionDto>(HttpMethod.Post, _storageService, "/api/v1/storage/shared/upload/init", grant,
+        SendWithGrantAsync<UploadSessionDto>(HttpMethod.Post, StorageService, "/api/v1/storage/shared/upload/init", grant,
             new { fileName, totalChunks }, ct);
 
     public async Task UploadSharedChunkAsync(string grant, Guid sessionId, int index, string chunkHashHex, byte[] chunkBytes, CancellationToken ct)
@@ -91,12 +112,12 @@ public sealed class ShareLinkApiClient
         request.Headers.Add("X-Share-Grant", grant);
         request.Headers.Add("X-Chunk-Hash", chunkHashHex);
         request.Content = new ByteArrayContent(chunkBytes);
-        var response = await _storageService.SendAsync(request, ct);
+        var response = await StorageService.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode) throw await BuildToolErrorAsync(response, ct);
     }
 
     public Task<ShareUploadCompleteDto> CompleteSharedUploadAsync(string grant, Guid sessionId, CancellationToken ct) =>
-        SendWithGrantAsync<ShareUploadCompleteDto>(HttpMethod.Post, _storageService, $"/api/v1/storage/shared/upload/{sessionId}/complete", grant, null, ct);
+        SendWithGrantAsync<ShareUploadCompleteDto>(HttpMethod.Post, StorageService, $"/api/v1/storage/shared/upload/{sessionId}/complete", grant, null, ct);
 
     /// <summary>
     /// Best-effort cleanup after a failed chunk upload. Its own failure is
@@ -109,7 +130,7 @@ public sealed class ShareLinkApiClient
         {
             using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/storage/shared/upload/{sessionId}");
             request.Headers.Add("X-Share-Grant", grant);
-            await _storageService.SendAsync(request, ct);
+            await StorageService.SendAsync(request, ct);
         }
         catch
         {
@@ -118,13 +139,13 @@ public sealed class ShareLinkApiClient
     }
 
     public Task<FileDto> RecordVersionAsync(string token, Guid fileId, string receipt, CancellationToken ct) =>
-        SendAsync<FileDto>(HttpMethod.Post, _fileService, $"/api/v1/shares/link/{Enc(token)}/files/{fileId}/versions", new { receipt }, ct);
+        SendAsync<FileDto>(HttpMethod.Post, FileService, $"/api/v1/shares/link/{Enc(token)}/files/{fileId}/versions", new { receipt }, ct);
 
     public Task<FileDto> CreateFolderAsync(string token, Guid? parentId, string name, CancellationToken ct) =>
-        SendAsync<FileDto>(HttpMethod.Post, _fileService, $"/api/v1/shares/link/{Enc(token)}/folders", new { parentId, name }, ct);
+        SendAsync<FileDto>(HttpMethod.Post, FileService, $"/api/v1/shares/link/{Enc(token)}/folders", new { parentId, name }, ct);
 
     public Task DeleteItemAsync(string token, Guid id, CancellationToken ct) =>
-        SendAsync<bool>(HttpMethod.Delete, _fileService, $"/api/v1/shares/link/{Enc(token)}/items/{id}", null, ct);
+        SendAsync<bool>(HttpMethod.Delete, FileService, $"/api/v1/shares/link/{Enc(token)}/items/{id}", null, ct);
 
     private static string Enc(string value) => Uri.EscapeDataString(value);
 

@@ -19,6 +19,7 @@ namespace ZDrive.ApiGateway.Tests.Mcp;
 public sealed class McpTestFactory : WebApplicationFactory<Program>
 {
     public const string ValidToken = "valid-share-token";
+    public const string UnavailableToken = "unavailable-token";
     public static readonly Guid RootFileId = Guid.NewGuid();
     public static readonly Guid ChildFileId = Guid.NewGuid();
 
@@ -41,6 +42,10 @@ public sealed class McpTestFactory : WebApplicationFactory<Program>
         // ShareTokenAuth's cheap validation call — the existing (already-on-master) GET shares/link/{token}.
         if (path == $"/api/v1/shares/link/{ValidToken}")
             return Ok(new { share = new { permission = "Read" }, file = new { id = RootFileId, name = "root", isFolder = true } });
+
+        // Simulates FileService itself being down/erroring for the 503 mapping test.
+        if (path == $"/api/v1/shares/link/{UnavailableToken}")
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
 
         if (path == $"/api/v1/shares/link/{ValidToken}/children")
         {
