@@ -29,9 +29,22 @@ public static class DependencyInjection
         services.AddScoped<IStorageDbContext>(sp => sp.GetRequiredService<StorageDbContext>());
 
         // Public share download grants (defaults to an empty key — see
-        // ShareDownloadGrantOptions.TryGetKey for the fail-closed behavior)
+        // ShareDownloadGrantOptions.TryGetKey for the fail-closed behavior).
+        // In Development only, an empty key falls back to the same per-machine
+        // dev key FileService signs with (DevShareGrantKeyProvider) instead of
+        // a literal in appsettings.Development.json.
         services.Configure<ShareDownloadGrantOptions>(
             configuration.GetSection(ShareDownloadGrantOptions.SectionName));
+        if (isDevelopment)
+        {
+            services.PostConfigure<ShareDownloadGrantOptions>(options =>
+            {
+                if (string.IsNullOrWhiteSpace(options.DownloadGrantKey))
+                {
+                    options.DownloadGrantKey = DevShareGrantKeyProvider.GetOrCreateKey();
+                }
+            });
+        }
 
         // Azure Blob Storage — same fail-fast policy as the JWT key below: the
         // Azurite fallback only applies in Development, never silently in prod.

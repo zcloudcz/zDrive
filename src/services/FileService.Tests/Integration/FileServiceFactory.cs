@@ -31,9 +31,12 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
 
     public const int MaxVersionsPerFile = 3;
 
-    // Must match StorageServiceFactory.TestShareGrantKey — grants minted here
-    // are validated over there in the shared-download integration tests.
-    public const string TestShareGrantKey = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=";
+    // Generated at runtime (not a literal) so nothing here looks like a
+    // committed secret to the repo's gitleaks scan. This suite never
+    // validates a grant string against the key, only the DTO fields — the
+    // key just needs to be present so ShareDownloadGrantOptions.TryGetKey
+    // succeeds and the download-grant endpoint isn't fail-closed off.
+    public static readonly string TestShareGrantKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
     public Guid TestUserId { get; } = Guid.NewGuid();
     public Guid TestTenantId { get; } = Guid.NewGuid();

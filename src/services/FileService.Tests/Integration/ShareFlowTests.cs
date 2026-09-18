@@ -76,7 +76,12 @@ public sealed class ShareFlowTests : IClassFixture<FileServiceFactory>
 
     private static void AssertPublicShareCacheHeaders(HttpResponseMessage response)
     {
-        response.Headers.CacheControl!.ToString().Should().Be("private, no-store");
+        // HttpClient parses Cache-Control into CacheControlHeaderValue and
+        // re-serializes it in its own field order on ToString() — "private,
+        // no-store" can come back as "no-store, private". Assert the parsed
+        // flags instead of the string form.
+        response.Headers.CacheControl!.NoStore.Should().BeTrue();
+        response.Headers.CacheControl.Private.Should().BeTrue();
         response.Headers.Vary.Should().Contain("X-Share-Grant");
     }
 

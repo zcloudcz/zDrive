@@ -41,10 +41,12 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
     // with this key and the service is configured to validate against it.
     public RSA Rsa { get; } = RSA.Create(2048);
 
-    // Base64 of 32 'a' bytes — long enough to pass ShareDownloadGrantOptions.TryGetKey.
-    // Must match FileServiceFactory's key so a grant minted by one test host
-    // validates against the other.
-    public const string TestShareGrantKey = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=";
+    // Generated at runtime (not a literal) so nothing here looks like a
+    // committed secret to the repo's gitleaks scan. SharedDownloadFlowTests
+    // mints grants with this same key and validates them against this same
+    // factory, all within this one process — no other test host needs to
+    // agree on it.
+    public static readonly string TestShareGrantKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
