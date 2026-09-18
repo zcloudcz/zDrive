@@ -32,7 +32,9 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, AuthToke
             .FirstOrDefaultAsync(u => u.Email == emailNormalized, cancellationToken)
             ?? throw new NotFoundException("User", emailNormalized);
 
-        if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
+        // Entra-only accounts have no PasswordHash — fail exactly like a wrong
+        // password so the response never reveals that the account is federated.
+        if (user.PasswordHash is null || !_passwordHasher.Verify(request.Password, user.PasswordHash))
             throw new NotFoundException("User", emailNormalized); // Intentionally vague for security
 
         user.LastLoginAt = DateTime.UtcNow;

@@ -10,6 +10,11 @@ public sealed class RefreshToken
     public DateTime? RevokedAt { get; set; }
     public string? ReplacedByToken { get; set; }
 
+    // Null for the legacy password flow (plain rotating 30-day expiry, unchanged).
+    // Set by the Entra exchange to cap a federated session at 24h so it can't stay
+    // renewable indefinitely after access is revoked on the Entra side.
+    public DateTime? AbsoluteExpiresAt { get; set; }
+
     public bool IsExpired => DateTime.UtcNow >= ExpiresAt;
     public bool IsRevoked => RevokedAt is not null;
     public bool IsActive => !IsRevoked && !IsExpired;

@@ -27,17 +27,31 @@ public sealed class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCom
         if (!existingToken.IsActive)
             throw new NotFoundException("RefreshToken", "(redacted)");
 
+        // A federated session's absolute cap is enforced independently of
+        // IsActive/ExpiresAt — reject the same way an expired token is rejected.
+        if (existingToken.AbsoluteExpiresAt is { } cap && DateTime.UtcNow >= cap)
+            throw new NotFoundException("RefreshToken", "(redacted)");
+
         // Rotate: revoke old, issue new
         existingToken.RevokedAt = DateTime.UtcNow;
         var newRefreshTokenValue = _jwtTokenGenerator.GenerateRefreshToken();
         existingToken.ReplacedByToken = newRefreshTokenValue;
+
+        // The replacement inherits the same absolute cap (if any), so a
+        // federated session can't outlive it by repeatedly refreshing before
+        // it hits. Legacy (uncapped) tokens keep rotating to a plain 30 days.
+        var thirtyDaysOut = DateTime.UtcNow.AddDays(30);
+        var newExpiresAt = existingToken.AbsoluteExpiresAt is { } absoluteCap
+            ? (absoluteCap < thirtyDaysOut ? absoluteCap : thirtyDaysOut)
+            : thirtyDaysOut;
 
         var newRefreshToken = new Domain.Entities.RefreshToken
         {
             Id = Guid.NewGuid(),
             Token = newRefreshTokenValue,
             UserId = existingToken.UserId,
-            ExpiresAt = DateTime.UtcNow.AddDays(30)
+            ExpiresAt = newExpiresAt,
+            AbsoluteExpiresAt = existingToken.AbsoluteExpiresAt
         };
 
         _db.RefreshTokens.Add(newRefreshToken);

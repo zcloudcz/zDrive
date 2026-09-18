@@ -3,7 +3,10 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
+using ZDrive.AuthService.Application.Auth;
 using ZDrive.AuthService.Application.Interfaces;
 using ZDrive.AuthService.Infrastructure.Auth;
 using ZDrive.AuthService.Infrastructure.Persistence;
@@ -83,6 +86,27 @@ public static class DependencyInjection
         });
 
         services.AddAuthorization();
+
+        // Entra External ID federation exchange — opt-in per deployment. Fail
+        // fast at startup (same spirit as the Jwt key check above) rather than
+        // let a half-configured section surface as a confusing 401 at runtime.
+        var entraSection = configuration.GetSection(EntraOptions.SectionName);
+        services.Configure<EntraOptions>(entraSection);
+        var entraOptions = entraSection.Get<EntraOptions>() ?? new EntraOptions();
+        if (entraOptions.Enabled &&
+            (string.IsNullOrWhiteSpace(entraOptions.TenantId) ||
+             string.IsNullOrWhiteSpace(entraOptions.Audience) ||
+             string.IsNullOrWhiteSpace(entraOptions.RequiredScope)))
+        {
+            throw new InvalidOperationException(
+                "Entra:TenantId, Entra:Audience and Entra:RequiredScope must be configured when Entra:Enabled is true.");
+        }
+
+        services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>(_ =>
+            new ConfigurationManager<OpenIdConnectConfiguration>(
+                $"https://{entraOptions.TenantId}.ciamlogin.com/{entraOptions.TenantId}/v2.0/.well-known/openid-configuration",
+                new OpenIdConnectConfigurationRetriever()));
+        services.AddSingleton<IEntraTokenValidator, EntraTokenValidator>();
 
         return services;
     }

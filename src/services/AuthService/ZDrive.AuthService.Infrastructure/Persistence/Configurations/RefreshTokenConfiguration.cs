@@ -22,6 +22,10 @@ public sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refresh
         builder.Property(rt => rt.ExpiresAt)
             .IsRequired();
 
+        // Null for legacy password-flow tokens; set by the Entra exchange to cap
+        // a federated session's lifetime (see RefreshToken.AbsoluteExpiresAt).
+        builder.Property(rt => rt.AbsoluteExpiresAt);
+
         builder.Property(rt => rt.CreatedAt)
             .HasDefaultValueSql("now() at time zone 'utc'");
 
