@@ -84,6 +84,56 @@ public sealed class EntraExchangeCommandHandlerTests
         await act.Should().ThrowAsync<ConflictException>();
     }
 
+    // Reproduces the race window without threads: the winner's user + mapping
+    // are seeded (via a second context on the same InMemory store, so the
+    // write is visible immediately — there's no way to hold it back to land
+    // strictly between the loser's own lookup and its email check with the
+    // fakes this test suite has). That means this test cannot exercise the
+    // race through the public Handle() entry point — Handle's own mapping
+    // lookup would already hit and never reach CreateUserAsync. Instead it
+    // invokes the private CreateUserAsync directly via reflection, which is
+    // exactly the method the fix lives in: given an email already "taken"
+    // and a mapping that already exists for the same (tid, oid), it must
+    // return the mapped user instead of throwing ConflictException.
+    [Fact]
+    public async Task CreateUserAsync_EmailTakenButMappingExistsForSameIdentity_ReturnsMappedUserInsteadOfConflict()
+    {
+        await using var db = CreateDb();
+        var identity = CreateIdentity();
+
+        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "Winner's Space" };
+        var winner = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = identity.Email,
+            PasswordHash = null,
+            DisplayName = "Winner",
+            TenantId = tenant.Id
+        };
+        var mapping = new ExternalIdentity
+        {
+            Id = Guid.NewGuid(),
+            UserId = winner.Id,
+            ProviderTenantId = identity.TenantId,
+            ObjectId = identity.ObjectId
+        };
+        db.Tenants.Add(tenant);
+        db.Users.Add(winner);
+        db.ExternalIdentities.Add(mapping);
+        await db.SaveChangesAsync();
+
+        var handler = new EntraExchangeCommandHandler(
+            db, FakeEntraTokenValidator.Returning(identity), new FakeJwtTokenGenerator());
+
+        var createUserAsync = typeof(EntraExchangeCommandHandler).GetMethod(
+            "CreateUserAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var task = (Task<User>)createUserAsync.Invoke(handler, [identity, CancellationToken.None])!;
+        var result = await task;
+
+        result.Id.Should().Be(winner.Id);
+        (await db.Users.CountAsync()).Should().Be(1);
+    }
+
     [Fact]
     public async Task Handle_ValidatorFailure_PropagatesForbidden()
     {
