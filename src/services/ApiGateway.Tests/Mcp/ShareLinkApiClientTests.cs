@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
+using ModelContextProtocol;
 using Xunit;
 using ZDrive.ApiGateway.Mcp;
 
@@ -53,5 +54,41 @@ public sealed class ShareLinkApiClientTests
         var result = await client.ValidateTokenAsync("tok", CancellationToken.None);
 
         result.Should().Be(ShareValidationResult.NotFound);
+    }
+
+    /// <summary>
+    /// Package A's own 429 (upload-grant's pending-uploads cap) carries
+    /// TOO_MANY_PENDING_UPLOADS in the envelope — only that case gets the
+    /// specific wording.
+    /// </summary>
+    [Fact]
+    public async Task GetInfoAsync_429WithPendingUploadsCode_UsesPendingUploadsMessage()
+    {
+        var handler = new FakeHttpMessageHandler(_ => FakeHttpMessageHandler.Json(
+            HttpStatusCode.TooManyRequests,
+            JsonSerializer.Serialize(new { success = false, error = new { code = "TOO_MANY_PENDING_UPLOADS", message = "..." } })));
+        var client = new ShareLinkApiClient(new SingleClientFactory(handler));
+
+        var act = () => client.GetInfoAsync("tok", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<McpException>()).WithMessage("*limit of pending uploads*");
+    }
+
+    /// <summary>
+    /// A gateway/ingress rate limiter can also answer 429 on any call, with no
+    /// ApiResponse envelope at all — that must NOT be reported as the
+    /// pending-uploads cap, which would be misleading.
+    /// </summary>
+    [Fact]
+    public async Task GetInfoAsync_429WithNoEnvelope_UsesGenericTooManyRequestsMessage()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+        var client = new ShareLinkApiClient(new SingleClientFactory(handler));
+
+        var act = () => client.GetInfoAsync("tok", CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<McpException>();
+        thrown.WithMessage("*wait a moment and retry*");
+        thrown.Which.Message.Should().NotContain("pending uploads");
     }
 }

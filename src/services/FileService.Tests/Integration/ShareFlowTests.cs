@@ -55,6 +55,9 @@ public sealed class ShareFlowTests : IClassFixture<FileServiceFactory>
         linkResult!.Success.Should().BeTrue();
         linkResult.Data!.File.Name.Should().Be("shared-file.txt");
         linkResult.Data.Share.Permission.Should().Be("Read");
+        // The root's real ParentId points to the owner's folder ABOVE the
+        // share — outside it — and must never be handed to an anonymous visitor.
+        linkResult.Data.File.ParentId.Should().BeNull();
 
         AssertPublicShareCacheHeaders(linkResponse);
     }
@@ -210,6 +213,9 @@ public sealed class ShareFlowTests : IClassFixture<FileServiceFactory>
         var rootChildren = await unauthClient.GetFromJsonAsync<ApiResponse<List<FileDto>>>(
             $"/api/v1/shares/link/{share.LinkToken}/children");
         rootChildren!.Data.Should().ContainSingle(f => f.Id == nested.Id);
+        // A direct child's ParentId equals the root's id — the link already
+        // exposes that id, and the client needs it to navigate inside the share.
+        rootChildren.Data!.Single(f => f.Id == nested.Id).ParentId.Should().Be(root.Id);
 
         // A nested subfolder inside the share lists its own children.
         var nestedChildren = await unauthClient.GetFromJsonAsync<ApiResponse<List<FileDto>>>(
