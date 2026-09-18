@@ -7,6 +7,11 @@ class AppTheme {
   // Seed colour: brand petrol raised to a usable M3 tone (section 4.1).
   static const _seedColor = Color(0xFF00565F);
 
+  // The literal brand petrol (section 8.1) — for brand surfaces (header
+  // bands, splash) that must stay on-brand regardless of scheme, as opposed
+  // to colorScheme.primary above, which is the lighter usable-tone seed.
+  static const Color brandPetrol = Color(0xFF003840);
+
   static ThemeData get light => _themeFor(_lightScheme);
 
   static ThemeData get dark => _themeFor(_darkScheme);

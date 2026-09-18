@@ -10,6 +10,8 @@ import 'package:zdrive_app/features/files/data/file_dtos.dart';
 import 'package:zdrive_app/features/share_link/presentation/pages/share_link_page.dart';
 import 'package:zdrive_app/features/share_link/presentation/share_link_cubit.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
+import 'package:zdrive_app/shared/theme/app_theme.dart';
+import 'package:zdrive_app/shared/widgets/brand_lockup.dart';
 
 class MockShareLinkCubit extends MockCubit<ShareLinkState> implements ShareLinkCubit {}
 
@@ -20,8 +22,14 @@ void main() {
     cubit = MockShareLinkCubit();
   });
 
-  Widget build() {
+  // themeMode/theme default to dark so the "forced light" test below proves
+  // ShareLinkView overrides the ambient theme rather than merely matching it
+  // by coincidence.
+  Widget build({ThemeMode themeMode = ThemeMode.dark}) {
     return MaterialApp(
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: themeMode,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -146,5 +154,117 @@ void main() {
     // The listing itself is untouched — a failed navigation must not blank
     // the page the visitor was already looking at.
     expect(find.text('child.txt'), findsOneWidget);
+  });
+
+  testWidgets('the header carries the brand lockup', (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(root: file, path: const [], children: null),
+    );
+
+    await tester.pumpWidget(build());
+
+    expect(
+      find.descendant(of: find.byType(AppBar), matching: find.byType(BrandLockup)),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'the page forces light theme even when the surrounding app is in dark mode',
+    (tester) async {
+      whenListen(
+        cubit,
+        const Stream<ShareLinkState>.empty(),
+        initialState: ShareLinkLoaded(root: file, path: const [], children: null),
+      );
+
+      await tester.pumpWidget(build(themeMode: ThemeMode.dark));
+
+      // Theme.of(context) on ShareLinkView's own element would read the
+      // ambient (dark) theme — the forced-light Theme wraps its build
+      // output, so assert from a descendant instead, same as the app does.
+      final brightness = Theme.of(tester.element(find.byType(Scaffold))).brightness;
+      expect(brightness, Brightness.light);
+    },
+  );
+
+  testWidgets('an expiry date shows "Available until", absent when there is none',
+      (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(
+        root: file,
+        path: const [],
+        children: null,
+        expiresAt: DateTime(2026, 9, 30),
+      ),
+    );
+    await tester.pumpWidget(build());
+    expect(find.textContaining('Available until'), findsOneWidget);
+  });
+
+  testWidgets('no expiry date on the share means no "Available until" line',
+      (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(root: file, path: const [], children: null),
+    );
+    await tester.pumpWidget(build());
+    expect(find.textContaining('Available until'), findsNothing);
+  });
+
+  testWidgets('loading shows skeleton placeholders, never a bare spinner',
+      (tester) async {
+    whenListen(cubit, const Stream<ShareLinkState>.empty(),
+        initialState: const ShareLinkLoading());
+
+    await tester.pumpWidget(build());
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    // The skeleton is a Card standing in for the eventual file card.
+    expect(find.byType(Card), findsOneWidget);
+  });
+
+  testWidgets('not-found and password-protected states render as a card, '
+      'not a SnackBar', (tester) async {
+    for (final state in [const ShareLinkNotFound(), const ShareLinkPasswordProtected()]) {
+      cubit = MockShareLinkCubit();
+      whenListen(cubit, const Stream<ShareLinkState>.empty(), initialState: state);
+
+      await tester.pumpWidget(build());
+
+      expect(find.byType(Card), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+    }
+  });
+
+  testWidgets('no overflow at a narrow width with text scaled to 200%',
+      (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(
+        root: file,
+        path: const [],
+        children: null,
+        expiresAt: DateTime(2026, 9, 30),
+      ),
+    );
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await tester.pumpWidget(build());
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
   });
 }

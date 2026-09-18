@@ -124,5 +124,8 @@
   "sharePasswordProtectedTitle": "Lösenord krävs",
   "sharePasswordProtectedMessage": "Den här delningslänken är lösenordsskyddad, vilket ännu inte stöds.",
   "openZDrive": "Öppna zDrive",
-  "download": "Ladda ner"
+  "download": "Ladda ner",
+  "shareAvailableUntil": "Tillgänglig till {date}",
+  "shareWhatIsZDrive": "Vad är zDrive?",
+  "shareFooterTagline": "Skyddad av zDrive"
 }

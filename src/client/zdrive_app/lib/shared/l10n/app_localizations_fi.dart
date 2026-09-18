@@ -416,4 +416,15 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get download => 'Lataa';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Saatavilla $date asti';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Mikä on zDrive?';
+
+  @override
+  String get shareFooterTagline => 'zDriven suojaama';
 }

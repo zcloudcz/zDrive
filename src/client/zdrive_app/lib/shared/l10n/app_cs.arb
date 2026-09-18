@@ -179,6 +179,9 @@
   "sharePasswordProtectedTitle": "Vyžaduje se heslo",
   "sharePasswordProtectedMessage": "Tento sdílený odkaz je chráněný heslem, což zatím není podporováno.",
   "openZDrive": "Otevřít zDrive",
-  "download": "Stáhnout"
+  "download": "Stáhnout",
+  "shareAvailableUntil": "Dostupné do {date}",
+  "shareWhatIsZDrive": "Co je zDrive?",
+  "shareFooterTagline": "Zabezpečeno pomocí zDrive"
 
 }

@@ -409,4 +409,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get download => 'Download';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Available until $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'What is zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Secured by zDrive';
 }

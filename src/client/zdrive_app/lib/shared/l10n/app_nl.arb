@@ -124,5 +124,8 @@
   "sharePasswordProtectedTitle": "Wachtwoord vereist",
   "sharePasswordProtectedMessage": "Deze deellink is met een wachtwoord beveiligd, wat nog niet wordt ondersteund.",
   "openZDrive": "zDrive openen",
-  "download": "Downloaden"
+  "download": "Downloaden",
+  "shareAvailableUntil": "Beschikbaar tot {date}",
+  "shareWhatIsZDrive": "Wat is zDrive?",
+  "shareFooterTagline": "Beveiligd door zDrive"
 }

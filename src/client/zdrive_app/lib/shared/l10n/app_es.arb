@@ -124,5 +124,8 @@
   "sharePasswordProtectedTitle": "Se requiere contraseña",
   "sharePasswordProtectedMessage": "Este enlace está protegido con contraseña, algo que aún no es compatible.",
   "openZDrive": "Abrir zDrive",
-  "download": "Descargar"
+  "download": "Descargar",
+  "shareAvailableUntil": "Disponible hasta {date}",
+  "shareWhatIsZDrive": "¿Qué es zDrive?",
+  "shareFooterTagline": "Protegido por zDrive"
 }

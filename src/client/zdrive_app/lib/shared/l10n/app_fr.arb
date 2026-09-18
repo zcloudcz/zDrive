@@ -124,5 +124,8 @@
   "sharePasswordProtectedTitle": "Mot de passe requis",
   "sharePasswordProtectedMessage": "Ce lien de partage est protégé par un mot de passe, ce qui n’est pas encore pris en charge.",
   "openZDrive": "Ouvrir zDrive",
-  "download": "Télécharger"
+  "download": "Télécharger",
+  "shareAvailableUntil": "Disponible jusqu'au {date}",
+  "shareWhatIsZDrive": "Qu'est-ce que zDrive ?",
+  "shareFooterTagline": "Sécurisé par zDrive"
 }

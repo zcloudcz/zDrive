@@ -59,6 +59,10 @@ final class ShareLinkLoaded extends ShareLinkState {
   final Map<String, double> downloadProgress;
   final Map<String, Object> downloadErrors;
   final Object? navigationError;
+  // From ShareDto.expiresAt, fetched alongside `root` in ShareLinkCubit.load
+  // but not otherwise carried by FileDto — null means the link never
+  // expires. Shown on the share page as "Available until ...".
+  final DateTime? expiresAt;
 
   const ShareLinkLoaded({
     required this.root,
@@ -67,6 +71,7 @@ final class ShareLinkLoaded extends ShareLinkState {
     this.downloadProgress = const {},
     this.downloadErrors = const {},
     this.navigationError,
+    this.expiresAt,
   });
 
   FileDto get current => path.isEmpty ? root : path.last;
@@ -90,12 +95,20 @@ final class ShareLinkLoaded extends ShareLinkState {
       downloadErrors: downloadErrors ?? this.downloadErrors,
       navigationError:
           navigationError != null ? navigationError() : this.navigationError,
+      expiresAt: expiresAt,
     );
   }
 
   @override
-  List<Object?> get props =>
-      [root, path, children, downloadProgress, downloadErrors, navigationError];
+  List<Object?> get props => [
+        root,
+        path,
+        children,
+        downloadProgress,
+        downloadErrors,
+        navigationError,
+        expiresAt,
+      ];
 }
 
 // --- Cubit ---
@@ -124,7 +137,12 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
       final children =
           result.file.isFolder ? await _dataSource.getChildren(token) : null;
       if (isClosed) return;
-      emit(ShareLinkLoaded(root: result.file, path: const [], children: children));
+      emit(ShareLinkLoaded(
+        root: result.file,
+        path: const [],
+        children: children,
+        expiresAt: result.share.expiresAt,
+      ));
     } catch (e) {
       if (isClosed) return;
       // Only the initial load maps 404/403 to the full-page states —

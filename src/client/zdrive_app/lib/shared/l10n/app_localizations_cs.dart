@@ -411,4 +411,15 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get download => 'Stáhnout';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Dostupné do $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Co je zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Zabezpečeno pomocí zDrive';
 }
