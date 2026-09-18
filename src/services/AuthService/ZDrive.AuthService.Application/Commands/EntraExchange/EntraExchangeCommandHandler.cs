@@ -61,7 +61,18 @@ public sealed class EntraExchangeCommandHandler : IRequestHandler<EntraExchangeC
         // account is a conflict, not an auto-merge.
         var emailTakenByPasswordAccount = await _db.Users.AnyAsync(u => u.Email == emailNormalized, ct);
         if (emailTakenByPasswordAccount)
+        {
+            // The winner of a concurrent first login for the SAME identity can
+            // commit between our mapping lookup (above, in Handle) and this
+            // email check — its user then looks like a pre-existing password
+            // account here. Re-read the mapping once before concluding it's a
+            // real conflict; only throw if it still isn't ours.
+            var mapping = await FindMappedUserAsync(identity.TenantId, identity.ObjectId, ct);
+            if (mapping is not null)
+                return mapping;
+
             throw new ConflictException($"A user with email '{emailNormalized}' already exists.");
+        }
 
         var displayName = identity.DisplayName ?? emailNormalized.Split('@')[0];
 
