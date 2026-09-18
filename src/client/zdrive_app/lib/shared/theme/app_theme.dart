@@ -98,6 +98,11 @@ class AppTheme {
         useMaterial3: true,
         colorScheme: colorScheme,
         brightness: colorScheme.brightness,
+        // Brand typeface (section 4.2). Inter ships no CJK glyphs, but the
+        // app supports ja/zh locales — Flutter already falls back to the
+        // platform's CJK font per-glyph when a font lacks a character, so
+        // no explicit fontFamilyFallback is needed here.
+        fontFamily: 'Inter',
         // Adaptive: compact on desktop, comfortable on touch (4.4).
         visualDensity: VisualDensity.adaptivePlatformDensity,
         appBarTheme: const AppBarTheme(centerTitle: false),

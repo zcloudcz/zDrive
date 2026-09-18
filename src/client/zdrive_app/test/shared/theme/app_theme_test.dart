@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zdrive_app/shared/theme/app_theme.dart';
 
@@ -260,6 +262,26 @@ void main() {
         AppTheme.light.visualDensity,
         VisualDensity.adaptivePlatformDensity,
       );
+    });
+  });
+
+  group('AppTheme typography (section 4.2)', () {
+    test('light and dark text theme use Inter', () {
+      expect(AppTheme.light.textTheme.bodyLarge!.fontFamily, 'Inter');
+      expect(AppTheme.dark.textTheme.bodyLarge!.fontFamily, 'Inter');
+    });
+
+    testWidgets('bundled font assets resolve via the pubspec path', (
+      tester,
+    ) async {
+      // A wrong pubspec asset path fails at runtime, not compile time, so
+      // load the exact paths declared in pubspec.yaml.
+      await rootBundle.load('assets/fonts/Inter-Regular.ttf');
+      await rootBundle.load('assets/fonts/Inter-SemiBold.ttf');
+    });
+
+    test('OFL licence file is bundled next to the fonts', () {
+      expect(File('assets/fonts/Inter-LICENSE.txt').existsSync(), isTrue);
     });
   });
 }
