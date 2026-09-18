@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -16,17 +17,47 @@ class Diagnostics {
   static int _pending = 0;
   static int _dropped = 0;
 
+  // A writer isolate that is merely slow to start (busy CI runner, cold
+  // JIT) is not broken, so `initialize()` never disables the facility on a
+  // timeout. Events raised before the writer is ready are queued here --
+  // bounded, so a writer that never starts cannot grow this without limit
+  // -- and flushed in order once the ready signal arrives, however late.
+  // Only a writer that genuinely fails (spawn error, uncaught isolate
+  // error, exit before ready) disables logging, via [_writerFailed].
+  static final Queue<Map<String, Object?>> _preReadyQueue = Queue();
+  static int _preReadyDropped = 0;
+  static const _preReadyQueueCap = 2000;
+  static bool _writerFailed = false;
+  static Completer<void>? _readyOrFailed;
+  static bool _slowStartFlagged = false;
+  static Duration _readyTimeout = const Duration(seconds: 20);
+  // Bumped on every initialize()/shutdown() cycle. A killed-but-still-
+  // starting isolate can deliver its (late) ready/exit message after a
+  // *later* initialize() call has already set up fresh state; the callback
+  // below checks this to discard such a stale result instead of clobbering
+  // the newer session.
+  static int _generation = 0;
+
   static Future<void> initialize({
     String? version,
     String? directory,
     int maxBytes = 2 * 1024 * 1024,
     Duration stallThreshold = const Duration(seconds: 10),
-    // Test-only: simulates a slow isolate startup, to prove `readyTimeout`
-    // tolerates it instead of silently abandoning a merely-slow writer.
+    // Test-only: simulates a slow isolate startup.
     Duration startupDelay = Duration.zero,
+    // How long `flush()` waits before flagging the writer as slow to start
+    // (a `diagnostics.slow_writer_start` event, itself queued for once the
+    // writer is up). Purely observability -- flush() keeps waiting for the
+    // writer past this point regardless; it is never treated as a failure.
     Duration readyTimeout = const Duration(seconds: 20),
   }) async {
-    if (_writer != null) return;
+    if (_writer != null || _isolate != null) return;
+    _writerFailed = false;
+    _slowStartFlagged = false;
+    _readyTimeout = readyTimeout;
+    final readyOrFailed = Completer<void>();
+    _readyOrFailed = readyOrFailed;
+    final generation = ++_generation;
     final ready = ReceivePort();
     try {
       final base =
@@ -43,34 +74,46 @@ class Diagnostics {
         ..listen((_) {
           if (_pending > 0) _pending--;
         });
-      _isolate = await Isolate.spawn(_writeLogs, [
-        ready.sendPort,
-        _acks!.sendPort,
-        base,
-        maxBytes,
-        stallThreshold.inMilliseconds,
-        version ?? 'unknown',
-        startupDelay.inMilliseconds,
-      ]);
-      // A generous safety net, not a race: isolate group startup and JIT
-      // warm-up for the writer entrypoint can legitimately take several
-      // seconds under load (busy CI runners, cold caches). A tight timeout
-      // here does not "fail fast" on a broken writer -- it abandons a merely
-      // slow one, permanently and silently (every event/flush becomes a
-      // no-op for the rest of the session, since `_writer` stays null).
-      final result = await ready.first.timeout(readyTimeout);
-      if (result is! SendPort) {
-        throw StateError('Diagnostic writer unavailable');
-      }
-      _writer = result;
-      _heartbeat = Timer.periodic(
-        const Duration(seconds: 2),
-        (_) => _writer?.send('heartbeat'),
+      // The same port doubles as onError/onExit: a genuine isolate failure
+      // delivers a message that is not a SendPort, handled below exactly
+      // like an explicit "unavailable" result.
+      _isolate = await Isolate.spawn(
+        _writeLogs,
+        [
+          ready.sendPort,
+          _acks!.sendPort,
+          base,
+          maxBytes,
+          stallThreshold.inMilliseconds,
+          version ?? 'unknown',
+          startupDelay.inMilliseconds,
+        ],
+        onError: ready.sendPort,
+        onExit: ready.sendPort,
+      );
+      unawaited(
+        ready.first.then((result) {
+          ready.close();
+          if (generation != _generation) return; // superseded, see above
+          if (result is SendPort) {
+            _writer = result;
+            _heartbeat = Timer.periodic(
+              const Duration(seconds: 2),
+              (_) => _writer?.send('heartbeat'),
+            );
+            _drainPreReadyQueue();
+          } else {
+            _writerFailed = true;
+            _isolate = null;
+          }
+          if (!readyOrFailed.isCompleted) readyOrFailed.complete();
+        }),
       );
     } catch (_) {
-      await shutdown();
-    } finally {
+      _writerFailed = true;
+      if (!readyOrFailed.isCompleted) readyOrFailed.complete();
       ready.close();
+      await shutdown();
     }
   }
 
@@ -90,7 +133,23 @@ class Diagnostics {
   }
 
   static void _send(Map<String, Object?> record) {
-    if (_writer == null) return;
+    if (_writerFailed) return;
+    if (_writer != null) {
+      _sendToWriter(record);
+      return;
+    }
+    // Writer not ready yet: buffer instead of dropping. Bounded so a writer
+    // that never starts (still waiting, or about to fail) cannot leak
+    // memory; oldest entries make way, and the drop count is reported as
+    // one summary event once the writer is finally reachable.
+    if (_preReadyQueue.length >= _preReadyQueueCap) {
+      _preReadyQueue.removeFirst();
+      _preReadyDropped++;
+    }
+    _preReadyQueue.add(record);
+  }
+
+  static void _sendToWriter(Map<String, Object?> record) {
     if (_pending >= 256) {
       _dropped++;
       return;
@@ -103,7 +162,41 @@ class Diagnostics {
     _writer!.send(record);
   }
 
+  static void _drainPreReadyQueue() {
+    if (_preReadyDropped > 0) {
+      _sendToWriter(
+        diagnosticRecord('diagnostics.dropped', {'count': _preReadyDropped}),
+      );
+      _preReadyDropped = 0;
+    }
+    while (_preReadyQueue.isNotEmpty) {
+      _sendToWriter(_preReadyQueue.removeFirst());
+    }
+  }
+
+  // Shared by exportLogs()/flush(): both need the writer to actually be up
+  // before they mean anything, and both are callable while it is still
+  // starting (cold JIT, busy CI runner) -- which is not a failure. `_readyTimeout`
+  // only flags a slow start once, as an event queued for whenever the
+  // writer does come up; callers still wait for the real outcome (ready,
+  // or genuinely failed via spawn error / isolate error / exit) afterwards.
+  // A fixed bound that gave up here would silently lose events queued so
+  // far, which is exactly the bug this replaces.
+  static Future<void> _awaitWriter() async {
+    if (_writer != null || _writerFailed) return;
+    if (!_slowStartFlagged) {
+      try {
+        await _readyOrFailed?.future.timeout(_readyTimeout);
+      } on TimeoutException {
+        _slowStartFlagged = true;
+        _send(diagnosticRecord('diagnostics.slow_writer_start', {}));
+      }
+    }
+    await _readyOrFailed?.future;
+  }
+
   static Future<String?> exportLogs() async {
+    await _awaitWriter();
     if (_writer == null) return null;
     final reply = ReceivePort();
     try {
@@ -119,6 +212,7 @@ class Diagnostics {
   /// Wait for earlier events to reach the disk writer before an explicit exit.
   /// A broken or busy filesystem must never indefinitely hold up the app.
   static Future<void> flush() async {
+    await _awaitWriter();
     if (_writer == null) return;
     final reply = ReceivePort();
     try {
@@ -133,6 +227,7 @@ class Diagnostics {
 
   /// Also releases resources for isolated filesystem tests.
   static Future<void> shutdown() async {
+    _generation++; // discard any still-in-flight ready/exit callback
     _heartbeat?.cancel();
     _heartbeat = null;
     if (_writer != null) {
@@ -153,6 +248,14 @@ class Diagnostics {
     _acks = null;
     _pending = 0;
     _dropped = 0;
+    _preReadyQueue.clear();
+    _preReadyDropped = 0;
+    _writerFailed = false;
+    _slowStartFlagged = false;
+    if (_readyOrFailed != null && !_readyOrFailed!.isCompleted) {
+      _readyOrFailed!.complete();
+    }
+    _readyOrFailed = null;
   }
 }
 
@@ -172,6 +275,11 @@ void _writeLogs(List<Object> args) {
     try {
       // Retry briefly on this worker only, never block the UI isolate. Releasing
       // the lease after each operation allows every running app to write/export.
+      // Pre-ready events now arrive in one synchronous burst once the writer
+      // comes up (drained from the buffer -- see Diagnostics._drainPreReadyQueue),
+      // instead of trickling in one at a time; two writers sharing a
+      // directory can collide on this lock more densely than before, so the
+      // retry budget is wider than a single append's own contention needed.
       for (var attempt = 0; ; attempt++) {
         try {
           lease = File(
@@ -182,7 +290,7 @@ void _writeLogs(List<Object> args) {
         } on FileSystemException {
           lease?.closeSync();
           lease = null;
-          if (attempt == 4) rethrow;
+          if (attempt == 19) rethrow;
           sleep(const Duration(milliseconds: 10));
         }
       }

@@ -39,35 +39,35 @@ void main() {
   });
 
   test(
-    'initialize tolerates writer startup slower than a tight ready timeout',
+    'events logged before the writer is ready are buffered and flushed in '
+    'order once it starts, however late',
     () async {
       // Reproduces the CI flake directly: a writer isolate that is merely
-      // slow to start (busy runner, cold JIT) must not be abandoned as if it
-      // were broken. With a too-tight `readyTimeout`, `initialize()` gives
-      // up and `_writer` stays null forever -- every later event/flush is a
-      // silent no-op, and the exported log only ever has the `app.started`
-      // line the isolate wrote before being abandoned.
+      // slow to start (busy runner, cold JIT) must never be treated as
+      // broken. `readyTimeout` is kept tiny here on purpose -- it only
+      // flags the slow start as an event once the writer is up; it must
+      // never cause events to be dropped or flush() to give up early.
       await Diagnostics.initialize(
         directory: directory.path,
-        startupDelay: const Duration(milliseconds: 300),
-        readyTimeout: const Duration(milliseconds: 100),
+        startupDelay: const Duration(milliseconds: 150),
+        readyTimeout: const Duration(milliseconds: 20),
       );
-      Diagnostics.event('should_be_dropped');
+      // Logged while the writer isolate is still starting up -- must be
+      // buffered in memory, not dropped.
+      Diagnostics.event('before.ready', {'sequence': 0});
+      // flush() must wait for the writer to actually become ready and
+      // drain the buffer, past the (tiny, already-elapsed) `readyTimeout`.
+      await Diagnostics.flush();
+      Diagnostics.event('after.ready', {'sequence': 1});
       await Diagnostics.flush();
       final file = File('${directory.path}/diagnostic-0.jsonl');
-      expect(await file.readAsString(), isNot(contains('should_be_dropped')));
-      await Diagnostics.shutdown();
-
-      // The fix: a `readyTimeout` generous enough for the same startup delay
-      // connects the writer normally, so events are no longer dropped.
-      await Diagnostics.initialize(
-        directory: directory.path,
-        startupDelay: const Duration(milliseconds: 300),
-        readyTimeout: const Duration(seconds: 5),
+      final text = await file.readAsString();
+      expect(text, contains('"sequence":0'));
+      expect(text, contains('"sequence":1'));
+      expect(
+        text.indexOf('before.ready') < text.indexOf('after.ready'),
+        isTrue,
       );
-      Diagnostics.event('should_be_recorded');
-      await Diagnostics.flush();
-      expect(await file.readAsString(), contains('should_be_recorded'));
     },
   );
 
