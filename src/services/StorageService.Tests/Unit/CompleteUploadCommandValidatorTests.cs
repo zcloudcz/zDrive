@@ -12,7 +12,7 @@ public sealed class CompleteUploadCommandValidatorTests
     [Fact]
     public void Valid_Command_Passes()
     {
-        var command = new CompleteUploadCommand(Guid.NewGuid());
+        var command = new CompleteUploadCommand(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var result = _validator.TestValidate(command);
         result.ShouldNotHaveAnyValidationErrors();
     }
@@ -20,7 +20,7 @@ public sealed class CompleteUploadCommandValidatorTests
     [Fact]
     public void Empty_SessionId_Fails()
     {
-        var command = new CompleteUploadCommand(Guid.Empty);
+        var command = new CompleteUploadCommand(Guid.Empty, Guid.NewGuid(), Guid.NewGuid());
         var result = _validator.TestValidate(command);
         result.ShouldHaveValidationErrorFor(x => x.SessionId);
     }

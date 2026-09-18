@@ -10,4 +10,5 @@ public sealed record CreateShareCommand(
     Guid? SharedWith,
     Permission Permission,
     string? Password,
-    DateTime? ExpiresAt) : IRequest<ShareDto>;
+    DateTime? ExpiresAt,
+    bool AllowDelete = false) : IRequest<ShareDto>;

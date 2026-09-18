@@ -67,6 +67,9 @@ namespace ZDrive.StorageService.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ChunkSizesJson")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -80,6 +83,14 @@ namespace ZDrive.StorageService.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(1024)
                         .HasColumnType("character varying(1024)");
+
+                    b.Property<bool>("IsShared")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<long?>("MaxBytes")
+                        .HasColumnType("bigint");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -101,6 +112,8 @@ namespace ZDrive.StorageService.Infrastructure.Migrations
                     b.HasIndex("FileId");
 
                     b.HasIndex("TenantId", "UserId");
+
+                    b.HasIndex("TenantId", "UserId", "IsShared", "CreatedAt");
 
                     b.ToTable("upload_sessions", "storage");
                 });

@@ -3,9 +3,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ZDrive.FileService.Application.Commands.CreateShare;
 using ZDrive.FileService.Application.Commands.CreateShareDownloadGrant;
+using ZDrive.FileService.Application.Commands.CreateShareFileVersion;
+using ZDrive.FileService.Application.Commands.CreateSharedFolder;
+using ZDrive.FileService.Application.Commands.CreateShareUploadGrant;
+using ZDrive.FileService.Application.Commands.DeleteSharedItem;
 using ZDrive.FileService.Application.Commands.RevokeShare;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Application.Queries.GetShareByToken;
+using ZDrive.FileService.Application.Queries.GetShareInfo;
 using ZDrive.FileService.Application.Queries.ListSharedChildren;
 using ZDrive.FileService.Domain.Enums;
 using ZDrive.Shared.Auth;
@@ -32,7 +37,7 @@ public sealed class SharesController : ControllerBase
         var userId = User.GetUserId();
         var command = new CreateShareCommand(
             userId, request.FileId, request.SharedWith, request.Permission,
-            request.Password, request.ExpiresAt);
+            request.Password, request.ExpiresAt, request.AllowDelete);
         var result = await _mediator.Send(command, ct);
         return CreatedAtAction(nameof(GetShareByToken), new { token = result.LinkToken }, ApiResponse<ShareDto>.Ok(result));
     }
@@ -90,6 +95,80 @@ public sealed class SharesController : ControllerBase
         var result = await _mediator.Send(new CreateShareDownloadGrantCommand(token, request.FileId), ct);
         return Ok(ApiResponse<ShareDownloadGrantDto>.Ok(result));
     }
+
+    [HttpGet("link/{token}/info")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<ShareInfoDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetShareInfo(string token, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var result = await _mediator.Send(new GetShareInfoQuery(token), ct);
+        return Ok(ApiResponse<ShareInfoDto>.Ok(result));
+    }
+
+    [HttpPost("link/{token}/folders")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<FileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateSharedFolder(
+        string token, [FromBody] CreateSharedFolderRequest request, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var result = await _mediator.Send(new CreateSharedFolderCommand(token, request.ParentId, request.Name), ct);
+        return Ok(ApiResponse<FileDto>.Ok(result));
+    }
+
+    [HttpPost("link/{token}/upload-grant")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<ShareUploadGrantResultDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<IActionResult> CreateShareUploadGrant(
+        string token, [FromBody] CreateShareUploadGrantRequest request, CancellationToken ct)
+    {
+        // The response body here IS a credential (the grant), same as the download-grant endpoint.
+        Response.SetPublicShareCacheHeaders();
+
+        var command = new CreateShareUploadGrantCommand(
+            token, request.ParentId, request.FileName, request.SizeBytes, request.Overwrite);
+        var result = await _mediator.Send(command, ct);
+        return Ok(ApiResponse<ShareUploadGrantResultDto>.Ok(result));
+    }
+
+    [HttpPost("link/{token}/files/{fileId:guid}/versions")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<FileDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    public async Task<IActionResult> CreateShareFileVersion(
+        string token, Guid fileId, [FromBody] CreateShareFileVersionRequest request, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var result = await _mediator.Send(new CreateShareFileVersionCommand(token, fileId, request.Receipt), ct);
+        return Ok(ApiResponse<FileDto>.Ok(result));
+    }
+
+    [HttpDelete("link/{token}/items/{id:guid}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteSharedItem(string token, Guid id, CancellationToken ct)
+    {
+        Response.SetPublicShareCacheHeaders();
+
+        var result = await _mediator.Send(new DeleteSharedItemCommand(token, id), ct);
+        return Ok(ApiResponse<bool>.Ok(result));
+    }
 }
 
 public sealed record CreateShareRequest(
@@ -97,6 +176,13 @@ public sealed record CreateShareRequest(
     Guid? SharedWith,
     Permission Permission,
     string? Password = null,
-    DateTime? ExpiresAt = null);
+    DateTime? ExpiresAt = null,
+    bool AllowDelete = false);
 
 public sealed record CreateShareDownloadGrantRequest(Guid FileId);
+
+public sealed record CreateSharedFolderRequest(Guid? ParentId, string Name);
+
+public sealed record CreateShareUploadGrantRequest(Guid? ParentId, string? FileName, long SizeBytes, bool Overwrite);
+
+public sealed record CreateShareFileVersionRequest(string Receipt);

@@ -21,8 +21,15 @@ public sealed class UploadSessionConfiguration : IEntityTypeConfiguration<Upload
         builder.Property(x => x.UploadedChunks).IsRequired();
         builder.Property(x => x.CreatedAt).IsRequired();
         builder.Property(x => x.ExpiresAt).IsRequired();
+        builder.Property(x => x.IsShared).IsRequired().HasDefaultValue(false);
+        builder.Property(x => x.ChunkSizesJson).HasColumnType("text");
 
         builder.HasIndex(x => x.FileId);
         builder.HasIndex(x => new { x.TenantId, x.UserId });
+
+        // Backs the shared-session 24h in-flight budget check in
+        // InitUploadCommandHandler (SUM(MaxBytes) over this owner's open
+        // shared sessions from the last day).
+        builder.HasIndex(x => new { x.TenantId, x.UserId, x.IsShared, x.CreatedAt });
     }
 }

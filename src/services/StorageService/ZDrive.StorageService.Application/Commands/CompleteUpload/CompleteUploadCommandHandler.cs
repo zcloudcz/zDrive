@@ -31,6 +31,14 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
             .FirstOrDefaultAsync(s => s.Id == request.SessionId, cancellationToken)
             ?? throw new NotFoundException("UploadSession", request.SessionId);
 
+        if (session.IsShared != request.IsShared
+            || session.TenantId != request.CallerTenantId
+            || session.UserId != request.CallerUserId
+            || (request.IsShared && session.FileId != request.ExpectedFileId))
+        {
+            throw new NotFoundException("UploadSession", request.SessionId);
+        }
+
         if (session.Status != UploadSessionStatus.Active)
             throw new ConflictException($"Upload session '{request.SessionId}' is not active (status: {session.Status}).");
 
@@ -50,13 +58,35 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
                 throw new ConflictException($"Chunk {i} is missing. Upload all {session.TotalChunks} chunks before completing.");
         }
 
+        // Read the actually-stored size of every chunk BEFORE moving anything,
+        // so an over-cap upload can be rejected without promoting any bytes
+        // to final storage (chunk-level PUT already enforces MaxBytes
+        // per-chunk, but that only catches the total growing chunk by chunk —
+        // it can't see a session whose cap changed, or verify the whole sum
+        // one more time before it becomes permanent).
+        var chunkSizes = new long[session.TotalChunks];
+        long totalSize = 0;
+        for (var i = 0; i < session.TotalChunks; i++)
+        {
+            chunkSizes[i] = await _blobStorage.GetTempChunkSizeAsync(session.Id, i, cancellationToken);
+            totalSize += chunkSizes[i];
+        }
+
+        if (session.MaxBytes is { } maxBytes && totalSize > maxBytes)
+        {
+            await _blobStorage.DeleteTempUploadAsync(session.Id, cancellationToken);
+            session.Status = UploadSessionStatus.Aborted;
+            await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            throw new QuotaExceededException(maxBytes, totalSize);
+        }
+
         // Move all chunks from temp to final location and collect metadata
         var chunks = new List<BlobChunk>();
-        long totalSize = 0;
 
         for (var i = 0; i < session.TotalChunks; i++)
         {
-            var chunkSize = await _blobStorage.GetTempChunkSizeAsync(session.Id, i, cancellationToken);
+            var chunkSize = chunkSizes[i];
 
             // Content-addressed chunk name: identical content lands on the same
             // blob path, so re-uploads never destroy chunks an older file
@@ -77,7 +107,6 @@ public sealed class CompleteUploadCommandHandler : IRequestHandler<CompleteUploa
             };
 
             chunks.Add(chunk);
-            totalSize += chunkSize;
         }
 
         // Build and upload manifest

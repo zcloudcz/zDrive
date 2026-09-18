@@ -69,6 +69,10 @@ public sealed class ExceptionHandlingMiddleware
                 HttpStatusCode.RequestEntityTooLarge,
                 new ErrorResponse("QUOTA_EXCEEDED", quotaEx.Message)),
 
+            TooManyRequestsException tooManyEx => (
+                HttpStatusCode.TooManyRequests,
+                new ErrorResponse("TOO_MANY_PENDING_UPLOADS", tooManyEx.Message)),
+
             // The per-handler `AnyAsync` sibling-name pre-check is only a fast
             // path, not the real guard — the unique index on
             // (tenant_id, user_id, parent_id, name_normalized) WHERE is_deleted

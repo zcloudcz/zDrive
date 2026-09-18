@@ -6,6 +6,7 @@ public sealed record ShareDto(
     Guid SharedBy,
     Guid? SharedWith,
     string Permission,
+    bool AllowDelete,
     string LinkToken,
     DateTime? ExpiresAt,
     DateTime CreatedAt);

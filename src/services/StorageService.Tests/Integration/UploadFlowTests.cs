@@ -15,6 +15,7 @@ namespace ZDrive.StorageService.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class UploadFlowTests : IClassFixture<StorageServiceFactory>
 {
+    private readonly StorageServiceFactory _factory;
     private readonly HttpClient _client;
     private readonly string _accessToken;
     private readonly Guid _userId = Guid.NewGuid();
@@ -22,6 +23,7 @@ public sealed class UploadFlowTests : IClassFixture<StorageServiceFactory>
 
     public UploadFlowTests(StorageServiceFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
         _accessToken = GenerateTestToken(factory.Rsa, _userId, _tenantId);
     }
@@ -180,6 +182,30 @@ public sealed class UploadFlowTests : IClassFixture<StorageServiceFactory>
 
         var response = await _client.SendAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task UploadChunk_ForeignUsersSession_Returns404()
+    {
+        // Session created by THIS class's own authenticated user (_accessToken).
+        var fileId = Guid.NewGuid();
+        var initResponse = await AuthPost("/api/v1/storage/upload/init", new { fileId, fileName = "owned-by-a.bin", totalChunks = 1 });
+        var sessionId = (await initResponse.Content.ReadFromJsonAsync<ApiResponse<UploadSessionDto>>())!.Data!.SessionId;
+
+        // A different user (fresh tenant/user, valid JWT of their own) must
+        // not be able to touch it — chunk/complete both 404, exactly like an
+        // unknown session id.
+        var otherToken = GenerateTestToken(_factory.Rsa, Guid.NewGuid(), Guid.NewGuid());
+
+        var foreignChunkRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/storage/upload/{sessionId}/chunk/0");
+        foreignChunkRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", otherToken);
+        foreignChunkRequest.Headers.Add("X-Chunk-Hash", "hash-0");
+        foreignChunkRequest.Content = new ByteArrayContent(new byte[10]) { Headers = { ContentType = new MediaTypeHeaderValue("application/octet-stream") } };
+        (await _client.SendAsync(foreignChunkRequest)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var foreignCompleteRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/storage/upload/{sessionId}/complete");
+        foreignCompleteRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", otherToken);
+        (await _client.SendAsync(foreignCompleteRequest)).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
