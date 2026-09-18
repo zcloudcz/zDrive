@@ -49,6 +49,7 @@ void main() {
     ));
     when(() => dio.get('/storage/download/f1/manifest',
       queryParameters: any(named: 'queryParameters'),
+      options: any(named: 'options'),
     )).thenAnswer((call) async {
       final query = call.namedArguments[#queryParameters] as Map<String, dynamic>?;
       final bytes = query?['manifestHash'] == committedHash ? restored : latest;

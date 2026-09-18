@@ -90,6 +90,7 @@ class FileUploadDataSource {
     int totalChunks, {
     CancelToken? cancelToken,
   }) async {
+    // First StorageService call of the upload flow — may hit a cold start.
     final response = await _dio.post(
       ApiConstants.uploadInit,
       cancelToken: cancelToken,
@@ -98,6 +99,7 @@ class FileUploadDataSource {
         'fileName': fileName,
         'totalChunks': totalChunks,
       },
+      options: Options(receiveTimeout: ApiConstants.storageColdStartTimeout),
     );
     return UploadSessionDto.fromJson(unwrapMap(response));
   }
@@ -256,9 +258,11 @@ class FileUploadDataSource {
 
   /// Fetches the chunk manifest for a file.
   Future<ManifestDto> getManifest(String fileId, {String? manifestHash}) async {
+    // First StorageService call of the download flow — may hit a cold start.
     final response = await _dio.get(
       '${ApiConstants.storage}/download/$fileId/manifest',
       queryParameters: manifestHash == null ? null : {'manifestHash': manifestHash},
+      options: Options(receiveTimeout: ApiConstants.storageColdStartTimeout),
     );
     return ManifestDto.fromJson(unwrapMap(response));
   }
