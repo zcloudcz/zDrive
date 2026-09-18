@@ -55,6 +55,29 @@ public sealed class ShareFlowTests : IClassFixture<FileServiceFactory>
         linkResult!.Success.Should().BeTrue();
         linkResult.Data!.File.Name.Should().Be("shared-file.txt");
         linkResult.Data.Share.Permission.Should().Be("Read");
+
+        AssertPublicShareCacheHeaders(linkResponse);
+    }
+
+    [Fact]
+    public async Task ShareLink_UnknownToken_ReturnsNotFoundWithNoStoreHeadersAndNoTokenInBody()
+    {
+        var unauthClient = _factory.CreateClient();
+        const string unknownToken = "does-not-exist-token";
+
+        var response = await unauthClient.GetAsync($"/api/v1/shares/link/{unknownToken}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        AssertPublicShareCacheHeaders(response);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(unknownToken, "the 404 body must never echo the link token back");
+    }
+
+    private static void AssertPublicShareCacheHeaders(HttpResponseMessage response)
+    {
+        response.Headers.CacheControl!.ToString().Should().Be("private, no-store");
+        response.Headers.Vary.Should().Contain("X-Share-Grant");
     }
 
     [Fact]

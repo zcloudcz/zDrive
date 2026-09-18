@@ -25,17 +25,22 @@ public static class PublicShareAccess
     /// </summary>
     public static async Task<Share> LoadShareAsync(IFileDbContext db, string linkToken, CancellationToken ct)
     {
+        // NotFoundException embeds its "key" argument verbatim in the message
+        // (see ZDrive.Shared.Exceptions.NotFoundException) — that message is
+        // both the response body and a Warning log line, so the token itself
+        // must never be passed as the key. It's a bearer credential for the
+        // share; a fixed marker leaks nothing.
         var share = await db.Shares
             .AsNoTracking()
             .Include(s => s.File)
             .FirstOrDefaultAsync(s => s.LinkToken == linkToken, ct)
-            ?? throw new NotFoundException("Share", linkToken);
+            ?? throw new NotFoundException("Share", "invalid");
 
         if (share.IsExpired || share.File.IsDeleted)
-            throw new NotFoundException("Share", linkToken);
+            throw new NotFoundException("Share", "invalid");
 
         if (share.SharedWith is not null)
-            throw new NotFoundException("Share", linkToken);
+            throw new NotFoundException("Share", "invalid");
 
         if (share.PasswordHash is not null)
             throw new ForbiddenException("This share is password protected.");

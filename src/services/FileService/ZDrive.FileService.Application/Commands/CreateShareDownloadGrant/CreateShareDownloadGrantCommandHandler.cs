@@ -11,11 +11,18 @@ namespace ZDrive.FileService.Application.Commands.CreateShareDownloadGrant;
 public sealed class CreateShareDownloadGrantCommandHandler
     : IRequestHandler<CreateShareDownloadGrantCommand, ShareDownloadGrantDto>
 {
-    // Chunks are requested throughout the whole download, not just at the
-    // start — a grant has to outlive the entire multi-GB transfer, not just
-    // the time to fetch the first chunk. 6 hours covers even a slow one; the
-    // client can also just ask for a fresh grant if this one expires mid-way.
-    private static readonly TimeSpan GrantTtl = TimeSpan.FromHours(6);
+    // StorageService validates a grant purely from its own signature and
+    // expiry — it has no way to see FileService state, so it cannot tell
+    // that the owner has since revoked the share, deleted the file, or
+    // moved it out of the shared folder. The grant's TTL is therefore the
+    // ONLY revocation window those actions get: however long it is, an
+    // already-issued grant keeps working for that long regardless of what
+    // happens on the FileService side afterwards. 1 hour bounds that window
+    // to something a legitimate owner could live with, at the cost of the
+    // client having to re-request a grant if a single chunk download runs
+    // longer than that (each chunk is a separate request against the same
+    // grant, so a fresh grant mid-transfer is a cheap, ordinary retry).
+    private static readonly TimeSpan GrantTtl = TimeSpan.FromHours(1);
 
     private readonly IFileDbContext _db;
     private readonly ShareDownloadGrantOptions _options;
@@ -29,9 +36,10 @@ public sealed class CreateShareDownloadGrantCommandHandler
     public async Task<ShareDownloadGrantDto> Handle(CreateShareDownloadGrantCommand request, CancellationToken cancellationToken)
     {
         // Fail closed: no key configured means the feature is off, not an
-        // error — production doesn't have this key set up yet.
+        // error — production doesn't have this key set up yet. Never echo
+        // the link token as the NotFoundException key (see LoadShareAsync).
         if (!_options.TryGetKey(out var key))
-            throw new NotFoundException("Share", request.LinkToken);
+            throw new NotFoundException("Share", "invalid");
 
         var share = await PublicShareAccess.LoadShareAsync(_db, request.LinkToken, cancellationToken);
 
@@ -39,7 +47,19 @@ public sealed class CreateShareDownloadGrantCommandHandler
         if (file is null || file.IsFolder || file.ManifestHash is null)
             throw new NotFoundException("FileNode", request.FileId);
 
-        var expiresAt = DateTimeOffset.UtcNow.Add(GrantTtl);
+        // Capped by the share's own expiry too: a grant must not outlive the
+        // share it was issued from, or ExpiresAt on the Share becomes
+        // decorative for anyone already holding a grant. ExpiresAt is stored
+        // (and compared elsewhere, see Share.IsExpired) as a UTC clock value
+        // with Kind left Unspecified by Npgsql — SpecifyKind instead of
+        // ToUniversalTime, which would wrongly treat it as local time.
+        var uncappedExpiry = DateTimeOffset.UtcNow.Add(GrantTtl);
+        var shareExpiresAt = share.ExpiresAt.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(share.ExpiresAt.Value, DateTimeKind.Utc))
+            : (DateTimeOffset?)null;
+        var expiresAt = shareExpiresAt.HasValue && shareExpiresAt.Value < uncappedExpiry
+            ? shareExpiresAt.Value
+            : uncappedExpiry;
 
         // file.TenantId/file.UserId are exactly the ids StorageController's
         // own User.GetTenantId() ?? userId fallback would have resolved for

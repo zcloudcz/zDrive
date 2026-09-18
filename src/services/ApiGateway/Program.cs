@@ -126,7 +126,9 @@ builder.Services.AddRateLimiter(options =>
     // back to caller IP since these requests carry no JWT) — same
     // X-Forwarded-For caveat applies.
     options.AddPolicy("publicShare", httpContext => RateLimitPartition.GetFixedWindowLimiter(
-        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        RateLimiterPartitioning.GetPublicSharePartitionKey(
+            httpContext.Request.Headers["X-Forwarded-For"].ToString(),
+            httpContext.Connection.RemoteIpAddress?.ToString()),
         _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 300,

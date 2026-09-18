@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using ZDrive.Shared.Auth;
 using ZDrive.Shared.DTOs;
 using ZDrive.Shared.Exceptions;
+using ZDrive.Shared.Http;
 using ZDrive.StorageService.Application.Common;
 using ZDrive.StorageService.Application.DTOs;
 using ZDrive.StorageService.Application.Queries.DownloadChunk;
@@ -46,6 +47,10 @@ public sealed class SharedStorageController : ControllerBase
     public async Task<IActionResult> GetSharedManifest(
         [FromHeader(Name = "X-Share-Grant")] string? grant, CancellationToken ct)
     {
+        // Set before anything below can throw, so it lands on the 404 too — see
+        // ShareResponseHeaderExtensions for why this endpoint must never be cached.
+        Response.SetPublicShareCacheHeaders();
+
         var payload = ValidateGrantOrThrow(grant);
         var query = new GetManifestQuery(payload.TenantId, payload.OwnerUserId, payload.FileId, payload.ManifestHash);
         var result = await _mediator.Send(query, ct);
@@ -58,6 +63,8 @@ public sealed class SharedStorageController : ControllerBase
     public async Task<IActionResult> DownloadSharedChunk(
         string hash, [FromHeader(Name = "X-Share-Grant")] string? grant, CancellationToken ct)
     {
+        Response.SetPublicShareCacheHeaders();
+
         var payload = ValidateGrantOrThrow(grant);
 
         // ponytail: re-reads the manifest per chunk; cache per grant if public download throughput matters
@@ -76,7 +83,10 @@ public sealed class SharedStorageController : ControllerBase
         if (!_options.TryGetKey(out var key)
             || !ShareDownloadGrant.TryValidate(grant, key, DateTimeOffset.UtcNow, out var payload))
         {
-            throw new NotFoundException("ShareDownloadGrant", grant ?? string.Empty);
+            // Never the grant itself here: NotFoundException's message embeds
+            // its "key" verbatim, and that would put a bearer credential for
+            // someone else's files into the response body and the Warning log.
+            throw new NotFoundException("ShareDownloadGrant", "invalid");
         }
 
         return payload;

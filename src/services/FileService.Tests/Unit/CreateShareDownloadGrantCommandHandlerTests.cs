@@ -151,4 +151,54 @@ public sealed class CreateShareDownloadGrantCommandHandlerTests
 
         await act.Should().ThrowAsync<NotFoundException>();
     }
+
+    [Fact]
+    public async Task Handle_ShareExpiringSoon_CapsGrantExpiryToShareExpiry()
+    {
+        // The share expires well inside the 1h grant TTL — StorageService has
+        // no way to see that the share expired, so the grant's own ExpiresAt
+        // is the only thing that stops it outliving the share.
+        var shareExpiresAt = DateTime.UtcNow.AddMinutes(10);
+        var (db, file, handler) = SeedFileWithShareExpiry(shareExpiresAt);
+
+        var result = await handler.Handle(new CreateShareDownloadGrantCommand("expiring-token", file.Id), CancellationToken.None);
+
+        result.ExpiresAt.Should().BeCloseTo(new DateTimeOffset(shareExpiresAt, TimeSpan.Zero), TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Handle_ShareWithNoExpiry_UsesUncappedOneHourTtl()
+    {
+        var (db, file, handler) = SeedFileWithShareExpiry(shareExpiresAt: null);
+
+        var result = await handler.Handle(new CreateShareDownloadGrantCommand("expiring-token", file.Id), CancellationToken.None);
+
+        result.ExpiresAt.Should().BeCloseTo(DateTimeOffset.UtcNow.AddHours(1), TimeSpan.FromSeconds(5));
+    }
+
+    private static (InMemoryFileDbContext Db, FileNode File, CreateShareDownloadGrantCommandHandler Handler) SeedFileWithShareExpiry(
+        DateTime? shareExpiresAt)
+    {
+        var db = InMemoryFileDbContext.Create();
+        var tenantId = Guid.NewGuid();
+        var ownerId = Guid.NewGuid();
+        var file = new FileNode
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserId = ownerId, Name = "expiring.txt",
+            IsFolder = false, SizeBytes = 5, ManifestHash = new string('d', 64)
+        };
+        db.FileNodes.Add(file);
+        db.Shares.Add(new Share
+        {
+            Id = Guid.NewGuid(),
+            FileId = file.Id,
+            SharedBy = ownerId,
+            Permission = Permission.Read,
+            LinkToken = "expiring-token",
+            ExpiresAt = shareExpiresAt
+        });
+        db.SaveChanges();
+
+        return (db, file, MakeHandler(db));
+    }
 }

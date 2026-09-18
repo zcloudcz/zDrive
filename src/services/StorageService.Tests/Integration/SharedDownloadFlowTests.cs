@@ -46,6 +46,7 @@ public sealed class SharedDownloadFlowTests : IClassFixture<StorageServiceFactor
 
         var manifestResponse = await GetShared("manifest", grant);
         manifestResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        AssertPublicShareCacheHeaders(manifestResponse);
         var manifest = (await manifestResponse.Content.ReadFromJsonAsync<ApiResponse<ManifestDto>>())!.Data!;
         manifest.Chunks.Should().HaveCount(2);
 
@@ -53,6 +54,7 @@ public sealed class SharedDownloadFlowTests : IClassFixture<StorageServiceFactor
         {
             var chunkResponse = await GetShared($"chunk/{chunk.Hash}/bytes", grant);
             chunkResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            AssertPublicShareCacheHeaders(chunkResponse);
             var bytes = await chunkResponse.Content.ReadAsByteArrayAsync();
             bytes.Should().BeEquivalentTo(chunkData[chunk.Index]);
         }
@@ -68,6 +70,10 @@ public sealed class SharedDownloadFlowTests : IClassFixture<StorageServiceFactor
         var response = await GetShared("manifest", tampered);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        AssertPublicShareCacheHeaders(response);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(tampered, "the 404 body must never echo the grant back");
     }
 
     [Fact]
@@ -79,14 +85,24 @@ public sealed class SharedDownloadFlowTests : IClassFixture<StorageServiceFactor
         var response = await GetShared("manifest", grant);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(grant, "the 404 body must never echo the grant back");
     }
 
     [Fact]
-    public async Task SharedManifest_MissingGrant_ReturnsNotFound()
+    public async Task SharedManifest_MissingGrant_ReturnsNotFoundWithNoStoreHeaders()
     {
         var response = await GetShared("manifest", grant: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        AssertPublicShareCacheHeaders(response);
+    }
+
+    private static void AssertPublicShareCacheHeaders(HttpResponseMessage response)
+    {
+        response.Headers.CacheControl!.ToString().Should().Be("private, no-store");
+        response.Headers.Vary.Should().Contain("X-Share-Grant");
     }
 
     [Fact]
