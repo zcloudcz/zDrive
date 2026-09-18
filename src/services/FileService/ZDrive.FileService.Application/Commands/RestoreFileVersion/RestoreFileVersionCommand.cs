@@ -16,4 +16,5 @@ public sealed record RestoreFileVersionCommand(
     Guid TenantId,
     Guid UserId,
     Guid FileId,
-    Guid VersionId) : IRequest<FileVersionDto>;
+    Guid VersionId,
+    long? ClaimQuotaBytes = null) : IRequest<FileVersionDto>;

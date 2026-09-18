@@ -122,6 +122,16 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
         return client;
     }
 
+    /// <summary>
+    /// Mints a JWT for an arbitrary (userId, tenantId), signed with this
+    /// factory's key. Public so a test can attach it to a client created
+    /// from a DERIVED host (via WithWebHostBuilder) — that derived host
+    /// still validates against this same instance's signing key, since
+    /// WithWebHostBuilder reuses this factory's ConfigureWebHost rather than
+    /// constructing a new one.
+    /// </summary>
+    public string CreateTestToken(Guid userId, Guid tenantId) => GenerateTestToken(userId, tenantId);
+
     private string GenerateTestToken(Guid userId, Guid tenantId)
     {
         var signingCredentials = new SigningCredentials(
