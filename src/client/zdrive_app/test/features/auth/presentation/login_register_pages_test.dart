@@ -16,6 +16,10 @@ class MockAuthBloc extends MockBloc<AuthEvent, AuthState> implements AuthBloc {}
 void main() {
   late MockAuthBloc authBloc;
 
+  setUpAll(() {
+    registerFallbackValue(const CheckAuthStatus());
+  });
+
   setUp(() {
     authBloc = MockAuthBloc();
     // Default: idle, unauthenticated-adjacent state so pages render their
@@ -126,7 +130,8 @@ void main() {
       expect(find.text('Invalid credentials'), findsOneWidget);
     });
 
-    testWidgets('Enter in the password field submits once', (tester) async {
+    testWidgets('Enter in the password field submits exactly once when idle',
+        (tester) async {
       await tester.pumpWidget(build(const LoginPage()));
       await tester.pumpAndSettle();
 
@@ -149,6 +154,48 @@ void main() {
           ),
         ),
       ).called(1);
+    });
+
+    testWidgets('Enter in the password field dispatches nothing while loading',
+        (tester) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: const AuthLoading(),
+      );
+
+      await tester.pumpWidget(build(const LoginPage()));
+      // Not pumpAndSettle: AuthLoading renders an indeterminate
+      // CircularProgressIndicator, which animates forever.
+      await tester.pump();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email'),
+        'user@example.com',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'longenoughpassword',
+      );
+      // The button is already disabled by AuthLoading; Enter is the second
+      // entry point that must be guarded the same way (SHOULD-FIX review
+      // finding: a second Enter mid-request used to dispatch a duplicate
+      // LoginRequested).
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      verifyNever(() => authBloc.add(any()));
+    });
+
+    testWidgets('has a heading distinguishing it from the register page',
+        (tester) async {
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(
+        tester.element(find.byType(LoginPage)),
+      )!;
+      expect(find.text(l10n.login), findsOneWidget);
     });
 
     testWidgets('320px + 200% text scaling does not overflow', (tester) async {
@@ -190,6 +237,28 @@ void main() {
       await tester.tap(find.byType(FilledButton));
       await tester.pump();
       expect(find.text(l10n.passwordTooShort), findsOneWidget);
+    });
+
+    testWidgets('has a heading distinguishing it from the login page',
+        (tester) async {
+      await tester.pumpWidget(build(const RegisterPage()));
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(
+        tester.element(find.byType(RegisterPage)),
+      )!;
+      expect(find.text(l10n.register), findsOneWidget);
+    });
+
+    testWidgets('320px + 200% text scaling does not overflow', (tester) async {
+      await setSize(tester, const Size(320, 700));
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await tester.pumpWidget(build(const RegisterPage()));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
     });
   });
 }
