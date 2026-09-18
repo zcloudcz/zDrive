@@ -26,11 +26,19 @@ WEB_TARGETS = [
     ("web/icons/Icon-maskable-512.png", 512, False),
 ]
 
-# In-app lockup mark, transparent background, used by BrandLockup.
-LOCKUP_TARGETS = [
-    ("assets/branding/zdrive-lockup.png", 28, True),
-    ("assets/branding/zdrive-lockup@2x.png", 56, True),
-    ("assets/branding/zdrive-lockup@3x.png", 84, True),
+# In-app mark, used by BrandLockup. Base size is 128 logical px, not the
+# AppBar's ~28-32px display size: BrandLockup downscales at paint time
+# (filterQuality: medium), which stays crisp; upscaling a small bitmap on
+# HiDPI screens would not.
+#
+# NOTE: the 1024 master has no alpha/rounded corners (checked pixel (0,0) =
+# opaque petrol) — it is a square tile, not a shape cut out of transparency.
+# `keep_alpha=True` here only preserves whatever alpha the master has (none
+# at the moment); it does not invent rounding.
+MARK_TARGETS = [
+    ("assets/branding/zdrive-mark.png", 128, True),
+    ("assets/branding/zdrive-mark@2x.png", 256, True),
+    ("assets/branding/zdrive-mark@3x.png", 384, True),
 ]
 
 ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
@@ -51,7 +59,7 @@ def _resized(master: Image.Image, size: int, keep_alpha: bool) -> Image.Image:
 def main() -> None:
     master = Image.open(MASTER).convert("RGBA")
 
-    for rel_path, size, keep_alpha in WEB_TARGETS + LOCKUP_TARGETS:
+    for rel_path, size, keep_alpha in WEB_TARGETS + MARK_TARGETS:
         out_path = ROOT / rel_path
         out_path.parent.mkdir(parents=True, exist_ok=True)
         _resized(master, size, keep_alpha).save(out_path)

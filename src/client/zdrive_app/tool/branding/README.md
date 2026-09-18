@@ -43,9 +43,17 @@ ships on **web and Windows only** in this PR. Neither script touches
    - `web/favicon.png`, `web/icons/Icon-{192,512}.png`,
      `web/icons/Icon-maskable-{192,512}.png` (opaque, petrol-filled square —
      matches the pre-existing files' format)
-   - `assets/branding/zdrive-lockup{,@2x,@3x}.png` (transparent background,
-     for `BrandLockup`)
+   - `assets/branding/zdrive-mark{,@2x,@3x}.png` (128/256/384px, for the
+     `BrandLockup` widget's mark — base size is 128 logical px, well above
+     the ~28-32px it's shown at in an AppBar, so downscaling at paint time
+     stays sharp on HiDPI screens instead of upscaling a small bitmap)
    - `windows/runner/resources/app_icon.ico` (16/24/32/48/64/128/256)
+
+   Note: the 1024px master has no alpha channel / rounded corners (checked
+   pixel (0,0) — fully opaque petrol), so the mark renders as a square tile,
+   not a rounded shape. If the master ever gains real alpha, these outputs
+   will carry it through unchanged (`keep_alpha=True` doesn't add rounding,
+   it only preserves whatever the source has).
 
 ## After running
 

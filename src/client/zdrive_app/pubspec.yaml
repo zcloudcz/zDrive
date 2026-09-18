@@ -48,6 +48,6 @@ flutter:
   uses-material-design: true
   generate: true
   assets:
-    - assets/branding/zdrive-lockup.png
-    - assets/branding/zdrive-lockup@2x.png
-    - assets/branding/zdrive-lockup@3x.png
+    - assets/branding/zdrive-mark.png
+    - assets/branding/zdrive-mark@2x.png
+    - assets/branding/zdrive-mark@3x.png

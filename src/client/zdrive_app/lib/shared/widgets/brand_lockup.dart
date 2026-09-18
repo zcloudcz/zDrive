@@ -31,9 +31,13 @@ class BrandLockup extends StatelessWidget {
         children: [
           ExcludeSemantics(
             child: Image.asset(
-              'assets/branding/zdrive-lockup.png',
+              'assets/branding/zdrive-mark.png',
               height: size,
               width: size,
+              // The source asset is 128px logical (384px @3x) so it stays
+              // sharp when downscaled to the AppBar's ~28-32px; medium
+              // filtering keeps that downscale crisp instead of blurring it.
+              filterQuality: FilterQuality.medium,
               // ponytail: monochrome variant reuses the colour mark tinted
               // white; a dedicated mono asset is only worth it if the tint
               // ever looks wrong against a real dark background.
