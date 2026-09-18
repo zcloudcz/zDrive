@@ -51,3 +51,10 @@ flutter:
     - assets/branding/zdrive-mark.png
     - assets/branding/zdrive-mark@2x.png
     - assets/branding/zdrive-mark@3x.png
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
