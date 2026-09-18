@@ -61,7 +61,28 @@ public sealed class ShareLinkTools
     [McpServerTool, Description("List the files and folders inside a folder. folderId is an id returned by a previous list_files/create_folder call, not a path — omit it to list the shared root.")]
     public async Task<string> list_files(Guid? folderId = null, CancellationToken ct = default)
     {
-        var children = await _api.GetChildrenAsync(Token, folderId, ct);
+        List<FileDto> children;
+        try
+        {
+            children = await _api.GetChildrenAsync(Token, folderId, ct);
+        }
+        catch (McpException) when (folderId is null)
+        {
+            // The only way GetChildrenAsync can fail when folderId is null (i.e. we asked
+            // for the shared root's children) is a link that shares a single FILE — the
+            // backend 404s because a file has no children. Confirm via get_info (one extra
+            // cheap call, only on this path) and give a friendly answer instead of the
+            // generic "not found" the client would otherwise see.
+            var info = await _api.GetInfoAsync(Token, ct);
+            if (!info.Root.IsFolder)
+            {
+                throw new McpException(
+                    "This link shares a single file, not a folder. Use get_info to see it and read_file with its id.");
+            }
+
+            throw;
+        }
+
         var compact = children.Select(f => new { f.Id, f.Name, f.IsFolder, f.SizeBytes, modifiedAt = f.UpdatedAt });
         _logger.LogInformation("MCP tool {Tool} succeeded, {Count} items", nameof(list_files), children.Count);
         return JsonSerializer.Serialize(compact, JsonOptions);

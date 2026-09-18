@@ -192,11 +192,14 @@ public sealed class ShareLinkApiClient
         var message = response.StatusCode switch
         {
             HttpStatusCode.Forbidden => "This link does not allow this operation.",
-            HttpStatusCode.NotFound => backendMessage ?? "Not found.",
+            // Never the raw backend text (e.g. "FileNode with key '…' was not found.") —
+            // it leaks internal entity names to the LLM/end user for no benefit.
+            HttpStatusCode.NotFound => "Not found inside this link (the id may be wrong, deleted, or outside the shared folder).",
             HttpStatusCode.Conflict => "A file or folder with that name already exists.",
             // The only status whose backend message we pass through: Package B's 413 body
             // states the limit/used numbers, which a fixed message here couldn't reproduce.
             HttpStatusCode.RequestEntityTooLarge => backendMessage ?? "Storage quota exceeded.",
+            HttpStatusCode.TooManyRequests => "The limit of pending uploads was reached, retry later.",
             _ => backendMessage ?? $"Backend request failed ({(int)response.StatusCode})."
         };
 
