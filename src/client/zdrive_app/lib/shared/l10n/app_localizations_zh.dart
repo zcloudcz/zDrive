@@ -402,4 +402,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get download => '下载';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return '有效期至 $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => '什么是 zDrive?';
+
+  @override
+  String get shareFooterTagline => '由 zDrive 提供安全保障';
 }

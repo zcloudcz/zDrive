@@ -863,6 +863,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Download'**
   String get download;
+
+  /// No description provided for @shareAvailableUntil.
+  ///
+  /// In en, this message translates to:
+  /// **'Available until {date}'**
+  String shareAvailableUntil(Object date);
+
+  /// No description provided for @shareWhatIsZDrive.
+  ///
+  /// In en, this message translates to:
+  /// **'What is zDrive?'**
+  String get shareWhatIsZDrive;
+
+  /// No description provided for @shareFooterTagline.
+  ///
+  /// In en, this message translates to:
+  /// **'Secured by zDrive'**
+  String get shareFooterTagline;
 }
 
 class _AppLocalizationsDelegate

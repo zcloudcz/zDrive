@@ -124,5 +124,8 @@
   "sharePasswordProtectedTitle": "Salasana vaaditaan",
   "sharePasswordProtectedMessage": "Tämä jakolinkki on salasanasuojattu, mitä ei vielä tueta.",
   "openZDrive": "Avaa zDrive",
-  "download": "Lataa"
+  "download": "Lataa",
+  "shareAvailableUntil": "Saatavilla {date} asti",
+  "shareWhatIsZDrive": "Mikä on zDrive?",
+  "shareFooterTagline": "zDriven suojaama"
 }

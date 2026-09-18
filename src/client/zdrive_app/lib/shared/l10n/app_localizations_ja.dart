@@ -403,4 +403,15 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get download => 'ダウンロード';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return '$dateまで利用可能';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'zDriveとは?';
+
+  @override
+  String get shareFooterTagline => 'zDriveによって保護されています';
 }

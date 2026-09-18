@@ -124,5 +124,8 @@
   "sharePasswordProtectedTitle": "パスワードが必要です",
   "sharePasswordProtectedMessage": "この共有リンクはパスワードで保護されていますが、まだサポートされていません。",
   "openZDrive": "zDriveを開く",
-  "download": "ダウンロード"
+  "download": "ダウンロード",
+  "shareAvailableUntil": "{date}まで利用可能",
+  "shareWhatIsZDrive": "zDriveとは?",
+  "shareFooterTagline": "zDriveによって保護されています"
 }

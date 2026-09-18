@@ -124,6 +124,9 @@
   "sharePasswordProtectedTitle": "需要密码",
   "sharePasswordProtectedMessage": "此共享链接受密码保护，目前尚不支持。",
   "openZDrive": "打开 zDrive",
-  "download": "下载"
+  "download": "下载",
+  "shareAvailableUntil": "有效期至 {date}",
+  "shareWhatIsZDrive": "什么是 zDrive?",
+  "shareFooterTagline": "由 zDrive 提供安全保障"
 }
 

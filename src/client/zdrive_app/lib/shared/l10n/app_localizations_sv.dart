@@ -412,4 +412,15 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get download => 'Ladda ner';
+
+  @override
+  String shareAvailableUntil(Object date) {
+    return 'Tillgänglig till $date';
+  }
+
+  @override
+  String get shareWhatIsZDrive => 'Vad är zDrive?';
+
+  @override
+  String get shareFooterTagline => 'Skyddad av zDrive';
 }

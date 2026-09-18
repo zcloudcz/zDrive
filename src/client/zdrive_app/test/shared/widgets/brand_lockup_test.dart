@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zdrive_app/shared/theme/app_theme.dart';
 import 'package:zdrive_app/shared/widgets/brand_lockup.dart';
+
+import '../theme/app_theme_test.dart' show contrastRatio;
 
 void main() {
   testWidgets('BrandLockup renders the zDrive wordmark and its semantics label', (tester) async {
@@ -24,5 +27,36 @@ void main() {
     expect(find.bySemanticsLabel('zDrive'), findsOneWidget);
 
     handle.dispose();
+  });
+
+  testWidgets(
+    'monochrome (on-dark) paints the wordmark white regardless of the '
+    'ambient TextStyle — titleLarge carries its own explicit colour that '
+    'would otherwise beat AppBar.foregroundColor (PR review BLOCKER)',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: const Scaffold(
+            backgroundColor: AppTheme.brandPetrol,
+            body: BrandLockup(monochrome: true),
+          ),
+        ),
+      );
+
+      final style = tester.widget<Text>(find.text('zDrive')).style!;
+      expect(style.color, Colors.white);
+      expect(contrastRatio(style.color!, AppTheme.brandPetrol), greaterThanOrEqualTo(4.5));
+    },
+  );
+
+  testWidgets('the default (non-monochrome) variant follows colorScheme.onSurface',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(theme: AppTheme.light, home: const Scaffold(body: BrandLockup())),
+    );
+
+    final style = tester.widget<Text>(find.text('zDrive')).style!;
+    expect(style.color, AppTheme.light.colorScheme.onSurface);
   });
 }
