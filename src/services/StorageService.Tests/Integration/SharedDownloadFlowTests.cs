@@ -65,7 +65,13 @@ public sealed class SharedDownloadFlowTests : IClassFixture<StorageServiceFactor
     {
         var (fileId, manifestHash, _) = await UploadFileAsync("tampered.bin", [new byte[64]]);
         var grant = MakeGrant(fileId, manifestHash, DateTimeOffset.UtcNow.AddHours(1));
-        var tampered = grant[..^1] + (grant[^1] == 'a' ? 'b' : 'a');
+        // Flip a bit in the signature segment's first byte rather than
+        // swapping the grant's last character: for a 32-byte HMAC signature
+        // that trailing base64url character carries only 4 significant bits
+        // plus 2 always-zero padding bits, so some swaps decode to the exact
+        // same bytes and the grant would legitimately still validate.
+        var parts = grant.Split('.', 2);
+        var tampered = $"{parts[0]}.{FlipFirstByte(parts[1])}";
 
         var response = await GetShared("manifest", tampered);
 
@@ -97,6 +103,24 @@ public sealed class SharedDownloadFlowTests : IClassFixture<StorageServiceFactor
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         AssertPublicShareCacheHeaders(response);
+    }
+
+    /// <summary>Decodes a base64url segment, flips a bit in its FIRST byte, and re-encodes.</summary>
+    private static string FlipFirstByte(string base64UrlSegment)
+    {
+        var bytes = Base64UrlDecode(base64UrlSegment);
+        bytes[0] ^= 0x01;
+        return Base64UrlEncode(bytes);
+    }
+
+    private static string Base64UrlEncode(byte[] bytes) =>
+        Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    private static byte[] Base64UrlDecode(string value)
+    {
+        var padded = value.Replace('-', '+').Replace('_', '/');
+        padded = padded.PadRight(padded.Length + ((4 - (padded.Length % 4)) % 4), '=');
+        return Convert.FromBase64String(padded);
     }
 
     private static void AssertPublicShareCacheHeaders(HttpResponseMessage response)

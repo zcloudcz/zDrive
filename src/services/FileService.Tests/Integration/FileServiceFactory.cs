@@ -31,11 +31,6 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
 
     public const int MaxVersionsPerFile = 3;
 
-    // Small enough that a couple of file versions can push a test user over
-    // it, without needing to actually move that many bytes (see
-    // StorageUsageFlowTests).
-    public const long DefaultUserQuotaBytes = 1000;
-
     // Generated at runtime (not a literal) so nothing here looks like a
     // committed secret to the repo's gitleaks scan. This suite never
     // validates a grant string against the key, only the DTO fields — the
@@ -84,9 +79,6 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
 
             services.PostConfigure<ZDrive.Shared.Auth.ShareDownloadGrantOptions>(
                 options => options.DownloadGrantKey = TestShareGrantKey);
-
-            services.PostConfigure<ZDrive.FileService.Application.Options.StorageOptions>(
-                options => options.DefaultUserQuotaBytes = DefaultUserQuotaBytes);
         });
     }
 
@@ -129,6 +121,16 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         return client;
     }
+
+    /// <summary>
+    /// Mints a JWT for an arbitrary (userId, tenantId), signed with this
+    /// factory's key. Public so a test can attach it to a client created
+    /// from a DERIVED host (via WithWebHostBuilder) — that derived host
+    /// still validates against this same instance's signing key, since
+    /// WithWebHostBuilder reuses this factory's ConfigureWebHost rather than
+    /// constructing a new one.
+    /// </summary>
+    public string CreateTestToken(Guid userId, Guid tenantId) => GenerateTestToken(userId, tenantId);
 
     private string GenerateTestToken(Guid userId, Guid tenantId)
     {
