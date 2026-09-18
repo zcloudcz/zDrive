@@ -43,6 +43,7 @@
   "clearSearch": "Effacer la recherche",
   "refresh": "Actualiser",
   "noFiles": "Aucun fichier",
+  "noFilesBody": "Importez un fichier ou créez un dossier pour commencer.",
   "createFolder": "Créer un dossier",
   "folderName": "Nom du dossier",
   "enterFolderName": "Saisissez le nom du dossier",

@@ -162,6 +162,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get noFiles => 'Keine Dateien';
 
   @override
+  String get noFilesBody =>
+      'Laden Sie eine Datei hoch oder erstellen Sie einen Ordner, um loszulegen.';
+
+  @override
   String get createFolder => 'Ordner erstellen';
 
   @override

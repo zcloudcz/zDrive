@@ -159,6 +159,10 @@ class AppLocalizationsSk extends AppLocalizations {
   String get noFiles => 'Žiadne súbory';
 
   @override
+  String get noFilesBody =>
+      'Nahrajte súbor alebo vytvorte priečinok a začnite.';
+
+  @override
   String get createFolder => 'Vytvoriť priečinok';
 
   @override

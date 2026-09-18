@@ -158,6 +158,9 @@ class AppLocalizationsCs extends AppLocalizations {
   String get noFiles => 'Žádné soubory';
 
   @override
+  String get noFilesBody => 'Nahrajte soubor nebo vytvořte složku a začněte.';
+
+  @override
   String get createFolder => 'Vytvořit složku';
 
   @override

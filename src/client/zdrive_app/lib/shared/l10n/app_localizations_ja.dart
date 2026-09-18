@@ -157,6 +157,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get noFiles => 'ファイルがありません';
 
   @override
+  String get noFilesBody => 'ファイルをアップロードするか、フォルダを作成して始めましょう。';
+
+  @override
   String get createFolder => 'フォルダーを作成';
 
   @override

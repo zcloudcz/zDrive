@@ -160,6 +160,9 @@ class AppLocalizationsFi extends AppLocalizations {
   String get noFiles => 'Ei tiedostoja';
 
   @override
+  String get noFilesBody => 'Aloita lataamalla tiedosto tai luomalla kansio.';
+
+  @override
   String get createFolder => 'Luo kansio';
 
   @override

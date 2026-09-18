@@ -160,6 +160,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get noFiles => 'Aucun fichier';
 
   @override
+  String get noFilesBody =>
+      'Importez un fichier ou créez un dossier pour commencer.';
+
+  @override
   String get createFolder => 'Créer un dossier';
 
   @override

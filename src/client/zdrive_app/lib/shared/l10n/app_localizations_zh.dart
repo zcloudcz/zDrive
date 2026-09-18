@@ -157,6 +157,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get noFiles => '没有文件';
 
   @override
+  String get noFilesBody => '上传文件或新建文件夹即可开始。';
+
+  @override
   String get createFolder => '创建文件夹';
 
   @override

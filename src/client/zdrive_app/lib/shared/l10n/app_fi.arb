@@ -43,6 +43,7 @@
   "clearSearch": "Tyhjennä haku",
   "refresh": "Päivitä",
   "noFiles": "Ei tiedostoja",
+  "noFilesBody": "Aloita lataamalla tiedosto tai luomalla kansio.",
   "createFolder": "Luo kansio",
   "folderName": "Kansion nimi",
   "enterFolderName": "Anna kansion nimi",

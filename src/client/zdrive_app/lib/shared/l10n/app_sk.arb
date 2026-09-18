@@ -43,6 +43,7 @@
   "clearSearch": "Vymazať vyhľadávanie",
   "refresh": "Obnoviť",
   "noFiles": "Žiadne súbory",
+  "noFilesBody": "Nahrajte súbor alebo vytvorte priečinok a začnite.",
   "createFolder": "Vytvoriť priečinok",
   "folderName": "Názov priečinka",
   "enterFolderName": "Zadajte názov priečinka",

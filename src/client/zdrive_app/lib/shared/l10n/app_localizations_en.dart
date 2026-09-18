@@ -157,6 +157,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noFiles => 'No files';
 
   @override
+  String get noFilesBody => 'Upload a file or create a folder to get started.';
+
+  @override
   String get createFolder => 'Create folder';
 
   @override

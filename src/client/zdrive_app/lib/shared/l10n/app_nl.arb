@@ -43,6 +43,7 @@
   "clearSearch": "Zoekopdracht wissen",
   "refresh": "Vernieuwen",
   "noFiles": "Geen bestanden",
+  "noFilesBody": "Upload een bestand of maak een map aan om te beginnen.",
   "createFolder": "Map maken",
   "folderName": "Mapnaam",
   "enterFolderName": "Voer een mapnaam in",

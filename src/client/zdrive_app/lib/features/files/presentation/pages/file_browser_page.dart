@@ -50,8 +50,20 @@ class FileBrowserPage extends StatelessWidget {
 /// Public only so a widget test can pump the real view under a MockBloc,
 /// without the page's get_it wiring.
 @visibleForTesting
-class FileBrowserView extends StatelessWidget {
+class FileBrowserView extends StatefulWidget {
   const FileBrowserView({super.key});
+
+  @override
+  State<FileBrowserView> createState() => _FileBrowserViewState();
+}
+
+class _FileBrowserViewState extends State<FileBrowserView> {
+  // FileBrowserLoading/Initial carry no view mode of their own, so the
+  // loading skeleton would otherwise always fall back to the list shape even
+  // when the user was last looking at the grid — remember the last loaded
+  // mode instead (spec 4.5: "list- or grid-shaped according to the last
+  // known view mode if available else list").
+  FileViewMode _lastViewMode = FileViewMode.list;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +75,9 @@ class FileBrowserView extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(state.message)),
           );
+        }
+        if (state is FileBrowserLoaded) {
+          _lastViewMode = state.viewMode;
         }
       },
       builder: (context, state) {
@@ -105,12 +120,18 @@ class FileBrowserView extends StatelessWidget {
                       },
                       child: Text(
                         breadcrumbs[i].name,
+                        // Current segment stands out at full onSurface weight;
+                        // parents are subdued onSurfaceVariant (spec 4.5).
                         style: i == breadcrumbs.length - 1
                             ? Theme.of(context)
                                 .textTheme
                                 .titleMedium
-                                ?.copyWith(fontWeight: FontWeight.bold)
-                            : Theme.of(context).textTheme.titleMedium,
+                                ?.copyWith(fontWeight: FontWeight.w600)
+                            : Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
                       ),
                     ),
                   ],
@@ -156,21 +177,21 @@ class FileBrowserView extends StatelessWidget {
     AppLocalizations l10n,
   ) {
     if (state is FileBrowserLoading || state is FileBrowserInitial) {
-      return const Center(child: CircularProgressIndicator());
+      return _buildLoadingSkeleton(context, _lastViewMode);
     }
 
     if (state is FileBrowserLoaded) {
-      if (state.files.isEmpty) {
-        return _buildEmptyState(context, l10n);
-      }
-
+      // RefreshIndicator wraps both branches, not just the non-empty one, so
+      // pull-to-refresh still works on an empty folder (spec 4.5/PR5).
       return RefreshIndicator(
         onRefresh: () async {
           context.read<FileBrowserBloc>().add(const RefreshFiles());
         },
-        child: state.viewMode == FileViewMode.list
-            ? _buildListView(context, state)
-            : _buildGridView(context, state),
+        child: state.files.isEmpty
+            ? _buildEmptyState(context, l10n)
+            : state.viewMode == FileViewMode.list
+                ? _buildListView(context, state)
+                : _buildGridView(context, state),
       );
     }
 
@@ -196,25 +217,164 @@ class FileBrowserView extends StatelessWidget {
   }
 
   Widget _buildEmptyState(BuildContext context, AppLocalizations l10n) {
-    return Center(
+    final colorScheme = Theme.of(context).colorScheme;
+    // A plain Center would give RefreshIndicator nothing scrollable to pull
+    // against, so pull-to-refresh works on an empty folder too — a
+    // ListView with AlwaysScrollableScrollPhysics, sized to fill the
+    // viewport, gives it that without changing how it looks.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(
+                      radius: 48,
+                      backgroundColor: colorScheme.primaryContainer,
+                      child: Icon(
+                        Icons.folder_open,
+                        size: 44,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      l10n.noFiles,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.noFilesBody,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    // Same "+ New" menu as the toolbar — the empty state
+                    // repeats the primary action, it doesn't invent a new one.
+                    NewItemMenuButton(
+                      onUploadFile: () => _pickAndUploadFile(context),
+                      onCreateFolder: () => _showCreateFolderDialog(context),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Shared by the real grid and its loading skeleton so the two can never
+  // drift into different tile layouts (review round 2, finding 4).
+  static const _gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+    maxCrossAxisExtent: 180,
+    mainAxisSpacing: 8,
+    crossAxisSpacing: 8,
+    childAspectRatio: 0.85,
+  );
+
+  /// Skeleton rows/tiles shown instead of a spinner while the folder loads
+  /// (spec 4.5). Plain themed containers, no shimmer package; nothing here
+  /// animates, so there is nothing to guard behind
+  /// `MediaQuery.disableAnimations`.
+  Widget _buildLoadingSkeleton(BuildContext context, FileViewMode viewMode) {
+    return ExcludeSemantics(
+      child: viewMode == FileViewMode.list
+          ? ListView.separated(
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: 6,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, _) => _skeletonRow(context),
+            )
+          : GridView.builder(
+              padding: const EdgeInsets.all(8),
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: _gridDelegate,
+              itemCount: 6,
+              itemBuilder: (context, _) => _skeletonTile(context),
+            ),
+    );
+  }
+
+  Widget _skeletonRow(BuildContext context) {
+    final color = Theme.of(context).colorScheme.surfaceContainerHigh;
+    return SizedBox(
+      height: 56,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FractionallySizedBox(
+                    widthFactor: 0.6,
+                    child: Container(height: 16, color: color),
+                  ),
+                  const SizedBox(height: 8),
+                  FractionallySizedBox(
+                    widthFactor: 0.4,
+                    child: Container(height: 12, color: color),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _skeletonTile(BuildContext context) {
+    final color = Theme.of(context).colorScheme.surfaceContainerHigh;
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.folder_open,
-            size: 64,
-            color: Theme.of(context).colorScheme.outline,
+          Expanded(child: Container(color: color)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: 0.6,
+                child: Container(height: 12, color: color),
+              ),
+            ),
           ),
-          const SizedBox(height: 16),
-          Text(l10n.noFiles, style: Theme.of(context).textTheme.titleMedium),
         ],
       ),
     );
   }
 
   Widget _buildListView(BuildContext context, FileBrowserLoaded state) {
-    return ListView.builder(
+    return ListView.separated(
+      // A short listing (fewer rows than the viewport) is otherwise
+      // non-scrollable, and RefreshIndicator needs an overscroll gesture to
+      // fire — without this, pull-to-refresh silently does nothing on a
+      // folder with only a couple of files (review round 2, finding 1).
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: state.files.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final file = state.files[index];
         return FileListItem(
@@ -232,12 +392,10 @@ class FileBrowserView extends StatelessWidget {
   Widget _buildGridView(BuildContext context, FileBrowserLoaded state) {
     return GridView.builder(
       padding: const EdgeInsets.all(8),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 180,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        childAspectRatio: 0.85,
-      ),
+      // Same reasoning as _buildListView above — a short grid must still be
+      // pull-to-refreshable.
+      physics: const AlwaysScrollableScrollPhysics(),
+      gridDelegate: _gridDelegate,
       itemCount: state.files.length,
       itemBuilder: (context, index) {
         final file = state.files[index];
