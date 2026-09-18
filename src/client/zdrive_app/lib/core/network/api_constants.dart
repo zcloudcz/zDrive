@@ -31,5 +31,15 @@ class ApiConstants {
   // 2026-09-18. Only the FIRST StorageService call of an upload/download
   // flow needs this longer budget: it wakes the service, so every call after
   // it hits a warm instance and can keep the normal 15s receiveTimeout.
+  //
+  // Known cost: a sync run holds the SyncCoordinator mutex for its whole
+  // duration, and logout (endSession) waits on that same mutex before it
+  // completes. So if a user taps logout while the app is stuck in exactly
+  // this cold-start hang — the first storage call of the first transfer
+  // after an idle period — logout can now take up to 90s to respond instead
+  // of 15s. Accepted: it needs that specific timing to happen at all.
+  // ponytail: proper fix is a session-level CancelToken that endSession
+  // cancels, so logout interrupts an in-flight cold-start wait instead of
+  // waiting it out. Not built — add if this wait is ever reported as real.
   static const Duration storageColdStartTimeout = Duration(seconds: 90);
 }

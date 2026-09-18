@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/core/network/api_constants.dart';
 import 'package:zdrive_app/features/files/data/file_remote_data_source.dart';
 
 class MockDio extends Mock implements Dio {}
@@ -285,6 +286,21 @@ void main() {
         .captured
         .single as Options;
     expect(captured.headers, {'X-Device-Id': 'dev-1'});
+  });
+
+  test('restoreStorageManifest gives the first StorageService call of the '
+      'restore flow a cold-start receiveTimeout', () async {
+    when(() => dio.post('/storage/files/f1/manifests/hash-1/restore',
+            options: any(named: 'options')))
+        .thenAnswer((_) async => ok(true, '/storage/files/f1/manifests/hash-1/restore'));
+
+    await ds.restoreStorageManifest('f1', 'hash-1');
+
+    final captured = verify(() => dio.post('/storage/files/f1/manifests/hash-1/restore',
+            options: captureAny(named: 'options')))
+        .captured
+        .single as Options;
+    expect(captured.receiveTimeout, ApiConstants.storageColdStartTimeout);
   });
 
   test('getFileVersions unwraps the data list', () async {

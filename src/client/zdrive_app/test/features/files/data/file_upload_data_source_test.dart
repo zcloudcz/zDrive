@@ -313,7 +313,8 @@ void main() {
 
       final chunkOpts = verify(() => dio.get<List<int>>('/storage/download/f1/chunk/$hash0/bytes',
           options: captureAny(named: 'options'))).captured.single as Options;
-      expect(chunkOpts.receiveTimeout, isNot(ApiConstants.storageColdStartTimeout));
+      // null means "fall back to the client's default 15s", not "any other value".
+      expect(chunkOpts.receiveTimeout, isNull);
     });
 
     test('reassembles chunks in manifest index order, not array order', () async {
