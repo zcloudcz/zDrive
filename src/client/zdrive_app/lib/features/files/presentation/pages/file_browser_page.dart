@@ -275,6 +275,15 @@ class _FileBrowserViewState extends State<FileBrowserView> {
     );
   }
 
+  // Shared by the real grid and its loading skeleton so the two can never
+  // drift into different tile layouts (review round 2, finding 4).
+  static const _gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+    maxCrossAxisExtent: 180,
+    mainAxisSpacing: 8,
+    crossAxisSpacing: 8,
+    childAspectRatio: 0.85,
+  );
+
   /// Skeleton rows/tiles shown instead of a spinner while the folder loads
   /// (spec 4.5). Plain themed containers, no shimmer package; nothing here
   /// animates, so there is nothing to guard behind
@@ -291,12 +300,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
           : GridView.builder(
               padding: const EdgeInsets.all(8),
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 180,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: 0.85,
-              ),
+              gridDelegate: _gridDelegate,
               itemCount: 6,
               itemBuilder: (context, _) => _skeletonTile(context),
             ),
@@ -364,6 +368,11 @@ class _FileBrowserViewState extends State<FileBrowserView> {
 
   Widget _buildListView(BuildContext context, FileBrowserLoaded state) {
     return ListView.separated(
+      // A short listing (fewer rows than the viewport) is otherwise
+      // non-scrollable, and RefreshIndicator needs an overscroll gesture to
+      // fire — without this, pull-to-refresh silently does nothing on a
+      // folder with only a couple of files (review round 2, finding 1).
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: state.files.length,
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
@@ -383,12 +392,10 @@ class _FileBrowserViewState extends State<FileBrowserView> {
   Widget _buildGridView(BuildContext context, FileBrowserLoaded state) {
     return GridView.builder(
       padding: const EdgeInsets.all(8),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 180,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        childAspectRatio: 0.85,
-      ),
+      // Same reasoning as _buildListView above — a short grid must still be
+      // pull-to-refreshable.
+      physics: const AlwaysScrollableScrollPhysics(),
+      gridDelegate: _gridDelegate,
       itemCount: state.files.length,
       itemBuilder: (context, index) {
         final file = state.files[index];

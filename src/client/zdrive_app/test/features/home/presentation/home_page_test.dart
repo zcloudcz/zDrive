@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zdrive_app/features/home/presentation/home_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
+import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
+import 'package:zdrive_app/shared/router/app_router.dart';
 import 'package:zdrive_app/shared/widgets/brand_lockup.dart';
 
 void main() {
@@ -51,6 +53,27 @@ void main() {
     expect(destinations.map((d) => d.label), contains(l10n.photos));
   });
 
+  // StatefulNavigationShell matches branches to destinations POSITIONALLY
+  // (goBranch(index)), so home_page.dart's destination list and
+  // app_router.dart's branch list must always be the same length under both
+  // flag values, or tapping a tab throws a RangeError. buildHomeDestinations
+  // and buildHomeBranches are each gated by the same kPhotosEnabled
+  // independently, so this compares them directly rather than
+  // re-implementing the gate here.
+  test(
+      'destination count matches the real router\'s branch count, '
+      'for both values of the Photos flag', () {
+    final l10n = AppLocalizationsEn();
+
+    for (final photosEnabled in [false, true]) {
+      expect(
+        buildHomeDestinations(l10n, photosEnabled: photosEnabled).length,
+        buildHomeBranches(photosEnabled: photosEnabled).length,
+        reason: 'photosEnabled: $photosEnabled',
+      );
+    }
+  });
+
   // --- Adaptive shell: NavigationBar (<840px) vs NavigationRail (>=840px) ---
   //
   // A real StatefulNavigationShell needs a real GoRouter, so this builds a
@@ -60,37 +83,30 @@ void main() {
   // through a real router).
   //
   // HomePage itself calls buildHomeDestinations(l10n) with the compile-time
-  // kPhotosEnabled default (false unless run with
-  // --dart-define=PHOTOS_ENABLED=true) — it has no per-instance override, so
-  // these branches are fixed at two (files, settings) to match what the
-  // widget actually renders. The Photos-gate assertion from PR5's acceptance
-  // criteria ("destination count still matches buildHomeDestinations(...) in
-  // both") is exactly the two tests above, which already drive both flag
-  // values directly.
+  // kPhotosEnabled default, so the branch count here is derived from that
+  // same call rather than hardcoded — hardcoding it silently drifted from
+  // the real destination count under --dart-define=PHOTOS_ENABLED=true,
+  // where HomePage renders 3 destinations over what used to be 2 branches
+  // and goBranch(2) threw a RangeError (review round 2, finding 2).
   Widget buildHomeApp() {
+    final branchCount =
+        buildHomeDestinations(AppLocalizationsEn()).length;
     final router = GoRouter(
-      initialLocation: '/home/a',
+      initialLocation: '/home/0',
       routes: [
         StatefulShellRoute.indexedStack(
           builder: (context, state, shell) =>
               HomePage(navigationShell: shell),
           branches: [
-            StatefulShellBranch(
-              routes: [
-                GoRoute(
-                  path: '/home/a',
-                  builder: (_, _) => const _BranchScreen('a'),
-                ),
-              ],
-            ),
-            StatefulShellBranch(
-              routes: [
-                GoRoute(
-                  path: '/home/c',
-                  builder: (_, _) => const _BranchScreen('c'),
-                ),
-              ],
-            ),
+            for (var i = 0; i < branchCount; i++)
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: '/home/$i',
+                    builder: (_, _) => _BranchScreen('$i'),
+                  ),
+                ],
+              ),
           ],
         ),
       ],
@@ -163,18 +179,21 @@ void main() {
   testWidgets('tapping a rail destination navigates like the bar does',
       (tester) async {
     setTestSize(tester, const Size(1200, 900));
+    // Settings is always the last destination/branch (buildHomeDestinations
+    // puts Photos, when present, between Files and Settings).
+    final lastIndex = buildHomeDestinations(AppLocalizationsEn()).length - 1;
 
     await tester.pumpWidget(buildHomeApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('branch-a'), findsOneWidget);
-    expect(find.text('branch-c'), findsNothing);
+    expect(find.text('branch-0'), findsOneWidget);
+    expect(find.text('branch-$lastIndex'), findsNothing);
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
 
-    expect(find.text('branch-c'), findsOneWidget);
-    expect(find.text('branch-a'), findsNothing);
+    expect(find.text('branch-$lastIndex'), findsOneWidget);
+    expect(find.text('branch-0'), findsNothing);
   });
 }
 

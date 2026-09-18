@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:zdrive_app/features/files/domain/file_item.dart';
 import 'package:zdrive_app/features/files/presentation/file_browser_bloc.dart';
 import 'package:zdrive_app/features/files/presentation/pages/file_browser_page.dart';
 import 'package:zdrive_app/features/files/presentation/widgets/file_actions_toolbar.dart';
@@ -86,6 +88,51 @@ void main() {
     // The dialog reads a name from a text field before it dispatches, so
     // just confirm the flow reached the dialog it shares with the toolbar.
     expect(find.text('Create folder'), findsOneWidget);
+  });
+
+  // A folder with just a couple of files is shorter than the viewport, so
+  // there is nothing to overscroll unless the listing opts into
+  // AlwaysScrollableScrollPhysics — without it, pull-to-refresh silently did
+  // nothing on any folder short enough not to need scrolling (review round
+  // 2, finding 1). Two files each in list and grid mode.
+  final now = DateTime(2026, 1, 1);
+  final twoFiles = [
+    FileItem(id: '1', name: 'a.txt', isFolder: false, createdAt: now, updatedAt: now),
+    FileItem(id: '2', name: 'b.txt', isFolder: false, createdAt: now, updatedAt: now),
+  ];
+
+  testWidgets('pull-to-refresh works on a short list (fewer rows than the viewport)',
+      (tester) async {
+    whenListen(
+      bloc,
+      const Stream<FileBrowserState>.empty(),
+      initialState: FileBrowserLoaded(files: twoFiles, breadcrumbs: const []),
+    );
+
+    await tester.pumpWidget(build());
+    await tester.fling(find.byType(ListView), const Offset(0, 300), 1000);
+    await tester.pumpAndSettle();
+
+    verify(() => bloc.add(const RefreshFiles())).called(1);
+  });
+
+  testWidgets('pull-to-refresh works on a short grid (fewer tiles than the viewport)',
+      (tester) async {
+    whenListen(
+      bloc,
+      const Stream<FileBrowserState>.empty(),
+      initialState: FileBrowserLoaded(
+        files: twoFiles,
+        breadcrumbs: const [],
+        viewMode: FileViewMode.grid,
+      ),
+    );
+
+    await tester.pumpWidget(build());
+    await tester.fling(find.byType(GridView), const Offset(0, 300), 1000);
+    await tester.pumpAndSettle();
+
+    verify(() => bloc.add(const RefreshFiles())).called(1);
   });
 
   testWidgets('loading shows skeletons, no CircularProgressIndicator',
