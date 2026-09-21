@@ -217,6 +217,13 @@
   "tagline": "Your files, everywhere.",
   "authBenefitSync": "Sync across every device",
   "authBenefitShare": "Share files and folders securely",
-  "authBenefitSecure": "Encrypted storage, always"
-
+  "authBenefitSecure": "Encrypted storage, always",
+  "offlineCloudOnly": "Cloud only",
+  "offlineDownloading": "Downloading",
+  "offlineAvailable": "Available on this device",
+  "offlineAlwaysKeep": "Always kept on this device",
+  "keepOnDevice": "Always keep on this device",
+  "freeUpSpace": "Free up space",
+  "freeUpSkippedUnsynced": "{count} kept on this device: unsynced changes",
+  "@freeUpSkippedUnsynced": { "placeholders": { "count": { "type": "int" } } }
 }

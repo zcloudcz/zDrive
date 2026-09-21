@@ -311,6 +311,37 @@ class SyncCoordinator {
       await _preferences.setSyncFolderPath(newPath);
     });
   }
+
+  /// "Always keep on this device": pins [serverId] and downloads what is not
+  /// on disk yet. Under [_withLock] like [syncOnce], so a scan never sees the
+  /// half-written state (see [freeUpSpace] for the mirror of this). A stale
+  /// [syncFolderPath] (folder switched, session ended) is a no-op, as in
+  /// [_syncOnce].
+  Future<void> keepOnDevice(
+    String serverId,
+    String syncFolderPath, {
+    SyncProgressTracker? progress,
+  }) {
+    return _withLock(() async {
+      if (_sessionEnded || _preferences.syncFolderPath != syncFolderPath) return;
+      await _mirror.pin(serverId);
+      await _pull.hydrate(serverId, syncFolderPath, progress: progress);
+    });
+  }
+
+  /// "Free up space": unpins [serverId] and removes the local copies that are
+  /// safe to remove (see [PullSyncService.freeUp]). Under [_withLock] so the
+  /// scanner cannot run between the file delete and the mirror update and read
+  /// the missing file as a local delete.
+  Future<FreeUpResult> freeUpSpace(String serverId, String syncFolderPath) {
+    return _withLock(() async {
+      if (_sessionEnded || _preferences.syncFolderPath != syncFolderPath) {
+        return FreeUpResult();
+      }
+      await _mirror.unpin(serverId);
+      return _pull.freeUp(serverId, syncFolderPath);
+    });
+  }
 }
 
 /// How many events [SyncCoordinator.syncOnce] applied from the server, and

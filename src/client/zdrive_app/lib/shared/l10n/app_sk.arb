@@ -141,5 +141,12 @@
   "tagline": "Vaše súbory, kdekoľvek.",
   "authBenefitSync": "Synchronizácia naprieč všetkými zariadeniami",
   "authBenefitShare": "Bezpečné zdieľanie súborov a priečinkov",
-  "authBenefitSecure": "Vždy šifrované úložisko"
+  "authBenefitSecure": "Vždy šifrované úložisko",
+  "offlineCloudOnly": "Iba v cloude",
+  "offlineDownloading": "Sťahuje sa",
+  "offlineAvailable": "Dostupné v tomto zariadení",
+  "offlineAlwaysKeep": "Vždy uchovávané v tomto zariadení",
+  "keepOnDevice": "Vždy uchovávať v tomto zariadení",
+  "freeUpSpace": "Uvoľniť miesto",
+  "freeUpSkippedUnsynced": "{count} ponechaných v tomto zariadení: nesynchronizované zmeny"
 }

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:zdrive_app/shared/l10n/relative_time.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
+import '../../../sync/domain/sync_mirror_entry.dart';
 import '../../domain/file_item.dart';
 import 'file_icon.dart';
 import 'file_size_format.dart';
+import 'offline_status_icon.dart';
 
 class FileListItem extends StatelessWidget {
   final FileItem file;
@@ -14,6 +16,12 @@ class FileListItem extends StatelessWidget {
   final VoidCallback onShare;
   final VoidCallback onVersions;
 
+  /// Desktop selective-sync extras. Null on platforms without the sync engine
+  /// (web, mobile): then no marker and no menu entries are shown.
+  final OfflineStatus? offlineStatus;
+  final VoidCallback? onKeepOnDevice;
+  final VoidCallback? onFreeUp;
+
   const FileListItem({
     super.key,
     required this.file,
@@ -22,6 +30,9 @@ class FileListItem extends StatelessWidget {
     required this.onDelete,
     required this.onShare,
     required this.onVersions,
+    this.offlineStatus,
+    this.onKeepOnDevice,
+    this.onFreeUp,
   });
 
   @override
@@ -39,26 +50,40 @@ class FileListItem extends StatelessWidget {
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
       ),
-      trailing: PopupMenuButton<String>(
-        onSelected: (value) {
-          switch (value) {
-            case 'rename':
-              onRename();
-            case 'delete':
-              onDelete();
-            case 'share':
-              onShare();
-            case 'versions':
-              onVersions();
-          }
-        },
-        itemBuilder: (_) => [
-          PopupMenuItem(value: 'rename', child: Text(l10n.rename)),
-          PopupMenuItem(value: 'share', child: Text(l10n.share)),
-          // Folders have no content, so no version history.
-          if (!file.isFolder)
-            PopupMenuItem(value: 'versions', child: Text(l10n.versionHistory)),
-          PopupMenuItem(value: 'delete', child: Text(l10n.delete)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (offlineStatus != null) OfflineStatusIcon(status: offlineStatus!),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'rename':
+                  onRename();
+                case 'delete':
+                  onDelete();
+                case 'share':
+                  onShare();
+                case 'versions':
+                  onVersions();
+                case 'keep':
+                  onKeepOnDevice?.call();
+                case 'freeUp':
+                  onFreeUp?.call();
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'rename', child: Text(l10n.rename)),
+              PopupMenuItem(value: 'share', child: Text(l10n.share)),
+              // Folders have no content, so no version history.
+              if (!file.isFolder)
+                PopupMenuItem(value: 'versions', child: Text(l10n.versionHistory)),
+              if (onKeepOnDevice != null && offlineStatus?.canKeep == true)
+                PopupMenuItem(value: 'keep', child: Text(l10n.keepOnDevice)),
+              if (onFreeUp != null && offlineStatus?.canFreeUp == true)
+                PopupMenuItem(value: 'freeUp', child: Text(l10n.freeUpSpace)),
+              PopupMenuItem(value: 'delete', child: Text(l10n.delete)),
+            ],
+          ),
         ],
       ),
       onTap: onTap,

@@ -471,4 +471,27 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get authBenefitSecure => 'Alltid krypterad lagring';
+
+  @override
+  String get offlineCloudOnly => 'Endast i molnet';
+
+  @override
+  String get offlineDownloading => 'Laddar ned';
+
+  @override
+  String get offlineAvailable => 'Tillgänglig på den här enheten';
+
+  @override
+  String get offlineAlwaysKeep => 'Behålls alltid på den här enheten';
+
+  @override
+  String get keepOnDevice => 'Behåll alltid på den här enheten';
+
+  @override
+  String get freeUpSpace => 'Frigör utrymme';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count behölls på den här enheten: osynkade ändringar';
+  }
 }

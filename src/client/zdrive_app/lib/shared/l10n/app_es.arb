@@ -141,5 +141,12 @@
   "tagline": "Tus archivos, en todas partes.",
   "authBenefitSync": "Sincronización en todos los dispositivos",
   "authBenefitShare": "Comparte archivos y carpetas de forma segura",
-  "authBenefitSecure": "Almacenamiento siempre cifrado"
+  "authBenefitSecure": "Almacenamiento siempre cifrado",
+  "offlineCloudOnly": "Solo en la nube",
+  "offlineDownloading": "Descargando",
+  "offlineAvailable": "Disponible en este dispositivo",
+  "offlineAlwaysKeep": "Siempre conservado en este dispositivo",
+  "keepOnDevice": "Conservar siempre en este dispositivo",
+  "freeUpSpace": "Liberar espacio",
+  "freeUpSkippedUnsynced": "{count} conservados en este dispositivo: cambios sin sincronizar"
 }

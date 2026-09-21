@@ -9,7 +9,11 @@ import '../../../../core/di/injection.dart';
 import '../../../../core/diagnostics/diagnostics.dart';
 import '../../../../core/events/remote_file_change_notifier.dart';
 import '../../../../core/network/error_message.dart';
+import '../../../sync/domain/sync_mirror_repository.dart';
+import '../../../sync/presentation/offline_status_cubit.dart';
+import '../../../sync/presentation/sync_bloc.dart';
 import '../../data/file_saver.dart';
+import '../../../sync/domain/sync_mirror_entry.dart';
 import '../../domain/file_item.dart';
 import '../../domain/file_repository.dart';
 import '../../domain/use_cases/create_folder_use_case.dart';
@@ -42,8 +46,27 @@ class FileBrowserPage extends StatelessWidget {
         fileRepository: getIt<FileRepository>(),
         remoteChangeNotifier: getIt<RemoteFileChangeNotifier>(),
       )..add(LoadFolder(folderId: folderId)),
-      child: const FileBrowserView(),
+      // The per-item "on this device" state exists only where the desktop sync
+      // engine does — the app shell provides a SyncBloc only there (see
+      // buildSyncShellProvider); elsewhere the view finds no cubit and shows
+      // none.
+      child: _maybeRead<SyncBloc>(context) != null
+          ? BlocProvider(
+              create: (_) => OfflineStatusCubit(getIt<SyncMirrorRepository>()),
+              child: const FileBrowserView(),
+            )
+          : const FileBrowserView(),
     );
+  }
+}
+
+/// The desktop-only providers may be absent (web, mobile, most widget tests);
+/// same ProviderNotFoundException pattern as sync_page.dart.
+T? _maybeRead<T extends Object>(BuildContext context) {
+  try {
+    return context.read<T>();
+  } on ProviderNotFoundException {
+    return null;
   }
 }
 
@@ -68,8 +91,11 @@ class _FileBrowserViewState extends State<FileBrowserView> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final offline = _maybeRead<OfflineStatusCubit>(context);
+    // Subscribes this view to status changes; _offlineArgs then just reads.
+    if (offline != null) context.watch<OfflineStatusCubit>();
 
-    return BlocConsumer<FileBrowserBloc, FileBrowserState>(
+    final browser = BlocConsumer<FileBrowserBloc, FileBrowserState>(
       listener: (context, state) {
         if (state is FileBrowserError) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -78,6 +104,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
         }
         if (state is FileBrowserLoaded) {
           _lastViewMode = state.viewMode;
+          offline?.load(state.files, parentId: state.currentFolderId);
         }
       },
       builder: (context, state) {
@@ -86,6 +113,45 @@ class _FileBrowserViewState extends State<FileBrowserView> {
           body: _buildBody(context, state, l10n),
         );
       },
+    );
+    final syncBloc = _maybeRead<SyncBloc>(context);
+    if (offline == null || syncBloc == null) return browser;
+
+    // A keep/free-up action finished: re-read the markers, and tell the user
+    // about files free-up had to leave alone.
+    return BlocListener<SyncBloc, SyncState>(
+      listenWhen: (previous, current) =>
+          previous is SyncLoaded &&
+          current is SyncLoaded &&
+          previous.offlineRevision != current.offlineRevision,
+      listener: (context, state) {
+        offline.refresh();
+        final skipped = state is SyncLoaded ? state.freeUpSkipped : 0;
+        if (skipped > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.freeUpSkippedUnsynced(skipped))),
+          );
+        }
+      },
+      child: browser,
+    );
+  }
+
+  /// Marker and menu actions for [file]; all null unless both the desktop
+  /// sync bloc and the status cubit are provided (web/mobile: nothing shown).
+  ({OfflineStatus? status, VoidCallback? keep, VoidCallback? freeUp}) _offlineArgs(
+    BuildContext context,
+    FileItem file,
+  ) {
+    final offline = _maybeRead<OfflineStatusCubit>(context);
+    final syncBloc = _maybeRead<SyncBloc>(context);
+    if (offline == null || syncBloc == null) return (status: null, keep: null, freeUp: null);
+    return (
+      // A row the cubit has not answered for yet (first frame of a listing)
+      // shows no marker instead of a wrong "cloud only".
+      status: offline.state[file.id],
+      keep: () => syncBloc.add(KeepOnDeviceRequested(file.id)),
+      freeUp: () => syncBloc.add(FreeUpSpaceRequested(file.id)),
     );
   }
 
@@ -377,8 +443,12 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final file = state.files[index];
+        final offline = _offlineArgs(context, file);
         return FileListItem(
           file: file,
+          offlineStatus: offline.status,
+          onKeepOnDevice: offline.keep,
+          onFreeUp: offline.freeUp,
           onTap: () => _onFileTap(context, file),
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),
@@ -399,8 +469,12 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       itemCount: state.files.length,
       itemBuilder: (context, index) {
         final file = state.files[index];
+        final offline = _offlineArgs(context, file);
         return FileGridItem(
           file: file,
+          offlineStatus: offline.status,
+          onKeepOnDevice: offline.keep,
+          onFreeUp: offline.freeUp,
           onTap: () => _onFileTap(context, file),
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),

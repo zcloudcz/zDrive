@@ -192,6 +192,22 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     await executor.delete(_pinsTable, where: 'serverId = ?', whereArgs: [serverId]);
   }
 
+  // Runs before _deleteRow (which drops the pin). The successor is found by
+  // local path, the only identity a recreated item keeps.
+  Future<void> _transferPin(DatabaseExecutor executor, String serverId, List<String> beingDeleted) async {
+    final pinned = await executor.query(_pinsTable, where: 'serverId = ?', whereArgs: [serverId]);
+    if (pinned.isEmpty) return;
+    final old = await executor.query(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+    if (old.isEmpty) return;
+    final key = syncPathKey(old.single['localPath'] as String);
+    final rows = await executor.query(_filesTable);
+    for (final row in rows) {
+      final id = row['serverId'] as String;
+      if (beingDeleted.contains(id) || syncPathKey(row['localPath'] as String) != key) continue;
+      await executor.insert(_pinsTable, {'serverId': id}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+
   @override
   Future<int> getCursor(String deviceId) async {
     final db = await _database;
@@ -296,6 +312,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
         await txn.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
       }
       for (final serverId in deleteServerIds) {
+        await _transferPin(txn, serverId, deleteServerIds);
         await _deleteRow(txn, serverId);
       }
       if (deleteUnderPath != null) {
@@ -326,16 +343,71 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   @override
   Future<bool> isEffectivelyPinned(String serverId, String localPath) async {
     if (await isPinned(serverId)) return true;
-    final db = await _database;
-    // Pins are few (user-chosen), so scan-and-filter over the pinned rows
-    // only — same trade-off as _rowsUnder.
-    final pinned = await db.rawQuery(
+    final prefixes = await _pinnedFolderPrefixes(await _database);
+    return _underAny(localPath, prefixes);
+  }
+
+  // Pins are few (user-chosen), so scan-and-filter over the pinned rows
+  // only — same trade-off as _rowsUnder.
+  Future<List<String>> _pinnedFolderPrefixes(DatabaseExecutor executor) async {
+    final pinned = await executor.rawQuery(
       'SELECT f.localPath FROM $_pinsTable p JOIN $_filesTable f ON f.serverId = p.serverId '
       'WHERE f.isFolder = 1',
     );
     // Case-insensitive like every other path comparison in sync.
+    return [for (final row in pinned) _childPrefix(syncPathKey(row['localPath'] as String))];
+  }
+
+  bool _underAny(String localPath, List<String> prefixes) {
     final key = syncPathKey(localPath);
-    return pinned.any((row) => key.startsWith(_childPrefix(syncPathKey(row['localPath'] as String))));
+    return prefixes.any(key.startsWith);
+  }
+
+  @override
+  Future<Map<String, OfflineStatus>> getOfflineStatuses(
+    List<String> serverIds, {
+    String? parentId,
+  }) async {
+    if (serverIds.isEmpty) return {};
+    final db = await _database;
+    final entries = <String, SyncMirrorEntry>{};
+    final directPins = <String>{};
+    // SQLite caps bound variables (999 on older builds); a listing page is far
+    // smaller, but chunk anyway so a big folder can never hit the cap.
+    for (var i = 0; i < serverIds.length; i += 500) {
+      final chunk = serverIds.sublist(i, i + 500 > serverIds.length ? serverIds.length : i + 500);
+      final marks = List.filled(chunk.length, '?').join(',');
+      for (final row in await db.query(_filesTable, where: 'serverId IN ($marks)', whereArgs: chunk)) {
+        entries[row['serverId'] as String] = _fromRow(row);
+      }
+      for (final row in await db.query(_pinsTable, where: 'serverId IN ($marks)', whereArgs: chunk)) {
+        directPins.add(row['serverId'] as String);
+      }
+    }
+    final prefixes = await _pinnedFolderPrefixes(db);
+    var parentPinned = false;
+    if (parentId != null) {
+      final parent = await getByServerId(parentId);
+      parentPinned = await isPinned(parentId) || (parent != null && _underAny(parent.localPath, prefixes));
+    }
+
+    return {
+      for (final id in serverIds)
+        id: _status(
+          entries[id],
+          direct: directPins.contains(id),
+          viaFolder: parentPinned || (entries[id] != null && _underAny(entries[id]!.localPath, prefixes)),
+        ),
+    };
+  }
+
+  OfflineStatus _status(SyncMirrorEntry? entry, {required bool direct, required bool viaFolder}) {
+    final downloaded = entry?.downloaded ?? false;
+    if (direct || viaFolder) {
+      if (!downloaded) return OfflineStatus.downloading;
+      return direct ? OfflineStatus.alwaysKeep : OfflineStatus.alwaysKeepViaFolder;
+    }
+    return downloaded ? OfflineStatus.available : OfflineStatus.cloudOnly;
   }
 
   @override

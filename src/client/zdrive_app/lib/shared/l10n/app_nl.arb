@@ -141,5 +141,12 @@
   "tagline": "Je bestanden, overal.",
   "authBenefitSync": "Synchronisatie op alle apparaten",
   "authBenefitShare": "Bestanden en mappen veilig delen",
-  "authBenefitSecure": "Altijd versleutelde opslag"
+  "authBenefitSecure": "Altijd versleutelde opslag",
+  "offlineCloudOnly": "Alleen in de cloud",
+  "offlineDownloading": "Downloaden",
+  "offlineAvailable": "Beschikbaar op dit apparaat",
+  "offlineAlwaysKeep": "Altijd op dit apparaat bewaard",
+  "keepOnDevice": "Altijd op dit apparaat bewaren",
+  "freeUpSpace": "Ruimte vrijmaken",
+  "freeUpSkippedUnsynced": "{count} bewaard op dit apparaat: niet-gesynchroniseerde wijzigingen"
 }

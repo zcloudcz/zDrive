@@ -196,6 +196,12 @@
   "tagline": "Vaše soubory, kdekoli.",
   "authBenefitSync": "Synchronizace napříč všemi zařízeními",
   "authBenefitShare": "Bezpečné sdílení souborů a složek",
-  "authBenefitSecure": "Vždy šifrované úložiště"
-
+  "authBenefitSecure": "Vždy šifrované úložiště",
+  "offlineCloudOnly": "Pouze v cloudu",
+  "offlineDownloading": "Stahuje se",
+  "offlineAvailable": "Dostupné v tomto zařízení",
+  "offlineAlwaysKeep": "Vždy uchováváno v tomto zařízení",
+  "keepOnDevice": "Vždy uchovávat v tomto zařízení",
+  "freeUpSpace": "Uvolnit místo",
+  "freeUpSkippedUnsynced": "{count} ponecháno v tomto zařízení: nesynchronizované změny"
 }

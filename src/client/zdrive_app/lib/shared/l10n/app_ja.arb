@@ -141,5 +141,12 @@
   "tagline": "あなたのファイルを、どこでも。",
   "authBenefitSync": "すべてのデバイスで同期",
   "authBenefitShare": "ファイルとフォルダを安全に共有",
-  "authBenefitSecure": "常に暗号化されたストレージ"
+  "authBenefitSecure": "常に暗号化されたストレージ",
+  "offlineCloudOnly": "クラウドのみ",
+  "offlineDownloading": "ダウンロード中",
+  "offlineAvailable": "このデバイスで利用可能",
+  "offlineAlwaysKeep": "常にこのデバイスに保持",
+  "keepOnDevice": "常にこのデバイスに保持する",
+  "freeUpSpace": "空き容量を増やす",
+  "freeUpSkippedUnsynced": "{count} 件をこのデバイスに保持しました: 未同期の変更があります"
 }

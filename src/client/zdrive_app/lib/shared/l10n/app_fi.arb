@@ -141,5 +141,12 @@
   "tagline": "Tiedostosi, kaikkialla.",
   "authBenefitSync": "Synkronointi kaikilla laitteilla",
   "authBenefitShare": "Jaa tiedostoja ja kansioita turvallisesti",
-  "authBenefitSecure": "Aina salattu tallennustila"
+  "authBenefitSecure": "Aina salattu tallennustila",
+  "offlineCloudOnly": "Vain pilvessä",
+  "offlineDownloading": "Ladataan",
+  "offlineAvailable": "Saatavilla tällä laitteella",
+  "offlineAlwaysKeep": "Säilytetään aina tällä laitteella",
+  "keepOnDevice": "Säilytä aina tällä laitteella",
+  "freeUpSpace": "Vapauta tilaa",
+  "freeUpSkippedUnsynced": "{count} säilytetty tällä laitteella: synkronoimattomia muutoksia"
 }

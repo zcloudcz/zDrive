@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 
+import '../../../sync/domain/sync_mirror_entry.dart';
 import '../../domain/file_item.dart';
 import 'file_icon.dart';
+import 'offline_status_icon.dart';
 
 class FileGridItem extends StatelessWidget {
   final FileItem file;
@@ -12,6 +14,12 @@ class FileGridItem extends StatelessWidget {
   final VoidCallback onShare;
   final VoidCallback onVersions;
 
+  /// Desktop selective-sync extras. Null on platforms without the sync engine
+  /// (web, mobile): then no marker and no menu entries are shown.
+  final OfflineStatus? offlineStatus;
+  final VoidCallback? onKeepOnDevice;
+  final VoidCallback? onFreeUp;
+
   const FileGridItem({
     super.key,
     required this.file,
@@ -20,6 +28,9 @@ class FileGridItem extends StatelessWidget {
     required this.onDelete,
     required this.onShare,
     required this.onVersions,
+    this.offlineStatus,
+    this.onKeepOnDevice,
+    this.onFreeUp,
   });
 
   @override
@@ -56,6 +67,8 @@ class FileGridItem extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
+                  if (offlineStatus != null)
+                    OfflineStatusIcon(status: offlineStatus!, size: 16),
                   PopupMenuButton<String>(
                     padding: EdgeInsets.zero,
                     iconSize: 16,
@@ -74,6 +87,10 @@ class FileGridItem extends StatelessWidget {
                           onShare();
                         case 'versions':
                           onVersions();
+                        case 'keep':
+                          onKeepOnDevice?.call();
+                        case 'freeUp':
+                          onFreeUp?.call();
                       }
                     },
                     itemBuilder: (_) => [
@@ -86,6 +103,13 @@ class FileGridItem extends StatelessWidget {
                         PopupMenuItem(
                             value: 'versions',
                             child: Text(l10n.versionHistory)),
+                      if (onKeepOnDevice != null &&
+                          offlineStatus?.canKeep == true)
+                        PopupMenuItem(
+                            value: 'keep', child: Text(l10n.keepOnDevice)),
+                      if (onFreeUp != null && offlineStatus?.canFreeUp == true)
+                        PopupMenuItem(
+                            value: 'freeUp', child: Text(l10n.freeUpSpace)),
                       PopupMenuItem(
                           value: 'delete', child: Text(l10n.delete)),
                     ],
