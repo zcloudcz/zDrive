@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -274,5 +275,77 @@ void main() {
       expect((await mirror.getByServerId('docs'))!.downloaded, isTrue,
           reason: 'the scanner must see the new directory as tracked');
     });
+  });
+
+  test('Move_CloudOnlySubtreeIntoPinnedFolder_HydratesDescendants', () async {
+    // The change feed has one row for the moved folder, none for its
+    // descendants - so pull itself must fetch them.
+    final pinned = item('pinned', 'Pinned', folder: true);
+    serve([pinned, docs, inner]);
+    await mirror.pin('pinned');
+    await service.pullOnce(root.path);
+    expect(File(path('Docs/inner.txt')).existsSync(), isFalse);
+
+    final moved = item('docs', 'Docs', parent: 'pinned', folder: true);
+    serve([pinned, moved, inner]);
+    feed([(1, 'docs', 'Move')]);
+    await service.pullOnce(root.path);
+
+    expect(File(path('Pinned/Docs/inner.txt')).existsSync(), isTrue);
+    expect((await mirror.getByServerId('inner'))!.downloaded, isTrue);
+  });
+
+  test('Hydrate_InterleavedWithPull_WaitsForThePullToFinish', () async {
+    final a = item('a', 'a.txt');
+    final b = item('b', 'b.txt');
+    serve([a, b]);
+    await mirror.pin('a');
+    final gate = Completer<void>();
+    when(() => files.downloadFileStream('a')).thenAnswer((_) async* {
+      await gate.future;
+      yield Uint8List.fromList(utf8.encode('abc'));
+    });
+
+    final pull = service.pullOnce(root.path);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    final hydrate = service.hydrate('b', root.path);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    verifyNever(() => files.downloadFileStream('b'));
+
+    gate.complete();
+    await Future.wait([pull, hydrate]);
+
+    expect(File(path('a.txt')).existsSync(), isTrue);
+    expect(File(path('b.txt')).existsSync(), isTrue);
+    expect(await mirror.getFailedEvents(), isEmpty);
+  });
+
+  test('Hydrate_FailedOnUnpinnedItem_IsRetriedByPullWithDownloadForced', () async {
+    serve([top]);
+    await service.pullOnce(root.path); // cloud-only
+    File(path('top.txt')).writeAsStringSync('mine');
+    await service.hydrate('top', root.path);
+    expect((await mirror.getFailedEvents()).single.fileId, 'top');
+
+    // The user gets the blocking file out of the way; the quarantine
+    // backoff has elapsed.
+    File(path('top.txt')).deleteSync();
+    await (await mirror.debugDatabase)
+        .update('failed_events', {'failedAt': DateTime.utc(2020).toIso8601String()});
+    await service.pullOnce(root.path);
+
+    expect(File(path('top.txt')).existsSync(), isTrue, reason: 'retry must keep the hydrate intent');
+    expect(await mirror.getFailedEvents(), isEmpty);
+  });
+
+  test('DeleteRow_RemovesItsPin', () async {
+    serve([docs, inner]);
+    await mirror.pin('docs');
+    await service.pullOnce(root.path);
+    when(() => files.getFile('docs')).thenThrow(notFound());
+    feed([(1, 'docs', 'Delete')]);
+    await service.pullOnce(root.path);
+
+    expect(await mirror.isPinned('docs'), isFalse);
   });
 }

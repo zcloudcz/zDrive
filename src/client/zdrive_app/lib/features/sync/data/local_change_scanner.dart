@@ -217,10 +217,12 @@ class LocalChangeScanner {
     // design, so leaving them in would classify every one as "deleted
     // locally" and push a server-side delete — data loss. They also must not
     // be a rename/move target or parent lookup, since nothing exists there.
-    final mirrorEntries = (await _mirror.getChildrenUnder(root)).where((e) => e.downloaded).toList();
+    final allEntries = await _mirror.getChildrenUnder(root);
+    final mirrorEntries = allEntries.where((e) => e.downloaded).toList();
     final mirrorByPath = <String, SyncMirrorEntry>{for (final e in mirrorEntries) e.localPath: e};
     final disk = await _walkDisk(root);
     final c = _classify(root, mirrorEntries, disk);
+    await _quarantineCloudOnlyCollisions(allEntries, c.newFiles, c.newDirs);
 
     // --- 0b. Case-only rename (decision 2) ---
     // Must run before anything below creates or deletes: on a match,
@@ -302,6 +304,39 @@ class LocalChangeScanner {
     );
 
     return pushed;
+  }
+
+  /// A new local file/folder whose path is where a cloud-only item would live
+  /// is somebody else's data, not a new item: uploading it would 409 into
+  /// "adopt by name" and overwrite the unrelated remote file with a new
+  /// version, and adopting a colliding folder would later let deleting it
+  /// trash the whole (still cloud-only) server subtree. So such paths are
+  /// dropped from [newFiles]/[newDirs] (anything nested under a dropped dir
+  /// is skipped by the unresolved-parent rule) and surfaced through the same
+  /// failed-events list pull uses for its own local-conflict refusals. The
+  /// user resolves it by moving/renaming the local item.
+  Future<void> _quarantineCloudOnlyCollisions(
+    List<SyncMirrorEntry> allEntries,
+    List<String> newFiles,
+    List<String> newDirs,
+  ) async {
+    final cloudOnly = {
+      for (final e in allEntries)
+        if (!e.downloaded) _key(e.localPath): e,
+    };
+    if (cloudOnly.isEmpty) return;
+    for (final list in [newFiles, newDirs]) {
+      final collisions = list.where((path) => cloudOnly.containsKey(_key(path))).toList();
+      for (final path in collisions) {
+        final entry = cloudOnly[_key(path)]!;
+        await _mirror.recordFailedEvent(
+          entry.serverId,
+          0,
+          'local conflict: a local item sits where a cloud-only item lives, not uploaded: $path',
+        );
+        list.remove(path);
+      }
+    }
   }
 
   /// Walks [root] once, collecting every syncable directory and file path —

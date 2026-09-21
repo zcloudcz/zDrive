@@ -8,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
+import 'local_change_scanner.dart' show syncPathKey;
 
 /// sqflite over drift: the schema is a handful of small tables with no joins
 /// or migrations planned, so drift's code-generated query builder buys
@@ -181,7 +182,14 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   @override
   Future<void> deleteByServerId(String serverId) async {
     final db = await _database;
-    await db.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+    await db.transaction((txn) => _deleteRow(txn, serverId));
+  }
+
+  // A deleted item must not leave a pin behind: pins are keyed by serverId,
+  // so a stale one would be harmless today but confusing for the UI.
+  Future<void> _deleteRow(DatabaseExecutor executor, String serverId) async {
+    await executor.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+    await executor.delete(_pinsTable, where: 'serverId = ?', whereArgs: [serverId]);
   }
 
   @override
@@ -288,7 +296,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
         await txn.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
       }
       for (final serverId in deleteServerIds) {
-        await txn.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+        await _deleteRow(txn, serverId);
       }
       if (deleteUnderPath != null) {
         await _deleteChildren(txn, deleteUnderPath);
@@ -325,7 +333,9 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
       'SELECT f.localPath FROM $_pinsTable p JOIN $_filesTable f ON f.serverId = p.serverId '
       'WHERE f.isFolder = 1',
     );
-    return pinned.any((row) => localPath.startsWith(_childPrefix(row['localPath'] as String)));
+    // Case-insensitive like every other path comparison in sync.
+    final key = syncPathKey(localPath);
+    return pinned.any((row) => key.startsWith(_childPrefix(syncPathKey(row['localPath'] as String))));
   }
 
   @override
@@ -395,6 +405,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     final batch = executor.batch();
     for (final row in rows) {
       batch.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
+      batch.delete(_pinsTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
     }
     await batch.commit(noResult: true);
   }

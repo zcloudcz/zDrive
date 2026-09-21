@@ -73,7 +73,9 @@ abstract class SyncMirrorRepository {
 
   /// Marks [serverId] (a file or a folder) "always keep offline". A folder
   /// pin covers everything beneath it, including items created later.
-  /// Pinning only records the intent — downloading is PullSyncService's job.
+  /// Pinning only records the intent. Pull downloads items that are created
+  /// or moved under the pin from then on; whatever already exists under it
+  /// stays cloud-only until PullSyncService.hydrate is called for it.
   Future<void> pin(String serverId);
 
   /// Removes the pin on [serverId]. Never touches files on disk or mirror

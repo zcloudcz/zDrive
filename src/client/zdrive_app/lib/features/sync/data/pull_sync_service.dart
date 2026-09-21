@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer';
 import 'dart:io';
 
@@ -111,6 +112,30 @@ class PullSyncService {
   // second caller await the first call's result instead of starting its own
   // (see PR #12 review round 2, R6/F4).
   Future<int>? _inFlight;
+
+  // Tail of the queue pullOnce and hydrate both run through, so a hydrate
+  // never downloads the same file a pull is installing (the pull's post-
+  // download recheck would then see a hash it did not write and quarantine a
+  // false conflict).
+  Future<void> _exclusiveTail = Future.value();
+
+  Future<T> _exclusive<T>(Future<T> Function() body) async {
+    final previous = _exclusiveTail;
+    final done = Completer<void>();
+    _exclusiveTail = done.future;
+    await previous;
+    try {
+      return await body();
+    } finally {
+      done.complete();
+    }
+  }
+
+  // Files whose hydrate failed and was quarantined. Retry must keep forcing
+  // the download for them even though they are not pinned. In memory only
+  // (ponytail: lost on restart, after which an unpinned item just stays
+  // cloud-only; persist if PR 2 needs it).
+  final Set<String> _hydrateIntent = {};
   SyncProgressTracker? _progress;
   int _plannedItems = 0;
 
@@ -126,7 +151,7 @@ class PullSyncService {
     if (_inFlight != null) return _inFlight!;
     _progress = progress;
     _plannedItems = 0;
-    return _inFlight = _pullOnce(syncFolderPath).whenComplete(() {
+    return _inFlight = _exclusive(() => _pullOnce(syncFolderPath)).whenComplete(() {
       _progress = null;
       _inFlight = null;
     });
@@ -304,7 +329,12 @@ class PullSyncService {
     _progress?.setTotalFiles(_plannedItems);
     for (final failed in retryItems) {
       try {
-        await _applyUpsert(failed.fileId, syncFolderPath);
+        await _applyUpsert(
+          failed.fileId,
+          syncFolderPath,
+          forceDownload: _hydrateIntent.contains(failed.fileId),
+        );
+        _hydrateIntent.remove(failed.fileId);
         await _mirror.clearFailedEvent(failed.fileId);
       } catch (e, st) {
         // Still failing — still an unsafe name, still a local conflict, a
@@ -430,6 +460,7 @@ class PullSyncService {
     String fileId,
     String syncFolderPath, {
     FileItem? remote,
+    bool forceDownload = false,
   }) async {
     _progress?.startFile(
       fileId,
@@ -437,7 +468,12 @@ class PullSyncService {
       totalBytes: remote?.sizeBytes,
     );
     try {
-      await _applyUpsertCore(fileId, syncFolderPath, prefetched: remote);
+      await _applyUpsertCore(
+        fileId,
+        syncFolderPath,
+        prefetched: remote,
+        forceDownload: forceDownload,
+      );
       _progress?.finishFile(fileId);
     } catch (_) {
       _progress?.finishFile(fileId, failed: true);
@@ -596,6 +632,14 @@ class PullSyncService {
         downloaded: download,
       ),
     );
+
+    // A folder that only now becomes downloaded (moved into a pinned folder,
+    // say) may hold cloud-only descendants, and the change feed has no rows
+    // for them — only the moved folder itself. Fetch them here, or the pin
+    // would silently not cover what was moved under it.
+    if (remote.isFolder && download && !forceDownload && previous != null && !previous.downloaded) {
+      await _hydrateChildren(remote, syncFolderPath);
+    }
   }
 
   /// Downloads whatever is still cloud-only at or under [serverId] (a file,
@@ -604,11 +648,13 @@ class PullSyncService {
   /// never re-fetches or overwrites local edits. Safety checks are the
   /// normal ones; an item that cannot be written is quarantined via
   /// [SyncMirrorRepository.recordFailedEvent] instead of aborting the rest.
-  /// Deliberately independent of [pullOnce]'s cursor. Sequential: it is a
-  /// one-off catch-up, not the hot path.
-  Future<void> hydrate(String serverId, String syncFolderPath) async {
-    await _hydrate(await _fileRepository.getFile(serverId), syncFolderPath);
-  }
+  /// Deliberately independent of [pullOnce]'s cursor, but serialized with it
+  /// (they never run at the same time). Sequential: it is a one-off
+  /// catch-up, not the hot path. A quarantined item is retried by pull with
+  /// the download still forced (see [_hydrateIntent]).
+  Future<void> hydrate(String serverId, String syncFolderPath) => _exclusive(
+        () async => _hydrate(await _fileRepository.getFile(serverId), syncFolderPath),
+      );
 
   Future<void> _hydrate(FileItem item, String syncFolderPath) async {
     if (item.isDeleted) return;
@@ -622,16 +668,22 @@ class PullSyncService {
         );
       }
     } on UnsafeRemoteNameException catch (e) {
+      _hydrateIntent.add(item.id);
       await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
       return;
     } on LocalConflictException catch (e) {
+      _hydrateIntent.add(item.id);
       await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
       return;
     } on FileSystemException catch (e) {
+      _hydrateIntent.add(item.id);
       await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.message);
       return;
     }
-    if (!item.isFolder) return;
+    if (item.isFolder) await _hydrateChildren(item, syncFolderPath);
+  }
+
+  Future<void> _hydrateChildren(FileItem item, String syncFolderPath) async {
     var page = 1;
     while (true) {
       final result = await _fileRepository.listChildren(item.id, page: page);
