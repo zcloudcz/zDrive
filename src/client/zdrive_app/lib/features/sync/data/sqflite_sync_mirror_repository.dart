@@ -405,7 +405,10 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     final downloaded = entry?.downloaded ?? false;
     if (direct || viaFolder) {
       if (!downloaded) return OfflineStatus.downloading;
-      return direct ? OfflineStatus.alwaysKeep : OfflineStatus.alwaysKeepViaFolder;
+      // Covered by a pinned folder wins over a direct pin: "free up" on the
+      // item would only drop its redundant pin and free nothing (the folder
+      // still covers it), so the menu must not offer it.
+      return viaFolder ? OfflineStatus.alwaysKeepViaFolder : OfflineStatus.alwaysKeep;
     }
     return downloaded ? OfflineStatus.available : OfflineStatus.cloudOnly;
   }

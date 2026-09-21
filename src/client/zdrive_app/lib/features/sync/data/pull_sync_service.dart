@@ -564,6 +564,7 @@ class PullSyncService {
     if (moved) await _assertNoLinks(syncFolderPath, previous.localPath);
 
     String? contentHash;
+    LocalConflictException? collision;
     if (remote.isFolder) {
       // A folder that exists only in the mirror has no directory to rename;
       // its children's virtual paths still have to follow it.
@@ -577,8 +578,16 @@ class PullSyncService {
         // same way (_quarantineCloudOnlyCollisions), and it must stay
         // quarantined here: without this check the retry below would clear
         // the scanner's failed event and the skipped-items list would flicker.
+        //
+        // The refusal is thrown only AFTER the cloud-only row is written
+        // below. Throwing here would leave a never-seen folder without any
+        // mirror row, and the scanner (which only knows mirror rows) would
+        // then adopt the server folder by name on its 409 and later trash
+        // the whole still-cloud-only server subtree when the user deletes
+        // their local folder. For a moved folder it would also leave the
+        // row at the old path with its children already re-pathed.
         if (await FileSystemEntity.type(localPath, followLinks: false) != FileSystemEntityType.notFound) {
-          throw LocalConflictException(
+          collision = LocalConflictException(
             'local item exists where a cloud-only folder would live: $localPath',
           );
         }
@@ -659,6 +668,7 @@ class PullSyncService {
         downloaded: download,
       ),
     );
+    if (collision != null) throw collision;
 
     // A folder that only now becomes downloaded (moved into a pinned folder,
     // say) may hold cloud-only descendants, and the change feed has no rows

@@ -431,6 +431,38 @@ void main() {
   });
 
   group('cloud-only folder collision', () {
+    test('LocalFolderFirst_ThenRemoteFolderAppears_ScannerNeverAdoptsIt', () async {
+      // Review round 1 of PR 63: the collision used to be thrown BEFORE the
+      // cloud-only row was written, so a folder this device had never seen
+      // got no row; the scanner then adopted the server folder on its 409
+      // and deleting the local folder later trashed the whole server subtree.
+      serve([]);
+      await service.pullOnce(root.path); // bootstrap of an empty server
+      Directory(path('Docs')).createSync();
+      File(path('Docs/mine.txt')).writeAsStringSync('mine');
+      // ...then a Create event for the remote "Docs" arrives.
+      serve([docs, inner]);
+      feed([(1, 'docs', 'Create')]);
+
+      await service.pullOnce(root.path);
+
+      final row = await mirror.getByServerId('docs');
+      expect(row, isNotNull, reason: 'the cloud-only row must exist so the scanner sees the path as taken');
+      expect(row!.downloaded, isFalse);
+      expect((await mirror.getFailedEvents()).map((f) => f.fileId), contains('docs'));
+
+      final scanner = LocalChangeScanner(mirror, files, device, isWindows: false);
+      await scanner.scanOnce(root.path);
+
+      verifyNever(() => files.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      expect((await mirror.getByServerId('docs'))!.downloaded, isFalse);
+
+      // The user deletes their local folder: nothing may be trashed remotely.
+      Directory(path('Docs')).deleteSync(recursive: true);
+      await scanner.scanOnce(root.path);
+      verifyNever(() => files.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
+    });
+
     test('QuarantinedCollidingFolder_PullRetry_StaysQuarantinedNoFlicker', () async {
       serve([docs, inner]);
       await service.pullOnce(root.path); // bootstrap: cloud-only rows only
@@ -476,6 +508,18 @@ void main() {
       expect(statuses['loose'], OfflineStatus.available);
       expect(statuses['top'], OfflineStatus.cloudOnly);
       expect(statuses['unknown'], OfflineStatus.cloudOnly);
+    });
+
+    test('Statuses_DirectPinInsidePinnedFolder_IsViaFolder_SoMenuOffersNoFreeUp', () async {
+      final sub = item('sub', 'Sub', parent: 'docs', folder: true);
+      serve([docs, inner, sub]);
+      await keep('docs');
+      await mirror.pin('inner'); // redundant explicit pin under a pinned folder
+      await service.pullOnce(root.path);
+
+      final statuses = await mirror.getOfflineStatuses(['inner']);
+
+      expect(statuses['inner'], OfflineStatus.alwaysKeepViaFolder);
     });
 
     test('Statuses_PinnedButNotOnDisk_IsDownloading_AndParentPinCoversRowlessItems', () async {
