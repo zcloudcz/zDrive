@@ -474,4 +474,27 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get authBenefitSecure => 'Aina salattu tallennustila';
+
+  @override
+  String get offlineCloudOnly => 'Vain pilvessä';
+
+  @override
+  String get offlineDownloading => 'Ladataan';
+
+  @override
+  String get offlineAvailable => 'Saatavilla tällä laitteella';
+
+  @override
+  String get offlineAlwaysKeep => 'Säilytetään aina tällä laitteella';
+
+  @override
+  String get keepOnDevice => 'Säilytä aina tällä laitteella';
+
+  @override
+  String get freeUpSpace => 'Vapauta tilaa';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count säilytetty tällä laitteella: synkronoimattomia muutoksia';
+  }
 }

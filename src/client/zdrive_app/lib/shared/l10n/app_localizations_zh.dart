@@ -457,4 +457,27 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get authBenefitSecure => '始终加密存储';
+
+  @override
+  String get offlineCloudOnly => '仅云端';
+
+  @override
+  String get offlineDownloading => '正在下载';
+
+  @override
+  String get offlineAvailable => '此设备上可用';
+
+  @override
+  String get offlineAlwaysKeep => '始终保留在此设备上';
+
+  @override
+  String get keepOnDevice => '始终保留在此设备上';
+
+  @override
+  String get freeUpSpace => '释放空间';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count 项已保留在此设备上：有未同步的更改';
+  }
 }

@@ -44,6 +44,29 @@ class SyncMirrorEntry extends Equatable {
       [serverId, localPath, isFolder, sizeBytes, contentHash, updatedAt, syncedAt, downloaded];
 }
 
+/// What the file browser shows per item on desktop (OneDrive-style selective
+/// sync). Derived from the mirror row plus pins, see
+/// [SyncMirrorRepository.getOfflineStatuses].
+enum OfflineStatus {
+  /// Known to the mirror (or not even that) but nothing on disk.
+  cloudOnly,
+
+  /// Pinned (directly or through a folder) but not on disk yet: pending or
+  /// the download failed.
+  downloading,
+
+  /// On disk, not pinned (e.g. an install from before cloud-only): kept in
+  /// sync, but "Free up space" may remove it.
+  available,
+
+  /// Pinned itself and on disk.
+  alwaysKeep,
+
+  /// On disk because a folder above it is pinned. Unpinning must happen on
+  /// that folder, so there is no per-item "free up".
+  alwaysKeepViaFolder,
+}
+
 /// A pull event that could not be applied for a reason a retry will not fix
 /// (an unsafe/unwritable name, or a local file pull refuses to overwrite —
 /// see F1/F3/F5 in the PR #12 review). Recorded so one bad file quarantines

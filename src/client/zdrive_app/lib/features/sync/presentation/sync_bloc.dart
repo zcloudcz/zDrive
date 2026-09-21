@@ -46,6 +46,26 @@ final class PullRequested extends SyncEvent {
   const PullRequested();
 }
 
+/// "Always keep on this device" for a file or folder (pin + download).
+final class KeepOnDeviceRequested extends SyncEvent {
+  final String serverId;
+
+  const KeepOnDeviceRequested(this.serverId);
+
+  @override
+  List<Object?> get props => [serverId];
+}
+
+/// "Free up space" for a file or folder (unpin + remove the local copy).
+final class FreeUpSpaceRequested extends SyncEvent {
+  final String serverId;
+
+  const FreeUpSpaceRequested(this.serverId);
+
+  @override
+  List<Object?> get props => [serverId];
+}
+
 // --- States ---
 
 sealed class SyncState extends Equatable {
@@ -72,6 +92,15 @@ final class SyncLoaded extends SyncState {
   final SyncProgress? progress;
   final int failedFiles;
 
+  /// Files the last "Free up space" left on disk because they hold local
+  /// edits that were never synced (or could not be read). One-shot for the
+  /// UI: reset to 0 when the next keep/free-up starts.
+  final int freeUpSkipped;
+
+  /// Bumped when a keep/free-up action finishes (also when it changed nothing
+  /// visible), so the file browser knows to re-read its per-item state.
+  final int offlineRevision;
+
   const SyncLoaded({
     required this.devices,
     this.syncFolderPath,
@@ -80,6 +109,8 @@ final class SyncLoaded extends SyncState {
     this.failedEvents = const [],
     this.progress,
     this.failedFiles = 0,
+    this.freeUpSkipped = 0,
+    this.offlineRevision = 0,
   });
 
   SyncLoaded copyWith({
@@ -90,6 +121,8 @@ final class SyncLoaded extends SyncState {
     List<SyncFailedEvent>? failedEvents,
     SyncProgress? Function()? progress,
     int? failedFiles,
+    int? freeUpSkipped,
+    int? offlineRevision,
   }) {
     return SyncLoaded(
       devices: devices ?? this.devices,
@@ -99,6 +132,8 @@ final class SyncLoaded extends SyncState {
       failedEvents: failedEvents ?? this.failedEvents,
       progress: progress != null ? progress() : this.progress,
       failedFiles: failedFiles ?? this.failedFiles,
+      freeUpSkipped: freeUpSkipped ?? this.freeUpSkipped,
+      offlineRevision: offlineRevision ?? this.offlineRevision,
     );
   }
 
@@ -111,6 +146,8 @@ final class SyncLoaded extends SyncState {
     failedEvents,
     progress,
     failedFiles,
+    freeUpSkipped,
+    offlineRevision,
   ];
 }
 
@@ -201,6 +238,22 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     on<LoadSyncStatus>(_onLoadSyncStatus);
     on<SyncFolderChosen>(_onSyncFolderChosen);
     on<PullRequested>(_onPullRequested);
+    on<KeepOnDeviceRequested>(
+      (event, emit) => _runOfflineAction(
+        emit,
+        (path, progress) async {
+          await _syncCoordinator.keepOnDevice(event.serverId, path, progress: progress);
+          return 0;
+        },
+      ),
+    );
+    on<FreeUpSpaceRequested>(
+      (event, emit) => _runOfflineAction(
+        emit,
+        (path, _) async =>
+            (await _syncCoordinator.freeUpSpace(event.serverId, path)).skippedUnsynced.length,
+      ),
+    );
   }
 
   Future<void> _onLoadSyncStatus(
@@ -508,6 +561,55 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     if (generation != _syncGeneration || isClosed) return;
     _syncRequestedWhileRunning = false;
     add(const PullRequested());
+  }
+
+  /// Runs one "keep on device" / "free up space" action through the
+  /// coordinator (which serializes it with pull and scan) and reports it
+  /// through the state the sync page and file browser already watch: progress
+  /// while it runs, the refreshed failed-events list after it, and — for free
+  /// up — how many files were kept because of unsynced edits. Deliberately
+  /// leaves [SyncLoaded.isPulling] alone: that flag guards the poll loop, and
+  /// the coordinator's lock already makes a sync run wait for this action.
+  Future<void> _runOfflineAction(
+    Emitter<SyncState> emit,
+    Future<int> Function(String path, SyncProgressTracker progress) action,
+  ) async {
+    final current = state;
+    if (current is! SyncLoaded || current.syncFolderPath == null) return;
+    final generation = _syncGeneration;
+    final path = current.syncFolderPath!;
+    bool stale() => generation != _syncGeneration || emit.isDone || isClosed;
+
+    emit(current.copyWith(pullError: () => null, freeUpSkipped: 0));
+    try {
+      final skipped = await action(
+        path,
+        SyncProgressTracker((progress) {
+          final latest = state;
+          if (stale() || latest is! SyncLoaded || latest.syncFolderPath != path) return;
+          emit(latest.copyWith(progress: () => progress, failedFiles: progress.failedFiles));
+        }),
+      );
+      final failedEvents = await _pullService.getFailedEvents();
+      final latest = state;
+      if (stale() || latest is! SyncLoaded) return;
+      emit(latest.copyWith(
+        failedEvents: failedEvents,
+        progress: () => null,
+        failedFiles: 0,
+        freeUpSkipped: skipped,
+        offlineRevision: latest.offlineRevision + 1,
+      ));
+    } catch (e, stack) {
+      Diagnostics.error('sync.bloc.failed', e, stack);
+      final latest = state;
+      if (stale() || latest is! SyncLoaded) return;
+      emit(latest.copyWith(
+        pullError: () => e.toString(),
+        progress: () => null,
+        offlineRevision: latest.offlineRevision + 1,
+      ));
+    }
   }
 
   Future<SyncLoaded> _fetchLoadedState() async {

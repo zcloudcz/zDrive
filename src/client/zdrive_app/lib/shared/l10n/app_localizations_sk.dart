@@ -472,4 +472,27 @@ class AppLocalizationsSk extends AppLocalizations {
 
   @override
   String get authBenefitSecure => 'Vždy šifrované úložisko';
+
+  @override
+  String get offlineCloudOnly => 'Iba v cloude';
+
+  @override
+  String get offlineDownloading => 'Sťahuje sa';
+
+  @override
+  String get offlineAvailable => 'Dostupné v tomto zariadení';
+
+  @override
+  String get offlineAlwaysKeep => 'Vždy uchovávané v tomto zariadení';
+
+  @override
+  String get keepOnDevice => 'Vždy uchovávať v tomto zariadení';
+
+  @override
+  String get freeUpSpace => 'Uvoľniť miesto';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count ponechaných v tomto zariadení: nesynchronizované zmeny';
+  }
 }

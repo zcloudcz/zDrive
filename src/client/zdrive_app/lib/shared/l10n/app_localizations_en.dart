@@ -467,4 +467,27 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get authBenefitSecure => 'Encrypted storage, always';
+
+  @override
+  String get offlineCloudOnly => 'Cloud only';
+
+  @override
+  String get offlineDownloading => 'Downloading';
+
+  @override
+  String get offlineAvailable => 'Available on this device';
+
+  @override
+  String get offlineAlwaysKeep => 'Always kept on this device';
+
+  @override
+  String get keepOnDevice => 'Always keep on this device';
+
+  @override
+  String get freeUpSpace => 'Free up space';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count kept on this device: unsynced changes';
+  }
 }

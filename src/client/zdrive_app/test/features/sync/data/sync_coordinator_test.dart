@@ -557,4 +557,65 @@ void main() {
       await future;
     });
   });
+
+  group('keepOnDevice / freeUpSpace', () {
+    test('KeepOnDevice_PinsThenHydratesInThatOrder', () async {
+      final calls = <String>[];
+      when(() => mockMirror.pin('doc-1')).thenAnswer((_) async => calls.add('pin'));
+      when(() => mockPull.hydrate('doc-1', syncPath, progress: any(named: 'progress')))
+          .thenAnswer((_) async => calls.add('hydrate'));
+
+      await coordinator.keepOnDevice('doc-1', syncPath);
+
+      expect(calls, ['pin', 'hydrate']);
+    });
+
+    test('FreeUpSpace_UnpinsThenFreesAndReturnsTheResult', () async {
+      final calls = <String>[];
+      final result = FreeUpResult()..freed = 2;
+      when(() => mockMirror.unpin('doc-1')).thenAnswer((_) async => calls.add('unpin'));
+      when(() => mockPull.freeUp('doc-1', syncPath)).thenAnswer((_) async {
+        calls.add('freeUp');
+        return result;
+      });
+
+      expect(await coordinator.freeUpSpace('doc-1', syncPath), same(result));
+      expect(calls, ['unpin', 'freeUp']);
+    });
+
+    test('FreeUpSpace_RunningSync_WaitsForTheSyncSoAScanNeverOverlapsIt', () async {
+      final pullGate = Completer<int>();
+      when(() => mockPull.pullOnce(syncPath)).thenAnswer((_) => pullGate.future);
+      when(() => mockScanner.scanOnce(syncPath)).thenAnswer((_) async => 0);
+      when(() => mockMirror.unpin(any())).thenAnswer((_) async {});
+      var freeUpStarted = false;
+      when(() => mockPull.freeUp(any(), any())).thenAnswer((_) async {
+        freeUpStarted = true;
+        return FreeUpResult();
+      });
+
+      final sync = coordinator.syncOnce(syncPath);
+      final free = coordinator.freeUpSpace('doc-1', syncPath);
+      await pumpEventQueue();
+      expect(freeUpStarted, isFalse);
+
+      pullGate.complete(0);
+      await sync;
+      await free;
+      expect(freeUpStarted, isTrue);
+    });
+
+    test('KeepOnDeviceAndFreeUp_StaleFolder_AreNoOps', () async {
+      when(() => mockPreferences.syncFolderPath).thenReturn('/some/other/folder');
+
+      await coordinator.keepOnDevice('doc-1', syncPath);
+      final result = await coordinator.freeUpSpace('doc-1', syncPath);
+
+      expect(result.freed, 0);
+      verifyNever(() => mockMirror.pin(any()));
+      verifyNever(() => mockMirror.unpin(any()));
+      verifyNever(() => mockPull.hydrate(any(), any(), progress: any(named: 'progress')));
+      verifyNever(() => mockPull.freeUp(any(), any()));
+    });
+  });
 }

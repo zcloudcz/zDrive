@@ -478,4 +478,27 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get authBenefitSecure => 'Stockage toujours chiffré';
+
+  @override
+  String get offlineCloudOnly => 'Uniquement dans le cloud';
+
+  @override
+  String get offlineDownloading => 'Téléchargement en cours';
+
+  @override
+  String get offlineAvailable => 'Disponible sur cet appareil';
+
+  @override
+  String get offlineAlwaysKeep => 'Toujours conservé sur cet appareil';
+
+  @override
+  String get keepOnDevice => 'Toujours conserver sur cet appareil';
+
+  @override
+  String get freeUpSpace => 'Libérer de l\'espace';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count conservés sur cet appareil : modifications non synchronisées';
+  }
 }

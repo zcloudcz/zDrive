@@ -459,4 +459,27 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get authBenefitSecure => '常に暗号化されたストレージ';
+
+  @override
+  String get offlineCloudOnly => 'クラウドのみ';
+
+  @override
+  String get offlineDownloading => 'ダウンロード中';
+
+  @override
+  String get offlineAvailable => 'このデバイスで利用可能';
+
+  @override
+  String get offlineAlwaysKeep => '常にこのデバイスに保持';
+
+  @override
+  String get keepOnDevice => '常にこのデバイスに保持する';
+
+  @override
+  String get freeUpSpace => '空き容量を増やす';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count 件をこのデバイスに保持しました: 未同期の変更があります';
+  }
 }

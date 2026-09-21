@@ -469,4 +469,27 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get authBenefitSecure => 'Vždy šifrované úložiště';
+
+  @override
+  String get offlineCloudOnly => 'Pouze v cloudu';
+
+  @override
+  String get offlineDownloading => 'Stahuje se';
+
+  @override
+  String get offlineAvailable => 'Dostupné v tomto zařízení';
+
+  @override
+  String get offlineAlwaysKeep => 'Vždy uchováváno v tomto zařízení';
+
+  @override
+  String get keepOnDevice => 'Vždy uchovávat v tomto zařízení';
+
+  @override
+  String get freeUpSpace => 'Uvolnit místo';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count ponecháno v tomto zařízení: nesynchronizované změny';
+  }
 }

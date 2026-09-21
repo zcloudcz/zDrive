@@ -64,6 +64,11 @@ abstract class SyncMirrorRepository {
   /// row nested under `rePath.from` to live under `rePath.to` instead (a
   /// folder rename) — applied before [upserts], so the folder's own row can
   /// be upserted straight to its new path in the same call.
+  ///
+  /// A pin on a deleted row moves to whatever other row sits at the same
+  /// local path afterwards: an item recreated under a NEW serverId at its old
+  /// path (the scanner re-uploads a locally edited file whose server copy was
+  /// deleted elsewhere) is the same file to the user, so its pin must survive.
   Future<void> commit({
     List<SyncMirrorEntry> upserts = const [],
     List<String> deleteServerIds = const [],
@@ -91,6 +96,15 @@ abstract class SyncMirrorRepository {
   /// path), so it works for an item that has no mirror row yet — pull asks
   /// before it creates one.
   Future<bool> isEffectivelyPinned(String serverId, String localPath);
+
+  /// State of one folder listing in a fixed number of queries (never one per
+  /// row): for each of [serverIds], whether it is on disk and pinned (see
+  /// [OfflineStatus]). [parentId] is the folder being listed; an item with no
+  /// mirror row yet still counts as pinned when that folder is.
+  Future<Map<String, OfflineStatus>> getOfflineStatuses(
+    List<String> serverIds, {
+    String? parentId,
+  });
 
   /// Wipes every row from every mirror table (files, cursor, bootstrap
   /// state, failed events) in one transaction — used by

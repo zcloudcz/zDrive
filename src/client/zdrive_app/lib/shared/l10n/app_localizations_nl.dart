@@ -475,4 +475,27 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get authBenefitSecure => 'Altijd versleutelde opslag';
+
+  @override
+  String get offlineCloudOnly => 'Alleen in de cloud';
+
+  @override
+  String get offlineDownloading => 'Downloaden';
+
+  @override
+  String get offlineAvailable => 'Beschikbaar op dit apparaat';
+
+  @override
+  String get offlineAlwaysKeep => 'Altijd op dit apparaat bewaard';
+
+  @override
+  String get keepOnDevice => 'Altijd op dit apparaat bewaren';
+
+  @override
+  String get freeUpSpace => 'Ruimte vrijmaken';
+
+  @override
+  String freeUpSkippedUnsynced(int count) {
+    return '$count bewaard op dit apparaat: niet-gesynchroniseerde wijzigingen';
+  }
 }

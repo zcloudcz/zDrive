@@ -141,6 +141,12 @@
   "tagline": "您的文件，随时随地。",
   "authBenefitSync": "跨所有设备同步",
   "authBenefitShare": "安全共享文件和文件夹",
-  "authBenefitSecure": "始终加密存储"
+  "authBenefitSecure": "始终加密存储",
+  "offlineCloudOnly": "仅云端",
+  "offlineDownloading": "正在下载",
+  "offlineAvailable": "此设备上可用",
+  "offlineAlwaysKeep": "始终保留在此设备上",
+  "keepOnDevice": "始终保留在此设备上",
+  "freeUpSpace": "释放空间",
+  "freeUpSkippedUnsynced": "{count} 项已保留在此设备上：有未同步的更改"
 }
-

@@ -48,6 +48,15 @@ class LocalConflictException implements Exception {
   String toString() => 'local conflict: $message';
 }
 
+/// What [PullSyncService.freeUp] did: how many files left the disk, which
+/// ones stayed because of an unsynced local edit (or an unreadable file), and
+/// how many stayed because a pin still covers them.
+class FreeUpResult {
+  int freed = 0;
+  int keptPinned = 0;
+  final List<String> skippedUnsynced = [];
+}
+
 /// Applies remote sync events into the designated local folder.
 ///
 /// Cloud-only by default: only items that are pinned ("always keep offline",
@@ -555,6 +564,7 @@ class PullSyncService {
     if (moved) await _assertNoLinks(syncFolderPath, previous.localPath);
 
     String? contentHash;
+    LocalConflictException? collision;
     if (remote.isFolder) {
       // A folder that exists only in the mirror has no directory to rename;
       // its children's virtual paths still have to follow it.
@@ -563,7 +573,24 @@ class PullSyncService {
         await _mirror.rePathChildren(previous.localPath, localPath);
       }
       if (!download) {
-        // Cloud-only folder: mirror row only, no directory.
+        // Cloud-only folder: mirror row only, no directory. Whatever the user
+        // already has at that path is theirs — the scanner quarantines it the
+        // same way (_quarantineCloudOnlyCollisions), and it must stay
+        // quarantined here: without this check the retry below would clear
+        // the scanner's failed event and the skipped-items list would flicker.
+        //
+        // The refusal is thrown only AFTER the cloud-only row is written
+        // below. Throwing here would leave a never-seen folder without any
+        // mirror row, and the scanner (which only knows mirror rows) would
+        // then adopt the server folder by name on its 409 and later trash
+        // the whole still-cloud-only server subtree when the user deletes
+        // their local folder. For a moved folder it would also leave the
+        // row at the old path with its children already re-pathed.
+        if (await FileSystemEntity.type(localPath, followLinks: false) != FileSystemEntityType.notFound) {
+          collision = LocalConflictException(
+            'local item exists where a cloud-only folder would live: $localPath',
+          );
+        }
       } else if (renameOnDisk) {
         await Directory(localPath).parent.create(recursive: true);
         try {
@@ -641,6 +668,7 @@ class PullSyncService {
         downloaded: download,
       ),
     );
+    if (collision != null) throw collision;
 
     // A folder that only now becomes downloaded (moved into a pinned folder,
     // say) may hold cloud-only descendants, and the change feed has no rows
@@ -661,18 +689,33 @@ class PullSyncService {
   /// (they never run at the same time). Sequential: it is a one-off
   /// catch-up, not the hot path. A quarantined item is retried by pull with
   /// the download still forced (see [_hydrateIntent]).
-  Future<void> hydrate(String serverId, String syncFolderPath) => _exclusive(
-        () async => _hydrate(await _fileRepository.getFile(serverId), syncFolderPath),
-      );
+  ///
+  /// [_exclusive] is not reentrant: never call this (or [freeUp]) from inside
+  /// a pull-run code path, it would wait on itself forever.
+  Future<void> hydrate(
+    String serverId,
+    String syncFolderPath, {
+    SyncProgressTracker? progress,
+  }) => _exclusive(() async {
+        _progress = progress;
+        _plannedItems = 0;
+        progress?.beginPhase(SyncPhase.downloading, discovering: true);
+        try {
+          await _hydrate(await _fileRepository.getFile(serverId), syncFolderPath);
+        } finally {
+          _progress = null;
+        }
+      });
 
   Future<void> _hydrate(FileItem item, String syncFolderPath) async {
     if (item.isDeleted) return;
     try {
       if (item.isFolder || (await _mirror.getByServerId(item.id))?.downloaded != true) {
-        await _applyUpsertCore(
+        _progress?.setTotalFiles(++_plannedItems);
+        await _applyUpsert(
           item.id,
           syncFolderPath,
-          prefetched: item,
+          remote: item,
           forceDownload: true,
         );
       }
@@ -703,6 +746,126 @@ class PullSyncService {
       page++;
     }
   }
+
+  /// Frees the local copy of [serverId] (a file, or every file beneath a
+  /// folder) and turns its mirror row(s) back into cloud-only. The caller
+  /// unpins first; whatever is still covered by a pin (own, or a pinned
+  /// folder above) is kept and counted in [FreeUpResult.keptPinned].
+  ///
+  /// A file is deleted ONLY if its bytes still hash to
+  /// [SyncMirrorEntry.contentHash], i.e. there is no unsynced local edit (the
+  /// data would be gone for good: it never reached the server). A file that
+  /// differs, is unreadable, or has no hash yet (upload not finished) stays
+  /// downloaded and is listed in [FreeUpResult.skippedUnsynced].
+  ///
+  /// Ordering matters because the scanner reads "downloaded but missing from
+  /// disk" as a local delete and trashes the server copy. So the row is
+  /// flipped to cloud-only FIRST and the file deleted second; if the delete
+  /// fails the row is put back. A crash in between leaves a file where a
+  /// cloud-only item lives, which the scanner merely quarantines — never a
+  /// delete. (Callers should also keep scans out via SyncCoordinator's lock.)
+  ///
+  /// The freed row keeps its size but gets a null [SyncMirrorEntry
+  /// .contentHash] — the same shape pull gives a cloud-only item, so nothing
+  /// has to special-case "freed" rows: the scanner skips them by
+  /// [SyncMirrorEntry.downloaded], pull's provisional-upload check only looks
+  /// at downloaded rows, and a stale hash could later make an unrelated file
+  /// with the same bytes at that path look like something pull wrote.
+  ///
+  /// A folder row is flipped (and the empty directory removed) only when
+  /// nothing under it stays local. Same [_exclusive] rules as [hydrate].
+  Future<FreeUpResult> freeUp(String serverId, String syncFolderPath) => _exclusive(() async {
+        final result = FreeUpResult();
+        final entry = await _mirror.getByServerId(serverId);
+        if (entry == null || !entry.downloaded) return result;
+        if (entry.isFolder) {
+          await _freeUpFolder(entry, syncFolderPath, result);
+        } else {
+          await _freeUpFile(entry, syncFolderPath, result);
+        }
+        return result;
+      });
+
+  /// Returns whether the file is off the disk now.
+  Future<bool> _freeUpFile(SyncMirrorEntry entry, String syncFolderPath, FreeUpResult result) async {
+    if (await _mirror.isEffectivelyPinned(entry.serverId, entry.localPath)) {
+      result.keptPinned++;
+      return false;
+    }
+    String? onDisk;
+    try {
+      await _assertNoLinks(syncFolderPath, entry.localPath);
+      onDisk = (await hashFileInBackground(entry.localPath)).hash;
+    } catch (_) {
+      // Missing, unreadable, or behind a link (Isolate.run may also rewrap the
+      // error): whatever the cause, the copy cannot be proven unedited.
+    }
+    if (onDisk == null || onDisk != entry.contentHash) {
+      result.skippedUnsynced.add(entry.localPath);
+      return false;
+    }
+    await _mirror.upsert(_cloudOnly(entry));
+    try {
+      await File(entry.localPath).delete();
+    } on PathNotFoundException {
+      // Already gone: the row is cloud-only now, which is what was wanted.
+    } on FileSystemException {
+      // Locked (open in another program) — undo, nothing was freed.
+      await _mirror.upsert(entry);
+      result.skippedUnsynced.add(entry.localPath);
+      return false;
+    }
+    result.freed++;
+    return true;
+  }
+
+  Future<void> _freeUpFolder(SyncMirrorEntry root, String syncFolderPath, FreeUpResult result) async {
+    final tracked = await _mirror.getChildrenUnder(root.localPath);
+    // Paths (files, then folders) that stay local; a folder with any of them
+    // beneath it cannot be removed.
+    final kept = <String>[];
+    for (final file in tracked.where((e) => !e.isFolder && e.downloaded)) {
+      if (!await _freeUpFile(file, syncFolderPath, result)) kept.add(file.localPath);
+    }
+    // Deepest first, so a subfolder is decided before its parent (see
+    // _deleteTrackedFolder for why length alone orders them).
+    final dirs = [...tracked.where((e) => e.isFolder && e.downloaded), root]
+      ..sort((a, b) => b.localPath.length.compareTo(a.localPath.length));
+    for (final dir in dirs) {
+      if (kept.any((path) => p.isWithin(dir.localPath, path))) {
+        kept.add(dir.localPath);
+        continue;
+      }
+      if (await _mirror.isEffectivelyPinned(dir.serverId, dir.localPath)) {
+        result.keptPinned++;
+        kept.add(dir.localPath);
+        continue;
+      }
+      await _mirror.upsert(_cloudOnly(dir));
+      var removed = false;
+      try {
+        removed = await _tryRemoveEmptyDir(dir.localPath, sweepOsMetadata: true);
+      } on FileSystemException {
+        // Treated like "not empty" below.
+      }
+      if (!removed) {
+        // Untracked or locked content still inside: the directory stays, so
+        // the row must keep saying it exists.
+        await _mirror.upsert(dir);
+        kept.add(dir.localPath);
+      }
+    }
+  }
+
+  SyncMirrorEntry _cloudOnly(SyncMirrorEntry e) => SyncMirrorEntry(
+        serverId: e.serverId,
+        localPath: e.localPath,
+        isFolder: e.isFolder,
+        sizeBytes: e.sizeBytes,
+        updatedAt: e.updatedAt,
+        syncedAt: DateTime.now(),
+        downloaded: false,
+      );
 
   /// True if writing to [localPath] would clobber something pull did not
   /// itself put there: either nothing was ever synced to this path before

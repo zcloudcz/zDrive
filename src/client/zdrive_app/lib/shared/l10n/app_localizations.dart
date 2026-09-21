@@ -965,6 +965,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Encrypted storage, always'**
   String get authBenefitSecure;
+
+  /// No description provided for @offlineCloudOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Cloud only'**
+  String get offlineCloudOnly;
+
+  /// No description provided for @offlineDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading'**
+  String get offlineDownloading;
+
+  /// No description provided for @offlineAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Available on this device'**
+  String get offlineAvailable;
+
+  /// No description provided for @offlineAlwaysKeep.
+  ///
+  /// In en, this message translates to:
+  /// **'Always kept on this device'**
+  String get offlineAlwaysKeep;
+
+  /// No description provided for @keepOnDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'Always keep on this device'**
+  String get keepOnDevice;
+
+  /// No description provided for @freeUpSpace.
+  ///
+  /// In en, this message translates to:
+  /// **'Free up space'**
+  String get freeUpSpace;
+
+  /// No description provided for @freeUpSkippedUnsynced.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} kept on this device: unsynced changes'**
+  String freeUpSkippedUnsynced(int count);
 }
 
 class _AppLocalizationsDelegate
