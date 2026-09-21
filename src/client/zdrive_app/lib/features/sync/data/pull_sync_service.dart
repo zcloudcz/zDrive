@@ -49,6 +49,14 @@ class LocalConflictException implements Exception {
 
 /// Applies remote sync events into the designated local folder.
 ///
+/// Cloud-only by default: only items that are pinned ("always keep offline",
+/// directly or through a pinned ancestor folder — see
+/// [SyncMirrorRepository.isEffectivelyPinned]) or already downloaded are
+/// written to disk. Everything else gets a mirror row with
+/// [SyncMirrorEntry.downloaded] false and NOTHING on disk: no placeholder
+/// file and no empty directory (a directory appears only when something under
+/// it is downloaded). Pinning later is followed by [hydrate].
+///
 /// New, untracked file creates may run concurrently, with at most three
 /// workers. Updates, deletes, folder events and creates for existing files
 /// act as serial barriers: all active workers finish before they run.
@@ -368,6 +376,18 @@ class PullSyncService {
     final entry = await _mirror.getByServerId(fileId);
     if (entry == null) return; // Never pulled locally — nothing to remove.
 
+    if (!entry.downloaded) {
+      // Cloud-only: nothing of ours is on disk (a cloud-only folder can only
+      // hold cloud-only rows), so only the mirror needs to follow the delete.
+      // Touching disk here could hit a user's own file at that virtual path.
+      await _mirror.commit(
+        deleteServerIds: [fileId],
+        deleteUnderPath: entry.isFolder ? entry.localPath : null,
+      );
+      Diagnostics.event('sync.remote_delete.complete');
+      return;
+    }
+
     if (entry.isFolder) {
       _assertWithinSyncFolder(syncFolderPath, entry.localPath);
       if (!await _deleteTrackedFolder(entry.localPath)) {
@@ -429,6 +449,7 @@ class PullSyncService {
     String fileId,
     String syncFolderPath, {
     FileItem? prefetched,
+    bool forceDownload = false,
   }) async {
     final FileItem remote;
     try {
@@ -450,14 +471,35 @@ class PullSyncService {
     final previous = await _mirror.getByServerId(fileId);
     // A provisional row belongs to this device's interrupted upload. Let
     // the scanner retry it or propagate a local deletion before any download.
-    if (previous != null && !previous.isFolder && previous.contentHash == null) return;
-    final dirPath = await _resolveLocalDirPath(remote.parentId, syncFolderPath);
+    // (Only a downloaded row can be provisional: a cloud-only file has a
+    // null hash by design.)
+    if (previous != null &&
+        previous.downloaded &&
+        !previous.isFolder &&
+        previous.contentHash == null) {
+      return;
+    }
+    // The virtual path is resolved without touching disk first, because the
+    // pin decision below needs it (folder pins match by path prefix).
+    final dirPath = await _resolveLocalDirPath(
+      remote.parentId,
+      syncFolderPath,
+      materialize: false,
+    );
     final localPath = _safeChildPath(
       syncFolderPath,
       dirPath,
       remote.name,
       _isWindows,
     );
+    // Something already on disk stays in sync (an upgraded install, or a
+    // file the user pinned and hydrated earlier); anything else follows pins.
+    final download = forceDownload ||
+        (previous?.downloaded ?? false) ||
+        await _mirror.isEffectivelyPinned(remote.id, localPath);
+    if (download) {
+      await _resolveLocalDirPath(remote.parentId, syncFolderPath, materialize: true);
+    }
     _progress?.startFile(
       fileId,
       p.relative(localPath, from: syncFolderPath),
@@ -469,7 +511,15 @@ class PullSyncService {
 
     String? contentHash;
     if (remote.isFolder) {
-      if (moved && previous.isFolder) {
+      // A folder that exists only in the mirror has no directory to rename;
+      // its children's virtual paths still have to follow it.
+      final renameOnDisk = moved && previous.isFolder && previous.downloaded;
+      if (moved && previous.isFolder && !renameOnDisk) {
+        await _mirror.rePathChildren(previous.localPath, localPath);
+      }
+      if (!download) {
+        // Cloud-only folder: mirror row only, no directory.
+      } else if (renameOnDisk) {
         await Directory(localPath).parent.create(recursive: true);
         try {
           // A directory rename moves every child with it — creating an
@@ -486,6 +536,15 @@ class PullSyncService {
         await _mirror.rePathChildren(previous.localPath, localPath);
       } else {
         await Directory(localPath).create(recursive: true);
+      }
+    } else if (!download) {
+      // Cloud-only file: record metadata, write nothing. A file already
+      // sitting at the path is still the user's (pull never put it there),
+      // so it is quarantined exactly like a refused overwrite.
+      if (await File(localPath).exists()) {
+        throw LocalConflictException(
+          'local file exists where a cloud-only item would live: $localPath',
+        );
       }
     } else {
       // Order matters here: check for a local conflict *before* touching
@@ -534,8 +593,54 @@ class PullSyncService {
         contentHash: contentHash,
         updatedAt: remote.updatedAt,
         syncedAt: DateTime.now(),
+        downloaded: download,
       ),
     );
+  }
+
+  /// Downloads whatever is still cloud-only at or under [serverId] (a file,
+  /// or every file beneath a folder), typically right after the user pinned
+  /// it. Already-downloaded files are skipped, so it is cheap to repeat and
+  /// never re-fetches or overwrites local edits. Safety checks are the
+  /// normal ones; an item that cannot be written is quarantined via
+  /// [SyncMirrorRepository.recordFailedEvent] instead of aborting the rest.
+  /// Deliberately independent of [pullOnce]'s cursor. Sequential: it is a
+  /// one-off catch-up, not the hot path.
+  Future<void> hydrate(String serverId, String syncFolderPath) async {
+    await _hydrate(await _fileRepository.getFile(serverId), syncFolderPath);
+  }
+
+  Future<void> _hydrate(FileItem item, String syncFolderPath) async {
+    if (item.isDeleted) return;
+    try {
+      if (item.isFolder || (await _mirror.getByServerId(item.id))?.downloaded != true) {
+        await _applyUpsertCore(
+          item.id,
+          syncFolderPath,
+          prefetched: item,
+          forceDownload: true,
+        );
+      }
+    } on UnsafeRemoteNameException catch (e) {
+      await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
+      return;
+    } on LocalConflictException catch (e) {
+      await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.toString());
+      return;
+    } on FileSystemException catch (e) {
+      await _mirror.recordFailedEvent(item.id, _bootstrapEventId, e.message);
+      return;
+    }
+    if (!item.isFolder) return;
+    var page = 1;
+    while (true) {
+      final result = await _fileRepository.listChildren(item.id, page: page);
+      for (final child in result.items) {
+        await _hydrate(child, syncFolderPath);
+      }
+      if (!result.hasMore) break;
+      page++;
+    }
   }
 
   /// True if writing to [localPath] would clobber something pull did not
@@ -602,29 +707,42 @@ class PullSyncService {
   /// walking the parentId chain as needed and caching each folder it visits
   /// as a mirror row — so later files under the same folder resolve from
   /// the mirror instead of re-walking the chain.
+  ///
+  /// With [materialize] false nothing is created on disk and folders are
+  /// recorded as cloud-only; with true every folder on the chain gets its
+  /// directory, and a folder row that was cloud-only is flipped to
+  /// downloaded — otherwise the scanner would see a directory the mirror
+  /// says does not exist and try to create it on the server.
   Future<String> _resolveLocalDirPath(
     String? folderId,
-    String syncFolderPath,
-  ) async {
+    String syncFolderPath, {
+    required bool materialize,
+  }) async {
     if (folderId == null) return syncFolderPath;
 
     final cached = await _mirror.getByServerId(folderId);
-    if (cached != null) return cached.localPath;
+    if (cached != null && (cached.downloaded || !materialize)) {
+      return cached.localPath;
+    }
 
     final folder = await _fileRepository.getFile(folderId);
     final parentPath = await _resolveLocalDirPath(
       folder.parentId,
       syncFolderPath,
+      materialize: materialize,
     );
-    final dirPath = _safeChildPath(
-      syncFolderPath,
-      parentPath,
-      folder.name,
-      _isWindows,
-    );
+    final dirPath = cached?.localPath ??
+        _safeChildPath(
+          syncFolderPath,
+          parentPath,
+          folder.name,
+          _isWindows,
+        );
 
-    await _assertNoLinks(syncFolderPath, dirPath);
-    await Directory(dirPath).create(recursive: true);
+    if (materialize) {
+      await _assertNoLinks(syncFolderPath, dirPath);
+      await Directory(dirPath).create(recursive: true);
+    }
     await _mirror.upsert(
       SyncMirrorEntry(
         serverId: folder.id,
@@ -632,6 +750,7 @@ class PullSyncService {
         isFolder: true,
         updatedAt: folder.updatedAt,
         syncedAt: DateTime.now(),
+        downloaded: materialize,
       ),
     );
 
@@ -870,8 +989,13 @@ class PullSyncService {
             item.name,
             _isWindows,
           );
-          await _assertNoLinks(syncFolderPath, localPath);
-          await Directory(localPath).create(recursive: true);
+          final pinned = await _mirror.isEffectivelyPinned(item.id, localPath);
+          if (pinned) {
+            await _resolveLocalDirPath(item.parentId, syncFolderPath, materialize: true);
+            await _assertNoLinks(syncFolderPath, localPath);
+            await Directory(localPath).create(recursive: true);
+          }
+          // Not pinned: mirror row only, no local directory (cloud-only).
           await _mirror.upsert(
             SyncMirrorEntry(
               serverId: item.id,
@@ -879,6 +1003,7 @@ class PullSyncService {
               isFolder: true,
               updatedAt: item.updatedAt,
               syncedAt: DateTime.now(),
+              downloaded: pinned,
             ),
           );
         } on UnsafeRemoteNameException catch (e) {
@@ -934,6 +1059,23 @@ class PullSyncService {
         return;
       }
 
+      if (!await _mirror.isEffectivelyPinned(item.id, localPath)) {
+        // Cloud-only: metadata only, nothing on disk.
+        await _mirror.upsert(
+          SyncMirrorEntry(
+            serverId: item.id,
+            localPath: localPath,
+            isFolder: false,
+            sizeBytes: item.sizeBytes,
+            updatedAt: item.updatedAt,
+            syncedAt: DateTime.now(),
+            downloaded: false,
+          ),
+        );
+        return;
+      }
+
+      await _resolveLocalDirPath(item.parentId, syncFolderPath, materialize: true);
       final contentHash = await _downloadToFile(
         item.id,
         localPath,

@@ -96,6 +96,7 @@ class _StatefulMirror {
         contentHash: e.contentHash,
         updatedAt: e.updatedAt,
         syncedAt: e.syncedAt,
+        downloaded: e.downloaded,
       );
 
   SyncMirrorEntry? row(String serverId) => rows.where((e) => e.serverId == serverId).firstOrNull;
@@ -1614,5 +1615,45 @@ void main() {
       // (case-sensitive)").
       skip: _isCaseInsensitiveHost ? 'host filesystem is case-insensitive' : false,
     );
+  });
+
+  group('cloud-only entries', () {
+    test('CloudOnly_NoFileOnDisk_IsNotPushedAsDelete', () async {
+      // The data-loss case: a cloud-only file/folder has a mirror row but,
+      // by design, nothing on disk. Reading that as "deleted locally" would
+      // trash the user's cloud copy.
+      final mirror = stateful([
+        SyncMirrorEntry(serverId: 'cloud-file', localPath: p.join(tempDir.path, 'remote.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'cloud-dir', localPath: p.join(tempDir.path, 'Docs'),
+          isFolder: true, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'cloud-nested', localPath: p.join(tempDir.path, 'Docs', 'inner.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+      ]);
+
+      final pushed = await scanner.scanOnce(tempDir.path);
+
+      expect(pushed, 0);
+      verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
+      expect(mirror.rows.map((e) => e.serverId), containsAll(['cloud-file', 'cloud-dir', 'cloud-nested']));
+    });
+
+    test('DownloadedNextToCloudOnly_MissingDownloadedStillPushedAsDelete', () async {
+      // Teeth check: the exclusion must be per row, not a blanket "skip
+      // deletes" - a downloaded file the user removed is still a delete.
+      stateful([
+        SyncMirrorEntry(serverId: 'cloud-file', localPath: p.join(tempDir.path, 'remote.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'local-gone', localPath: p.join(tempDir.path, 'gone.txt'),
+          isFolder: false, sizeBytes: 5, contentHash: 'h', updatedAt: past, syncedAt: past),
+      ]);
+      when(() => mockFileRepository.deleteFile('local-gone', originDeviceId: any(named: 'originDeviceId')))
+          .thenAnswer((_) async {});
+
+      expect(await scanner.scanOnce(tempDir.path), 1);
+
+      verify(() => mockFileRepository.deleteFile('local-gone', originDeviceId: 'dev-1')).called(1);
+      verifyNever(() => mockFileRepository.deleteFile('cloud-file', originDeviceId: any(named: 'originDeviceId')));
+    });
   });
 }

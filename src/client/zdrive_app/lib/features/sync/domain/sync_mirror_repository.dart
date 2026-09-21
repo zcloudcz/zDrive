@@ -71,6 +71,25 @@ abstract class SyncMirrorRepository {
     ({String from, String to})? rePath,
   });
 
+  /// Marks [serverId] (a file or a folder) "always keep offline". A folder
+  /// pin covers everything beneath it, including items created later.
+  /// Pinning only records the intent — downloading is PullSyncService's job.
+  Future<void> pin(String serverId);
+
+  /// Removes the pin on [serverId]. Never touches files on disk or mirror
+  /// rows — freeing space is a separate, explicit step.
+  Future<void> unpin(String serverId);
+
+  /// Whether [serverId] itself carries a pin (not inherited).
+  Future<bool> isPinned(String serverId);
+
+  /// Whether the item is pinned directly or lives under a pinned folder.
+  /// Ancestors are found by [localPath] prefix among mirrored folders (the
+  /// mirror is path-based everywhere, and cloud-only rows keep a virtual
+  /// path), so it works for an item that has no mirror row yet — pull asks
+  /// before it creates one.
+  Future<bool> isEffectivelyPinned(String serverId, String localPath);
+
   /// Wipes every row from every mirror table (files, cursor, bootstrap
   /// state, failed events) in one transaction — used by
   /// [SyncCoordinator.endSession] (a new account on this machine must not

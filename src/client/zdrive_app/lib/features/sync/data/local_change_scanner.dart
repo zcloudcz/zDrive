@@ -213,7 +213,11 @@ class LocalChangeScanner {
       if (p.isWithin(_key(root), path) && _isBackedOff(path)) _reportPendingFailure(path);
     }
 
-    final mirrorEntries = await _mirror.getChildrenUnder(root);
+    // Cloud-only rows are excluded up front: they have no file on disk by
+    // design, so leaving them in would classify every one as "deleted
+    // locally" and push a server-side delete — data loss. They also must not
+    // be a rename/move target or parent lookup, since nothing exists there.
+    final mirrorEntries = (await _mirror.getChildrenUnder(root)).where((e) => e.downloaded).toList();
     final mirrorByPath = <String, SyncMirrorEntry>{for (final e in mirrorEntries) e.localPath: e};
     final disk = await _walkDisk(root);
     final c = _classify(root, mirrorEntries, disk);

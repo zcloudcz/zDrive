@@ -138,6 +138,7 @@ void main() {
     required String localPath,
     bool isFolder = false,
     String? contentHash,
+    bool downloaded = true,
   }) =>
       SyncMirrorEntry(
         serverId: serverId,
@@ -146,6 +147,7 @@ void main() {
         contentHash: contentHash,
         updatedAt: DateTime.utc(2026, 1, 1),
         syncedAt: DateTime.utc(2026, 1, 1),
+        downloaded: downloaded,
       );
 
   group('mirror rows', () {
@@ -477,6 +479,104 @@ void main() {
       );
 
       await (await migrated.debugDatabase).close();
+    });
+  });
+
+  group('cloud-only state and pins', () {
+    test('downloaded flag round-trips, defaulting to true', () async {
+      await repository.upsert(entry(serverId: 'a', localPath: '/s/a.txt'));
+      await repository.upsert(entry(serverId: 'b', localPath: '/s/b.txt', downloaded: false));
+
+      expect((await repository.getByServerId('a'))!.downloaded, isTrue);
+      expect((await repository.getByServerId('b'))!.downloaded, isFalse);
+    });
+
+    test('Pin_FolderPin_CoversDescendantsButNotSiblings', () async {
+      final sep = Platform.pathSeparator;
+      await repository.upsert(entry(serverId: 'dir', localPath: '${sep}s${sep}Docs', isFolder: true));
+      await repository.pin('dir');
+
+      expect(await repository.isPinned('dir'), isTrue);
+      expect(await repository.isEffectivelyPinned('new-file', '${sep}s${sep}Docs${sep}sub${sep}x.txt'), isTrue);
+      // "Docs2" shares the string prefix but is not beneath Docs.
+      expect(await repository.isEffectivelyPinned('other', '${sep}s${sep}Docs2${sep}x.txt'), isFalse);
+      expect(await repository.isEffectivelyPinned('other', '${sep}s${sep}x.txt'), isFalse);
+    });
+
+    test('Pin_FilePin_IsEffectiveForItselfOnly', () async {
+      await repository.pin('file');
+      expect(await repository.isEffectivelyPinned('file', '/s/f.txt'), isTrue);
+      expect(await repository.isEffectivelyPinned('file2', '/s/f2.txt'), isFalse);
+    });
+
+    test('Unpin_RemovesPinAndKeepsMirrorRows', () async {
+      await repository.upsert(entry(serverId: 'dir', localPath: '/s/Docs', isFolder: true));
+      await repository.pin('dir');
+      await repository.unpin('dir');
+
+      expect(await repository.isPinned('dir'), isFalse);
+      expect(await repository.getByServerId('dir'), isNotNull);
+    });
+
+    test('clearAll_DropsPins', () async {
+      await repository.pin('dir');
+      await repository.clearAll();
+      expect(await repository.isPinned('dir'), isFalse);
+    });
+
+    test('Migration_FromV3_KeepsExistingRowsAsDownloaded', () async {
+      final dir = Directory.systemTemp.createTempSync('mirror_v3_');
+      final dbPath = p.join(dir.path, 'v3.db');
+      try {
+        sqfliteFfiInit();
+        final old = await databaseFactoryFfi.openDatabase(
+          dbPath,
+          options: OpenDatabaseOptions(
+            version: 3,
+            onCreate: (db, version) async {
+              await db.execute('''
+                CREATE TABLE mirror_files (
+                  serverId TEXT PRIMARY KEY,
+                  localPath TEXT NOT NULL,
+                  isFolder INTEGER NOT NULL,
+                  sizeBytes INTEGER,
+                  contentHash TEXT,
+                  updatedAt TEXT NOT NULL,
+                  syncedAt TEXT NOT NULL
+                )
+              ''');
+              await db.execute('CREATE TABLE sync_cursor (deviceId TEXT PRIMARY KEY, cursor INTEGER NOT NULL)');
+              await db.execute('CREATE TABLE bootstrap_state (deviceId TEXT PRIMARY KEY)');
+              await db.execute(
+                'CREATE TABLE failed_events (fileId TEXT PRIMARY KEY, eventId INTEGER NOT NULL, '
+                'reason TEXT NOT NULL, failedAt TEXT NOT NULL)',
+              );
+            },
+          ),
+        );
+        await old.insert('mirror_files', {
+          'serverId': 'legacy',
+          'localPath': '/s/legacy.txt',
+          'isFolder': 0,
+          'sizeBytes': 3,
+          'contentHash': 'h',
+          'updatedAt': DateTime.utc(2026).toIso8601String(),
+          'syncedAt': DateTime.utc(2026).toIso8601String(),
+        });
+        await old.close();
+
+        final migrated = SqfliteSyncMirrorRepository.withDbPath(dbPath);
+        final row = await migrated.getByServerId('legacy');
+        expect(row, isNotNull);
+        expect(row!.downloaded, isTrue);
+        expect(row.contentHash, 'h');
+        // The new pins table exists and is usable after the upgrade.
+        await migrated.pin('legacy');
+        expect(await migrated.isPinned('legacy'), isTrue);
+        await (await migrated.debugDatabase).close();
+      } finally {
+        dir.deleteSync(recursive: true);
+      }
     });
   });
 }
