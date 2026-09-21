@@ -338,6 +338,25 @@ void main() {
     expect(await mirror.getFailedEvents(), isEmpty);
   });
 
+  test('Hydrate_FolderFailedOnItself_RetryStillDownloadsItsChildren', () async {
+    // Review round 2: the retry re-applied the folder with the download
+    // forced, which skips the children pass - the folder came back but stayed
+    // empty for good, since no change event exists for its children.
+    serve([docs, inner]);
+    await service.pullOnce(root.path); // cloud-only
+    File(path('Docs')).writeAsStringSync('blocker'); // a file where the dir must go
+    await service.hydrate('docs', root.path);
+    expect((await mirror.getFailedEvents()).single.fileId, 'docs');
+
+    File(path('Docs')).deleteSync();
+    await (await mirror.debugDatabase)
+        .update('failed_events', {'failedAt': DateTime.utc(2020).toIso8601String()});
+    await service.pullOnce(root.path);
+
+    expect(File(path('Docs/inner.txt')).existsSync(), isTrue);
+    expect(await mirror.getFailedEvents(), isEmpty);
+  });
+
   test('DeleteRow_RemovesItsPin', () async {
     serve([docs, inner]);
     await mirror.pin('docs');

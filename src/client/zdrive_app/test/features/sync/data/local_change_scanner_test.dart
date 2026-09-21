@@ -1676,6 +1676,27 @@ void main() {
       expect(mirror.row('cloud-top')!.downloaded, isFalse);
     });
 
+    test('CloudOnlyFileCollision_RenameOntoItsPath_SourceIsNotTrashedOnServer', () async {
+      // Regression from review round 2: quarantining the destination hid the
+      // rename from move detection, so the tracked source looked deleted and
+      // was trashed on the server while its bytes sat under the new name.
+      final dest = p.join(tempDir.path, 'Report.pdf');
+      File(dest).writeAsStringSync('draft'); // draft.pdf renamed to Report.pdf
+      final mirror = stateful([
+        SyncMirrorEntry(serverId: 'cloud-report', localPath: dest,
+          isFolder: false, sizeBytes: 99, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'draft', localPath: p.join(tempDir.path, 'draft.pdf'),
+          isFolder: false, sizeBytes: 5, contentHash: 'h-draft', updatedAt: past, syncedAt: past),
+      ]);
+      when(() => mockMirror.recordFailedEvent(any(), any(), any())).thenAnswer((_) async {});
+
+      expect(await scanner.scanOnce(tempDir.path), 0);
+
+      verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
+      expect(mirror.row('draft'), isNotNull);
+    });
+
     test('CloudOnlyFolderCollision_LocalFolderAtItsPath_NotAdoptedAndDeleteNeverTrashesSubtree', () async {
       // Scenario B: local "Docs" next to a cloud-only "Docs" with children.
       // Adopting it would let a later local delete trash the server subtree.

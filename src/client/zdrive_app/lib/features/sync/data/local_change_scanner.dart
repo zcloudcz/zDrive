@@ -222,7 +222,17 @@ class LocalChangeScanner {
     final mirrorByPath = <String, SyncMirrorEntry>{for (final e in mirrorEntries) e.localPath: e};
     final disk = await _walkDisk(root);
     final c = _classify(root, mirrorEntries, disk);
-    await _quarantineCloudOnlyCollisions(allEntries, c.newFiles, c.newDirs);
+    final quarantined = await _quarantineCloudOnlyCollisions(allEntries, c.newFiles, c.newDirs);
+    // A quarantined file may be the *destination* of a local rename/move of a
+    // tracked file (Report.pdf -> renamed onto a cloud-only name). Dropping it
+    // hides that from move detection, so the source would look deleted and
+    // be trashed on the server. Same-size missing files are therefore
+    // protected, mirroring the unhashed-new-file rule in _applyMoves
+    // (conservative: it may spare a genuinely deleted file for a scan or two
+    // until the collision is resolved, never the reverse).
+    final quarantinedSizes = <int>{
+      for (final f in quarantined.files) (await File(f).stat()).size,
+    };
 
     // --- 0b. Case-only rename (decision 2) ---
     // Must run before anything below creates or deletes: on a match,
@@ -247,6 +257,7 @@ class LocalChangeScanner {
     // --- 2. Moves/renames by content hash ---
     final moves = await _applyMoves(c.newFiles, c.missingFiles, root, mirrorByPath, progress);
     pushed += moves.pushed;
+    moves.protectedMissingFiles.addAll(c.missingFiles.where((e) => quarantinedSizes.contains(e.sizeBytes)));
 
     final changedHashes = <String, ({String hash, int size})>{};
     progress?.beginPhase(SyncPhase.hashing, totalFiles: c.changeCandidates.length);
@@ -315,7 +326,7 @@ class LocalChangeScanner {
   /// is skipped by the unresolved-parent rule) and surfaced through the same
   /// failed-events list pull uses for its own local-conflict refusals. The
   /// user resolves it by moving/renaming the local item.
-  Future<void> _quarantineCloudOnlyCollisions(
+  Future<({List<String> files, List<String> dirs})> _quarantineCloudOnlyCollisions(
     List<SyncMirrorEntry> allEntries,
     List<String> newFiles,
     List<String> newDirs,
@@ -324,10 +335,13 @@ class LocalChangeScanner {
       for (final e in allEntries)
         if (!e.downloaded) _key(e.localPath): e,
     };
-    if (cloudOnly.isEmpty) return;
-    for (final list in [newFiles, newDirs]) {
+    final droppedFiles = <String>[];
+    final droppedDirs = <String>[];
+    if (cloudOnly.isEmpty) return (files: droppedFiles, dirs: droppedDirs);
+    for (final (list, dropped) in [(newFiles, droppedFiles), (newDirs, droppedDirs)]) {
       final collisions = list.where((path) => cloudOnly.containsKey(_key(path))).toList();
       for (final path in collisions) {
+        dropped.add(path);
         final entry = cloudOnly[_key(path)]!;
         await _mirror.recordFailedEvent(
           entry.serverId,
@@ -337,6 +351,7 @@ class LocalChangeScanner {
         list.remove(path);
       }
     }
+    return (files: droppedFiles, dirs: droppedDirs);
   }
 
   /// Walks [root] once, collecting every syncable directory and file path —

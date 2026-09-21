@@ -329,11 +329,20 @@ class PullSyncService {
     _progress?.setTotalFiles(_plannedItems);
     for (final failed in retryItems) {
       try {
+        final wasHydrate = _hydrateIntent.contains(failed.fileId);
         await _applyUpsert(
           failed.fileId,
           syncFolderPath,
-          forceDownload: _hydrateIntent.contains(failed.fileId),
+          forceDownload: wasHydrate,
         );
+        // _applyUpsertCore skips the children pass when forceDownload is set
+        // (hydrate does it itself), so a folder whose hydrate failed on the
+        // folder itself must get its children here or it stays empty forever:
+        // no change event will ever arrive for them.
+        if (wasHydrate) {
+          final item = await _fileRepository.getFile(failed.fileId);
+          if (item.isFolder && !item.isDeleted) await _hydrateChildren(item, syncFolderPath);
+        }
         _hydrateIntent.remove(failed.fileId);
         await _mirror.clearFailedEvent(failed.fileId);
       } catch (e, st) {
