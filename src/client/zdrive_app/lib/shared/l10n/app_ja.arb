@@ -156,5 +156,6 @@
   "cloudMigrationLater": "後で決める",
   "cloudMigrationWorking": "空き容量を確保しています…",
   "cloudMigrationFreed": "{count} 件を解放しました ({size})",
-  "freeUpKeptPinned": "{count} 件をこのデバイスに保持しました: 常に保持"
+  "freeUpKeptPinned": "{count} 件をこのデバイスに保持しました: 常に保持",
+  "cloudMigrationKeeping": "すべてをこのデバイスに保持しています…"
 }

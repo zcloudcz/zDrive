@@ -532,4 +532,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String freeUpKeptPinned(int count) {
     return '$count conservados en este dispositivo: conservar siempre';
   }
+
+  @override
+  String get cloudMigrationKeeping => 'Conservando todo en este dispositivo…';
 }

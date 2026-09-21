@@ -236,7 +236,7 @@ void main() {
       expect(result.freed, 2);
       expect(result.freedBytes, 6);
       expect(result.skippedUnsynced, [path('edited.txt')]);
-      expect(result.keptPinned, greaterThanOrEqualTo(2)); // pinned.txt + Keep/k.txt (+ the folder)
+      expect(result.keptPinned, 2); // pinned.txt + Keep/k.txt; folders are not counted
       expect(File(path('a.txt')).existsSync(), isFalse);
       expect(File(path('Docs/b.txt')).existsSync(), isFalse);
       expect(Directory(path('Docs')).existsSync(), isFalse);
@@ -265,6 +265,19 @@ void main() {
       verifyServerUntouched();
       expect(await mirror.getByServerId('a'), isNotNull);
       expect(await mirror.getByServerId('b'), isNotNull);
+    });
+
+    test('BulkFreeUp_PinnedFolderWithNoFilesInIt_IsNotCountedAsAKeptFile', () async {
+      // keptPinned counts files, like every other counter: a pinned folder row
+      // that holds nothing downloaded is kept but adds nothing to it.
+      await legacyFolder('top', 'Top');
+      await legacyFolder('sub', 'Top/Sub');
+      await mirror.pin('sub');
+
+      final result = await coordinator.freeUpEverythingUnpinned(root.path);
+
+      expect(result.keptPinned, 0);
+      expect(Directory(path('Top/Sub')).existsSync(), isTrue);
     });
 
     test('BulkFreeUp_SecondRun_IsIdempotent', () async {
@@ -324,8 +337,12 @@ void main() {
 
       expect(snapshots.first.phase, SyncPhase.deleting);
       expect(snapshots.first.totalFiles, 3); // a, b, edited: the estimate excludes pinned
-      // Every examined file (freed, kept-edited, kept-pinned) is finished.
-      expect(snapshots.last.completedFiles, 5);
+      // Pinned files are not work, so the bar ends exactly full, never "5 of 3".
+      expect(snapshots.last.completedFiles, 3);
+      expect(snapshots.last.completedFiles, lessThanOrEqualTo(snapshots.first.totalFiles));
+      // Paths are relative to the sync folder, like pull's progress.
+      final shown = snapshots.expand((s) => s.activeFiles).map((f) => f.path).toSet();
+      expect(shown, containsAll(['a.txt', p.join('Docs', 'b.txt'), 'edited.txt']));
     });
 
     test('BulkFreeUp_StaleFolder_DoesNothingAndDecidesNothing', () async {

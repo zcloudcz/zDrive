@@ -50,7 +50,7 @@ class LocalConflictException implements Exception {
 
 /// What [PullSyncService.freeUp] did: how many files left the disk, which
 /// ones stayed because of an unsynced local edit (or an unreadable file), and
-/// how many stayed because a pin still covers them.
+/// how many files stayed because a pin still covers them (folders are not counted).
 class FreeUpResult {
   int freed = 0;
   int freedBytes = 0;
@@ -802,7 +802,17 @@ class PullSyncService {
 
   /// Returns whether the file is off the disk now.
   Future<bool> _freeUpFile(SyncMirrorEntry entry, String syncFolderPath, FreeUpResult result) async {
-    _progress?.startFile(entry.serverId, entry.localPath, totalBytes: entry.sizeBytes);
+    // A pinned file is not work: it is neither in the bulk estimate that sizes
+    // the progress total nor examined, so it must not advance the bar.
+    if (await _mirror.isEffectivelyPinned(entry.serverId, entry.localPath)) {
+      result.keptPinned++;
+      return false;
+    }
+    _progress?.startFile(
+      entry.serverId,
+      p.relative(entry.localPath, from: syncFolderPath),
+      totalBytes: entry.sizeBytes,
+    );
     try {
       return await _freeUpFileCore(entry, syncFolderPath, result);
     } finally {
@@ -811,10 +821,6 @@ class PullSyncService {
   }
 
   Future<bool> _freeUpFileCore(SyncMirrorEntry entry, String syncFolderPath, FreeUpResult result) async {
-    if (await _mirror.isEffectivelyPinned(entry.serverId, entry.localPath)) {
-      result.keptPinned++;
-      return false;
-    }
     String? onDisk;
     try {
       await _assertNoLinks(syncFolderPath, entry.localPath);
@@ -860,8 +866,8 @@ class PullSyncService {
         kept.add(dir.localPath);
         continue;
       }
+      // Not counted in keptPinned: that counter is files only, like the others.
       if (await _mirror.isEffectivelyPinned(dir.serverId, dir.localPath)) {
-        result.keptPinned++;
         kept.add(dir.localPath);
         continue;
       }

@@ -89,13 +89,18 @@ class CloudOnlyMigrationDialog extends StatelessWidget {
           return PopScope(
             canPop: false,
             child: AlertDialog(
-              title: Text(l10n.cloudMigrationWorking),
+              title: Text(migration.keeping ? l10n.cloudMigrationKeeping : l10n.cloudMigrationWorking),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (progress != null && progress.totalFiles > 0)
-                    Text(l10n.syncProgressCounts(progress.completedFiles, progress.totalFiles, progress.remainingFiles)),
+                  if (!migration.keeping && progress != null && progress.totalFiles > 0)
+                    // The total is an estimate from the mirror: never show "5 of 3".
+                    Text(l10n.syncProgressCounts(
+                      progress.completedFiles.clamp(0, progress.totalFiles),
+                      progress.totalFiles,
+                      progress.remainingFiles,
+                    )),
                   const SizedBox(height: 12),
                   LinearProgressIndicator(
                     // The total is only an estimate (kept files count too), so

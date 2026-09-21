@@ -158,6 +158,25 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('Dialog_KeepEverythingWaitingOnTheLock_SaysKeepingNotFreeingUp', (tester) async {
+    final gate = Completer<void>();
+    when(() => coordinator.keepEverythingOnDevice('/sync')).thenAnswer((_) => gate.future);
+    await tester.pumpWidget(shell(desktop: true));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Keep everything on this device'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Keeping everything on this device…'), findsOneWidget);
+    expect(find.text('Freeing up space…'), findsNothing);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    await unmount(tester);
+  });
+
   testWidgets('Dialog_FreeUp_ShowsProgressThenResultWithKeptCounts', (tester) async {
     final finish = Completer<FreeUpResult>();
     when(() => coordinator.freeUpEverythingUnpinned('/sync', progress: any(named: 'progress')))

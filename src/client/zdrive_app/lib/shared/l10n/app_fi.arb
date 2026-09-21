@@ -156,5 +156,6 @@
   "cloudMigrationLater": "Päätä myöhemmin",
   "cloudMigrationWorking": "Vapautetaan tilaa…",
   "cloudMigrationFreed": "Vapautettu {count} tiedostoa, {size}",
-  "freeUpKeptPinned": "{count} säilytetty tällä laitteella: säilytä aina"
+  "freeUpKeptPinned": "{count} säilytetty tällä laitteella: säilytä aina",
+  "cloudMigrationKeeping": "Säilytetään kaikki tällä laitteella…"
 }

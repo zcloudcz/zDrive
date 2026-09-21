@@ -533,4 +533,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String freeUpKeptPinned(int count) {
     return '$count auf diesem Gerät behalten: immer behalten';
   }
+
+  @override
+  String get cloudMigrationKeeping => 'Alles wird auf diesem Gerät behalten…';
 }

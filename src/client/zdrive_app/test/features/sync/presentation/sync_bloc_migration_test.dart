@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -200,5 +202,51 @@ void main() {
     expect(migrationOf(bloc), isNull);
     verify(() => coordinator.keepEverythingOnDevice('/local/sync')).called(1);
     verifyNever(() => coordinator.freeUpEverythingUnpinned(any(), progress: any(named: 'progress')));
+  });
+
+  test('KeepAll_WhileWaitingOnTheLock_IsMarkedKeepingNotFreeingAndClearsStaleSnackbarCounts', () async {
+    final gate = Completer<void>();
+    when(() => coordinator.keepEverythingOnDevice('/local/sync')).thenAnswer((_) => gate.future);
+    final bloc = build()
+      ..emit(const SyncLoaded(devices: [], syncFolderPath: '/local/sync', freeUpSkipped: 2, freeUpKeptPinned: 1));
+    addTearDown(bloc.close);
+    bloc.add(const CloudOnlyMigrationCheckRequested());
+    await settle();
+
+    bloc.add(const CloudOnlyMigrationChosen(CloudOnlyMigrationChoice.keepAll));
+    await settle();
+
+    final running = bloc.state as SyncLoaded;
+    expect(running.migration!.running, isTrue);
+    expect(running.migration!.keeping, isTrue);
+    // A stale per-item snackbar must not fire when the revision bumps.
+    expect(running.freeUpSkipped, 0);
+    expect(running.freeUpKeptPinned, 0);
+
+    gate.complete();
+    await settle();
+    expect(migrationOf(bloc), isNull);
+  });
+
+  test('FreeUp_Running_IsNotMarkedKeepingAndClearsStaleSnackbarCounts', () async {
+    final gate = Completer<FreeUpResult>();
+    when(() => coordinator.freeUpEverythingUnpinned(any(), progress: any(named: 'progress')))
+        .thenAnswer((_) => gate.future);
+    final bloc = build()
+      ..emit(const SyncLoaded(devices: [], syncFolderPath: '/local/sync', freeUpSkipped: 2, freeUpKeptPinned: 1));
+    addTearDown(bloc.close);
+    bloc.add(const CloudOnlyMigrationCheckRequested());
+    await settle();
+
+    bloc.add(const CloudOnlyMigrationChosen(CloudOnlyMigrationChoice.freeUp));
+    await settle();
+
+    final running = bloc.state as SyncLoaded;
+    expect(running.migration!.running, isTrue);
+    expect(running.migration!.keeping, isFalse);
+    expect(running.freeUpSkipped, 0);
+    expect(running.freeUpKeptPinned, 0);
+    gate.complete(FreeUpResult());
+    await settle();
   });
 }

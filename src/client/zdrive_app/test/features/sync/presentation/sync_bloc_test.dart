@@ -654,6 +654,7 @@ void main() {
       verify: (_) {
         verify(() => mockSyncCoordinator.resetForNewFolder('/new/folder')).called(1);
         verifyNever(() => mockPreferences.setSyncFolderPath(any()));
+        verify(() => mockPreferences.setCloudOnlyMigrationDecided()).called(1);
       },
     );
 
@@ -671,7 +672,12 @@ void main() {
         when(() => mockDataSource.getDevices()).thenAnswer((_) async => []);
       },
       act: (bloc) => bloc.add(const SyncFolderChosen('/same/folder')),
-      verify: (_) => verifyNever(() => mockSyncCoordinator.resetForNewFolder(any())),
+      verify: (_) {
+        verifyNever(() => mockSyncCoordinator.resetForNewFolder(any()));
+        // Re-picking the same folder must not permanently hide the one-time
+        // cloud-only migration offer.
+        verifyNever(() => mockPreferences.setCloudOnlyMigrationDecided());
+      },
     );
 
     blocTest<SyncBloc, SyncState>(

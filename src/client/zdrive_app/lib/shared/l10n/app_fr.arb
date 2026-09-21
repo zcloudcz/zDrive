@@ -156,5 +156,6 @@
   "cloudMigrationLater": "Décider plus tard",
   "cloudMigrationWorking": "Libération d’espace…",
   "cloudMigrationFreed": "{count} fichiers libérés, {size}",
-  "freeUpKeptPinned": "{count} conservés sur cet appareil : toujours conserver"
+  "freeUpKeptPinned": "{count} conservés sur cet appareil : toujours conserver",
+  "cloudMigrationKeeping": "Conservation de tout sur cet appareil…"
 }

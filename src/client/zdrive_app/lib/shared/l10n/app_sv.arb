@@ -156,5 +156,6 @@
   "cloudMigrationLater": "Bestäm senare",
   "cloudMigrationWorking": "Frigör utrymme…",
   "cloudMigrationFreed": "{count} filer frigjorda, {size}",
-  "freeUpKeptPinned": "{count} behölls på den här enheten: behåll alltid"
+  "freeUpKeptPinned": "{count} behölls på den här enheten: behåll alltid",
+  "cloudMigrationKeeping": "Behåller allt på den här enheten…"
 }

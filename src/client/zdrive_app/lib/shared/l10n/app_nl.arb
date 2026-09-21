@@ -156,5 +156,6 @@
   "cloudMigrationLater": "Later beslissen",
   "cloudMigrationWorking": "Ruimte vrijmaken…",
   "cloudMigrationFreed": "{count} bestanden vrijgemaakt, {size}",
-  "freeUpKeptPinned": "{count} bewaard op dit apparaat: altijd bewaren"
+  "freeUpKeptPinned": "{count} bewaard op dit apparaat: altijd bewaren",
+  "cloudMigrationKeeping": "Alles op dit apparaat bewaren…"
 }

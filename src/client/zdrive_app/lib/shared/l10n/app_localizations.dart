@@ -1055,6 +1055,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} kept on this device: always kept'**
   String freeUpKeptPinned(int count);
+
+  /// No description provided for @cloudMigrationKeeping.
+  ///
+  /// In en, this message translates to:
+  /// **'Keeping everything on this device…'**
+  String get cloudMigrationKeeping;
 }
 
 class _AppLocalizationsDelegate

@@ -511,4 +511,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String freeUpKeptPinned(int count) {
     return '$count 项已保留在此设备上: 始终保留';
   }
+
+  @override
+  String get cloudMigrationKeeping => '正在将所有内容保留在此设备上…';
 }

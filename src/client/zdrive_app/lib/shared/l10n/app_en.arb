@@ -236,5 +236,6 @@
   "cloudMigrationFreed": "Freed {count} files, {size}",
   "@cloudMigrationFreed": { "placeholders": { "count": { "type": "int" }, "size": { "type": "String" } } },
   "freeUpKeptPinned": "{count} kept on this device: always kept",
-  "@freeUpKeptPinned": { "placeholders": { "count": { "type": "int" } } }
+  "@freeUpKeptPinned": { "placeholders": { "count": { "type": "int" } } },
+  "cloudMigrationKeeping": "Keeping everything on this device…"
 }

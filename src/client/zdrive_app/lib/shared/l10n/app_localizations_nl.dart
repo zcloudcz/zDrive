@@ -529,4 +529,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String freeUpKeptPinned(int count) {
     return '$count bewaard op dit apparaat: altijd bewaren';
   }
+
+  @override
+  String get cloudMigrationKeeping => 'Alles op dit apparaat bewaren…';
 }

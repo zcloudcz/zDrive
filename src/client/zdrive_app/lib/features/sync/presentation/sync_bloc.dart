@@ -105,9 +105,14 @@ sealed class SyncState extends Equatable {
 class CloudOnlyMigration extends Equatable {
   final FreeableEstimate estimate;
   final bool running;
+
+  /// While [running]: the run is "Keep everything" (a few pin writes that may
+  /// still wait behind a sync) rather than the free-up, so the dialog must not
+  /// claim it is freeing space.
+  final bool keeping;
   final FreeUpResult? result;
 
-  const CloudOnlyMigration(this.estimate, {this.running = false, this.result});
+  const CloudOnlyMigration(this.estimate, {this.running = false, this.keeping = false, this.result});
 
   // FreeUpResult is a mutable class without value equality, so its numbers are
   // compared instead; the state must change when the result arrives.
@@ -115,6 +120,7 @@ class CloudOnlyMigration extends Equatable {
   List<Object?> get props => [
     estimate,
     running,
+    keeping,
     result?.freed,
     result?.freedBytes,
     result?.keptPinned,
@@ -386,10 +392,12 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       } else {
         await _preferences.setSyncFolderPath(event.path);
       }
-      // A freshly chosen folder starts cloud-only, so there is no pre-upgrade
-      // full mirror to migrate: never ask about it (a file the user already
-      // had in that folder and that got uploaded is not "space to free").
-      await _preferences.setCloudOnlyMigrationDecided();
+      // A genuinely different folder starts cloud-only, so there is no
+      // pre-upgrade full mirror to migrate: never ask about it (a file the
+      // user already had in that folder and that got uploaded is not "space to
+      // free"). Re-picking the SAME folder changes nothing and must not hide
+      // the offer for good.
+      if (previousPath != event.path) await _preferences.setCloudOnlyMigrationDecided();
       // The bloc can close while the await above is pending (e.g. logout
       // during a folder switch). emit.isDone alone does not cover that:
       // Bloc.close() (bloc 9.x) awaits _eventController.close() FIRST and
@@ -741,7 +749,11 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       return;
     }
     if (event.choice == CloudOnlyMigrationChoice.keepAll) {
-      emit(current.copyWith(migration: () => CloudOnlyMigration(migration.estimate, running: true)));
+      emit(current.copyWith(
+        migration: () => CloudOnlyMigration(migration.estimate, running: true, keeping: true),
+        freeUpSkipped: 0,
+        freeUpKeptPinned: 0,
+      ));
       try {
         await _syncCoordinator.keepEverythingOnDevice(path);
       } catch (e, stack) {
@@ -757,7 +769,11 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       return;
     }
 
-    emit(current.copyWith(migration: () => CloudOnlyMigration(migration.estimate, running: true)));
+    emit(current.copyWith(
+      migration: () => CloudOnlyMigration(migration.estimate, running: true),
+      freeUpSkipped: 0,
+      freeUpKeptPinned: 0,
+    ));
     try {
       final result = await _syncCoordinator.freeUpEverythingUnpinned(
         path,

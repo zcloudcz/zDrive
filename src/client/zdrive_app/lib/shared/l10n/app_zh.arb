@@ -156,5 +156,6 @@
   "cloudMigrationLater": "稍后决定",
   "cloudMigrationWorking": "正在释放空间…",
   "cloudMigrationFreed": "已释放 {count} 个文件，{size}",
-  "freeUpKeptPinned": "{count} 项已保留在此设备上: 始终保留"
+  "freeUpKeptPinned": "{count} 项已保留在此设备上: 始终保留",
+  "cloudMigrationKeeping": "正在将所有内容保留在此设备上…"
 }

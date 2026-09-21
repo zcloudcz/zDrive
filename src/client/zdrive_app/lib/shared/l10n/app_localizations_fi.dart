@@ -528,4 +528,7 @@ class AppLocalizationsFi extends AppLocalizations {
   String freeUpKeptPinned(int count) {
     return '$count säilytetty tällä laitteella: säilytä aina';
   }
+
+  @override
+  String get cloudMigrationKeeping => 'Säilytetään kaikki tällä laitteella…';
 }

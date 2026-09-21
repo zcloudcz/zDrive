@@ -513,4 +513,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String freeUpKeptPinned(int count) {
     return '$count 件をこのデバイスに保持しました: 常に保持';
   }
+
+  @override
+  String get cloudMigrationKeeping => 'すべてをこのデバイスに保持しています…';
 }

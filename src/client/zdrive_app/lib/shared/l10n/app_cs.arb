@@ -211,5 +211,6 @@
   "cloudMigrationLater": "Rozhodnout později",
   "cloudMigrationWorking": "Uvolňuje se místo…",
   "cloudMigrationFreed": "Uvolněno souborů: {count}, {size}",
-  "freeUpKeptPinned": "{count} ponecháno v tomto zařízení: vždy ponechat"
+  "freeUpKeptPinned": "{count} ponecháno v tomto zařízení: vždy ponechat",
+  "cloudMigrationKeeping": "Ponechává se vše v tomto zařízení…"
 }

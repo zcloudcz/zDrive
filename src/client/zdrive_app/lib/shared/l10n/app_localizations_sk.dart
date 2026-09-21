@@ -526,4 +526,7 @@ class AppLocalizationsSk extends AppLocalizations {
   String freeUpKeptPinned(int count) {
     return '$count ponechaných v tomto zariadení: vždy ponechať';
   }
+
+  @override
+  String get cloudMigrationKeeping => 'Ponecháva sa všetko v tomto zariadení…';
 }
