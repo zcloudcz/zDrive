@@ -148,5 +148,13 @@
   "offlineAlwaysKeep": "Behålls alltid på den här enheten",
   "keepOnDevice": "Behåll alltid på den här enheten",
   "freeUpSpace": "Frigör utrymme",
-  "freeUpSkippedUnsynced": "{count} behölls på den här enheten: osynkade ändringar"
+  "freeUpSkippedUnsynced": "{count} behölls på den här enheten: osynkade ändringar",
+  "cloudMigrationTitle": "Frigör utrymme på den här enheten?",
+  "cloudMigrationBody": "Filerna i din synkroniseringsmapp lagras nu i molnet och laddas bara ned när du behöver dem. Filer som kan tas bort från den här enheten: {count}, upp till {size}.",
+  "cloudMigrationReassure": "Dina filer finns kvar i molnet och på webben, och du kan ladda ned dem igen när som helst. Filer med ändringar som ännu inte synkats behålls alltid.",
+  "cloudMigrationKeepAll": "Behåll allt på den här enheten",
+  "cloudMigrationLater": "Bestäm senare",
+  "cloudMigrationWorking": "Frigör utrymme…",
+  "cloudMigrationFreed": "{count} filer frigjorda, {size}",
+  "freeUpKeptPinned": "{count} behölls på den här enheten: behåll alltid"
 }

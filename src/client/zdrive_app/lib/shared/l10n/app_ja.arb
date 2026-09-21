@@ -148,5 +148,13 @@
   "offlineAlwaysKeep": "常にこのデバイスに保持",
   "keepOnDevice": "常にこのデバイスに保持する",
   "freeUpSpace": "空き容量を増やす",
-  "freeUpSkippedUnsynced": "{count} 件をこのデバイスに保持しました: 未同期の変更があります"
+  "freeUpSkippedUnsynced": "{count} 件をこのデバイスに保持しました: 未同期の変更があります",
+  "cloudMigrationTitle": "このデバイスの空き容量を増やしますか?",
+  "cloudMigrationBody": "同期フォルダ内のファイルはクラウドに保管され、必要なときにだけダウンロードされるようになりました。このデバイスから削除できるファイル: {count} 件、最大 {size}。",
+  "cloudMigrationReassure": "ファイルはクラウドとWebで引き続き利用でき、いつでも再ダウンロードできます。まだ同期されていない変更があるファイルは常に保持されます。",
+  "cloudMigrationKeepAll": "すべてこのデバイスに保持する",
+  "cloudMigrationLater": "後で決める",
+  "cloudMigrationWorking": "空き容量を確保しています…",
+  "cloudMigrationFreed": "{count} 件を解放しました ({size})",
+  "freeUpKeptPinned": "{count} 件をこのデバイスに保持しました: 常に保持"
 }

@@ -6,6 +6,7 @@ import 'package:injectable/injectable.dart';
 
 import '../../../core/storage/app_preferences.dart';
 import '../../../core/diagnostics/diagnostics.dart';
+import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
 import '../domain/sync_progress.dart';
 import 'device_id_storage.dart';
@@ -340,6 +341,70 @@ class SyncCoordinator {
       }
       await _mirror.unpin(serverId);
       return _pull.freeUp(serverId, syncFolderPath);
+    });
+  }
+
+  /// One-time migration for installs from before cloud-only sync, which
+  /// mirrored everything: returns what a bulk free-up could remove, or null
+  /// when the user must not be asked (already decided, stale folder/session,
+  /// or nothing freeable). Nothing freeable also records the migration as done
+  /// right here, so a new install or an all-pinned mirror is never asked later.
+  /// Under [_withLock], so the mirror is not read mid-pull.
+  Future<FreeableEstimate?> pendingCloudOnlyMigration(String syncFolderPath) {
+    return _withLock(() async {
+      if (_sessionEnded || _preferences.syncFolderPath != syncFolderPath) return null;
+      if (_preferences.cloudOnlyMigrationDecided) return null;
+      final estimate = await _mirror.estimateFreeable();
+      if (estimate.count == 0) {
+        await _preferences.setCloudOnlyMigrationDecided();
+        return null;
+      }
+      return estimate;
+    });
+  }
+
+  /// Migration choice "Free up space": frees every top-level mirror item via
+  /// [PullSyncService.freeUp] (the one deletion path, so its safety contract
+  /// holds: hash must match, pinned and edited files stay). Unlike
+  /// [freeUpSpace] it never unpins anything. Resumable: freed rows are
+  /// cloud-only afterwards, so a re-run after a crash only continues. The
+  /// decision is recorded only after the whole run finished; a crash midway
+  /// asks again next start and the estimate then covers just what is left.
+  Future<FreeUpResult> freeUpEverythingUnpinned(
+    String syncFolderPath, {
+    SyncProgressTracker? progress,
+  }) {
+    return _withLock(() async {
+      final total = FreeUpResult();
+      if (_sessionEnded || _preferences.syncFolderPath != syncFolderPath) return total;
+      final estimate = await _mirror.estimateFreeable();
+      progress?.beginPhase(SyncPhase.deleting, totalFiles: estimate.count);
+      for (final top in await _mirror.getTopLevelDownloaded(syncFolderPath)) {
+        final part = await _pull.freeUp(top.serverId, syncFolderPath, progress: progress);
+        total.freed += part.freed;
+        total.freedBytes += part.freedBytes;
+        total.keptPinned += part.keptPinned;
+        total.skippedUnsynced.addAll(part.skippedUnsynced);
+      }
+      await _preferences.setCloudOnlyMigrationDecided();
+      return total;
+    });
+  }
+
+  /// Migration choice "Keep everything on this device": pins every top-level
+  /// downloaded item. A folder pin covers everything beneath it, so all
+  /// current files are then pinned and no free-up (bulk or per item) removes
+  /// them; nothing is deleted or downloaded. Pinned folders also download
+  /// items added under them from now on, while new items at the sync root
+  /// still follow the cloud-only default. Chosen over pinning every row
+  /// because it is a few writes instead of one per file.
+  Future<void> keepEverythingOnDevice(String syncFolderPath) {
+    return _withLock(() async {
+      if (_sessionEnded || _preferences.syncFolderPath != syncFolderPath) return;
+      for (final top in await _mirror.getTopLevelDownloaded(syncFolderPath)) {
+        await _mirror.pin(top.serverId);
+      }
+      await _preferences.setCloudOnlyMigrationDecided();
     });
   }
 }

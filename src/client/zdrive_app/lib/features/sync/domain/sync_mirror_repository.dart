@@ -106,6 +106,17 @@ abstract class SyncMirrorRepository {
     String? parentId,
   });
 
+  /// Files that a bulk free-up would consider: downloaded, no direct or
+  /// ancestor pin, and with a content hash (a null hash on a downloaded row is
+  /// an unfinished upload, never freeable). Read from the mirror only, the
+  /// disk is not hashed, so this is an upper bound.
+  Future<FreeableEstimate> estimateFreeable();
+
+  /// Downloaded rows sitting directly in [syncFolderPath] (files and
+  /// folders): the roots a bulk free-up walks, one [PullSyncService.freeUp]
+  /// each.
+  Future<List<SyncMirrorEntry>> getTopLevelDownloaded(String syncFolderPath);
+
   /// Wipes every row from every mirror table (files, cursor, bootstrap
   /// state, failed events) in one transaction — used by
   /// [SyncCoordinator.endSession] (a new account on this machine must not

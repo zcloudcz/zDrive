@@ -203,5 +203,13 @@
   "offlineAlwaysKeep": "Vždy uchováváno v tomto zařízení",
   "keepOnDevice": "Vždy uchovávat v tomto zařízení",
   "freeUpSpace": "Uvolnit místo",
-  "freeUpSkippedUnsynced": "{count} ponecháno v tomto zařízení: nesynchronizované změny"
+  "freeUpSkippedUnsynced": "{count} ponecháno v tomto zařízení: nesynchronizované změny",
+  "cloudMigrationTitle": "Uvolnit místo v tomto zařízení?",
+  "cloudMigrationBody": "Soubory ve vaší synchronizované složce se nyní uchovávají v cloudu a stahují se, až když je potřebujete. Souborů, které lze z tohoto zařízení odstranit: {count}, až {size}.",
+  "cloudMigrationReassure": "Vaše soubory zůstanou dostupné v cloudu i na webu a můžete si je kdykoli stáhnout znovu. Soubory s dosud nesynchronizovanými změnami se vždy ponechají.",
+  "cloudMigrationKeepAll": "Ponechat vše v tomto zařízení",
+  "cloudMigrationLater": "Rozhodnout později",
+  "cloudMigrationWorking": "Uvolňuje se místo…",
+  "cloudMigrationFreed": "Uvolněno souborů: {count}, {size}",
+  "freeUpKeptPinned": "{count} ponecháno v tomto zařízení: vždy ponechat"
 }

@@ -148,5 +148,13 @@
   "offlineAlwaysKeep": "始终保留在此设备上",
   "keepOnDevice": "始终保留在此设备上",
   "freeUpSpace": "释放空间",
-  "freeUpSkippedUnsynced": "{count} 项已保留在此设备上：有未同步的更改"
+  "freeUpSkippedUnsynced": "{count} 项已保留在此设备上：有未同步的更改",
+  "cloudMigrationTitle": "要释放此设备上的空间吗?",
+  "cloudMigrationBody": "同步文件夹中的文件现在保存在云端，只有在需要时才会下载。可从此设备移除的文件: {count} 个，最多 {size}。",
+  "cloudMigrationReassure": "您的文件仍可在云端和网页上访问，随时可以重新下载。含有尚未同步更改的文件始终会被保留。",
+  "cloudMigrationKeepAll": "将所有内容保留在此设备上",
+  "cloudMigrationLater": "稍后决定",
+  "cloudMigrationWorking": "正在释放空间…",
+  "cloudMigrationFreed": "已释放 {count} 个文件，{size}",
+  "freeUpKeptPinned": "{count} 项已保留在此设备上: 始终保留"
 }

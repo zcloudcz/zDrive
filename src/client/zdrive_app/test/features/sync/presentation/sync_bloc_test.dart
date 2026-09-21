@@ -44,6 +44,11 @@ void main() {
     // nullable getter), matching "no folder chosen yet" — the baseline every
     // existing test below assumes, since none of them are about pulling.
     when(() => mockSyncCoordinator.startSession(any())).thenAnswer((_) async {});
+    // Choosing a folder records the cloud-only migration as moot; a load asks
+    // whether it is due. Neither is what these tests are about (the migration
+    // has its own file), so: recorded, and never due.
+    when(() => mockPreferences.setCloudOnlyMigrationDecided()).thenAnswer((_) async {});
+    when(() => mockSyncCoordinator.pendingCloudOnlyMigration(any())).thenAnswer((_) async => null);
   });
 
   SyncBloc buildBloc({
@@ -625,6 +630,8 @@ void main() {
       ],
       verify: (_) {
         verify(() => mockPreferences.setSyncFolderPath('/new/folder')).called(1);
+        // A freshly chosen folder has no pre-upgrade mirror to migrate.
+        verify(() => mockPreferences.setCloudOnlyMigrationDecided()).called(1);
         verifyNever(() => mockSyncCoordinator.resetForNewFolder(any()));
       },
     );

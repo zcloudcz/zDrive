@@ -53,6 +53,7 @@ class LocalConflictException implements Exception {
 /// how many stayed because a pin still covers them.
 class FreeUpResult {
   int freed = 0;
+  int freedBytes = 0;
   int keptPinned = 0;
   final List<String> skippedUnsynced = [];
 }
@@ -774,20 +775,42 @@ class PullSyncService {
   ///
   /// A folder row is flipped (and the empty directory removed) only when
   /// nothing under it stays local. Same [_exclusive] rules as [hydrate].
-  Future<FreeUpResult> freeUp(String serverId, String syncFolderPath) => _exclusive(() async {
+  ///
+  /// [progress], when given, gets one start/finish per file examined (kept or
+  /// freed alike); the caller owns beginPhase and the total, so several calls
+  /// can share one bar (the bulk migration free-up).
+  Future<FreeUpResult> freeUp(
+    String serverId,
+    String syncFolderPath, {
+    SyncProgressTracker? progress,
+  }) => _exclusive(() async {
         final result = FreeUpResult();
         final entry = await _mirror.getByServerId(serverId);
         if (entry == null || !entry.downloaded) return result;
-        if (entry.isFolder) {
-          await _freeUpFolder(entry, syncFolderPath, result);
-        } else {
-          await _freeUpFile(entry, syncFolderPath, result);
+        _progress = progress;
+        try {
+          if (entry.isFolder) {
+            await _freeUpFolder(entry, syncFolderPath, result);
+          } else {
+            await _freeUpFile(entry, syncFolderPath, result);
+          }
+        } finally {
+          _progress = null;
         }
         return result;
       });
 
   /// Returns whether the file is off the disk now.
   Future<bool> _freeUpFile(SyncMirrorEntry entry, String syncFolderPath, FreeUpResult result) async {
+    _progress?.startFile(entry.serverId, entry.localPath, totalBytes: entry.sizeBytes);
+    try {
+      return await _freeUpFileCore(entry, syncFolderPath, result);
+    } finally {
+      _progress?.finishFile(entry.serverId);
+    }
+  }
+
+  Future<bool> _freeUpFileCore(SyncMirrorEntry entry, String syncFolderPath, FreeUpResult result) async {
     if (await _mirror.isEffectivelyPinned(entry.serverId, entry.localPath)) {
       result.keptPinned++;
       return false;
@@ -816,6 +839,7 @@ class PullSyncService {
       return false;
     }
     result.freed++;
+    result.freedBytes += entry.sizeBytes ?? 0;
     return true;
   }
 

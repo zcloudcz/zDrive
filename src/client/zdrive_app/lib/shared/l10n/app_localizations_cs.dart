@@ -492,4 +492,35 @@ class AppLocalizationsCs extends AppLocalizations {
   String freeUpSkippedUnsynced(int count) {
     return '$count ponecháno v tomto zařízení: nesynchronizované změny';
   }
+
+  @override
+  String get cloudMigrationTitle => 'Uvolnit místo v tomto zařízení?';
+
+  @override
+  String cloudMigrationBody(int count, String size) {
+    return 'Soubory ve vaší synchronizované složce se nyní uchovávají v cloudu a stahují se, až když je potřebujete. Souborů, které lze z tohoto zařízení odstranit: $count, až $size.';
+  }
+
+  @override
+  String get cloudMigrationReassure =>
+      'Vaše soubory zůstanou dostupné v cloudu i na webu a můžete si je kdykoli stáhnout znovu. Soubory s dosud nesynchronizovanými změnami se vždy ponechají.';
+
+  @override
+  String get cloudMigrationKeepAll => 'Ponechat vše v tomto zařízení';
+
+  @override
+  String get cloudMigrationLater => 'Rozhodnout později';
+
+  @override
+  String get cloudMigrationWorking => 'Uvolňuje se místo…';
+
+  @override
+  String cloudMigrationFreed(int count, String size) {
+    return 'Uvolněno souborů: $count, $size';
+  }
+
+  @override
+  String freeUpKeptPinned(int count) {
+    return '$count ponecháno v tomto zařízení: vždy ponechat';
+  }
 }

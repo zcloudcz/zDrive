@@ -9,6 +9,7 @@ class AppPreferences {
   static const _localeKey = 'locale';
   static const _syncFolderPathKey = 'sync_folder_path';
   static const _syncOwnerUserIdKey = 'sync_owner_user_id';
+  static const _cloudOnlyMigrationDecidedKey = 'cloud_only_migration_decided';
 
   late Box<dynamic> _box;
 
@@ -65,5 +66,18 @@ class AppPreferences {
 
   Future<void> clearSyncOwnerUserId() async {
     await _box.delete(_syncOwnerUserIdKey);
+  }
+
+  /// Whether this device already went through the one-time "free up the
+  /// space the old mirror-everything sync used" decision (see
+  /// [SyncCoordinator.pendingCloudOnlyMigration]). Per device, not per
+  /// account: it describes this machine's sync folder, and a new account gets
+  /// a cleared mirror anyway. Only ever set after an explicit choice (or when
+  /// there is nothing to decide), never merely because the dialog was shown.
+  bool get cloudOnlyMigrationDecided =>
+      _box.get(_cloudOnlyMigrationDecidedKey, defaultValue: false) as bool;
+
+  Future<void> setCloudOnlyMigrationDecided() async {
+    await _box.put(_cloudOnlyMigrationDecidedKey, true);
   }
 }

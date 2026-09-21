@@ -225,5 +225,16 @@
   "keepOnDevice": "Always keep on this device",
   "freeUpSpace": "Free up space",
   "freeUpSkippedUnsynced": "{count} kept on this device: unsynced changes",
-  "@freeUpSkippedUnsynced": { "placeholders": { "count": { "type": "int" } } }
+  "@freeUpSkippedUnsynced": { "placeholders": { "count": { "type": "int" } } },
+  "cloudMigrationTitle": "Free up space on this device?",
+  "cloudMigrationBody": "Files in your sync folder are now kept in the cloud and downloaded only when you need them. Files that can be removed from this device: {count}, up to {size}.",
+  "@cloudMigrationBody": { "placeholders": { "count": { "type": "int" }, "size": { "type": "String" } } },
+  "cloudMigrationReassure": "Your files stay available in the cloud and on the web, and you can download them again at any time. Files with changes that are not synced yet are always kept.",
+  "cloudMigrationKeepAll": "Keep everything on this device",
+  "cloudMigrationLater": "Decide later",
+  "cloudMigrationWorking": "Freeing up space…",
+  "cloudMigrationFreed": "Freed {count} files, {size}",
+  "@cloudMigrationFreed": { "placeholders": { "count": { "type": "int" }, "size": { "type": "String" } } },
+  "freeUpKeptPinned": "{count} kept on this device: always kept",
+  "@freeUpKeptPinned": { "placeholders": { "count": { "type": "int" } } }
 }
