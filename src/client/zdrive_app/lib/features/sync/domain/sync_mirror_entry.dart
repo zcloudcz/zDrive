@@ -9,6 +9,15 @@ import 'package:equatable/equatable.dart';
 /// (see PullSyncService's refuse-to-overwrite check) — and it still doubles
 /// as what the file watcher the next task adds will use to tell "pull just
 /// wrote this" apart from a genuine local edit.
+///
+/// [downloaded] is the cloud-only switch. `false` means the item is known
+/// (metadata mirrored) but nothing was written to disk for it: [localPath] is
+/// only where it *would* live, so children and renames can still be resolved
+/// by path. A cloud-only file has a null [contentHash] — that is NOT the
+/// "provisional upload" marker it is for a downloaded file, so always check
+/// [downloaded] first. For a folder it means "no local directory created".
+/// Rows written before cloud-only existed default to `true` (they were all
+/// mirrored to disk), which is what keeps upgraded installs working.
 class SyncMirrorEntry extends Equatable {
   final String serverId;
   final String localPath;
@@ -17,6 +26,7 @@ class SyncMirrorEntry extends Equatable {
   final String? contentHash;
   final DateTime updatedAt;
   final DateTime syncedAt;
+  final bool downloaded;
 
   const SyncMirrorEntry({
     required this.serverId,
@@ -26,11 +36,12 @@ class SyncMirrorEntry extends Equatable {
     this.contentHash,
     required this.updatedAt,
     required this.syncedAt,
+    this.downloaded = true,
   });
 
   @override
   List<Object?> get props =>
-      [serverId, localPath, isFolder, sizeBytes, contentHash, updatedAt, syncedAt];
+      [serverId, localPath, isFolder, sizeBytes, contentHash, updatedAt, syncedAt, downloaded];
 }
 
 /// A pull event that could not be applied for a reason a retry will not fix

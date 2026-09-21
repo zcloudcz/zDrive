@@ -8,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../domain/sync_mirror_entry.dart';
 import '../domain/sync_mirror_repository.dart';
+import 'local_change_scanner.dart' show syncPathKey;
 
 /// sqflite over drift: the schema is a handful of small tables with no joins
 /// or migrations planned, so drift's code-generated query builder buys
@@ -18,6 +19,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   static const _cursorTable = 'sync_cursor';
   static const _bootstrapTable = 'bootstrap_state';
   static const _failedTable = 'failed_events';
+  static const _pinsTable = 'pinned_items';
 
   final String? _dbPathOverride;
 
@@ -51,7 +53,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     final db = await databaseFactory.openDatabase(
       dbPath,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onCreate: (db, version) async {
           await db.execute('''
             CREATE TABLE $_filesTable (
@@ -61,9 +63,11 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
               sizeBytes INTEGER,
               contentHash TEXT,
               updatedAt TEXT NOT NULL,
-              syncedAt TEXT NOT NULL
+              syncedAt TEXT NOT NULL,
+              downloaded INTEGER NOT NULL DEFAULT 1
             )
           ''');
+          await db.execute(_pinsTableSql);
           await db.execute('''
             CREATE TABLE $_cursorTable (
               deviceId TEXT PRIMARY KEY,
@@ -111,12 +115,29 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
             // have skipped is safe. Mirror rows themselves are untouched.
             await db.update(_cursorTable, {'cursor': 0});
           }
+          if (oldVersion < 4) {
+            // Cloud-only support. DEFAULT 1: every row that exists before
+            // this step was mirrored to disk, so it stays "downloaded".
+            // ALTER has no IF NOT EXISTS, so check first (same rollback-then-
+            // upgrade re-run concern as the outbox step above).
+            final columns = await db.rawQuery('PRAGMA table_info($_filesTable)');
+            if (!columns.any((c) => c['name'] == 'downloaded')) {
+              await db.execute(
+                'ALTER TABLE $_filesTable ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 1',
+              );
+            }
+            await db.execute(_pinsTableSql);
+          }
         },
       ),
     );
     _db = db;
     return db;
   }
+
+  // IF NOT EXISTS: onUpgrade may re-run after a rollback (see below).
+  static const _pinsTableSql =
+      'CREATE TABLE IF NOT EXISTS $_pinsTable (serverId TEXT PRIMARY KEY)';
 
   // IF NOT EXISTS: this step must stay idempotent (PR #14 review round 4,
   // R4-3) — sqflite_common_ffi has no onDowngrade, so opening a v2 db,
@@ -155,12 +176,20 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
         'contentHash': entry.contentHash,
         'updatedAt': entry.updatedAt.toIso8601String(),
         'syncedAt': entry.syncedAt.toIso8601String(),
+        'downloaded': entry.downloaded ? 1 : 0,
       };
 
   @override
   Future<void> deleteByServerId(String serverId) async {
     final db = await _database;
-    await db.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+    await db.transaction((txn) => _deleteRow(txn, serverId));
+  }
+
+  // A deleted item must not leave a pin behind: pins are keyed by serverId,
+  // so a stale one would be harmless today but confusing for the UI.
+  Future<void> _deleteRow(DatabaseExecutor executor, String serverId) async {
+    await executor.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+    await executor.delete(_pinsTable, where: 'serverId = ?', whereArgs: [serverId]);
   }
 
   @override
@@ -267,12 +296,46 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
         await txn.insert(_filesTable, _entryRow(entry), conflictAlgorithm: ConflictAlgorithm.replace);
       }
       for (final serverId in deleteServerIds) {
-        await txn.delete(_filesTable, where: 'serverId = ?', whereArgs: [serverId]);
+        await _deleteRow(txn, serverId);
       }
       if (deleteUnderPath != null) {
         await _deleteChildren(txn, deleteUnderPath);
       }
     });
+  }
+
+  @override
+  Future<void> pin(String serverId) async {
+    final db = await _database;
+    await db.insert(_pinsTable, {'serverId': serverId}, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  @override
+  Future<void> unpin(String serverId) async {
+    final db = await _database;
+    await db.delete(_pinsTable, where: 'serverId = ?', whereArgs: [serverId]);
+  }
+
+  @override
+  Future<bool> isPinned(String serverId) async {
+    final db = await _database;
+    final rows = await db.query(_pinsTable, where: 'serverId = ?', whereArgs: [serverId]);
+    return rows.isNotEmpty;
+  }
+
+  @override
+  Future<bool> isEffectivelyPinned(String serverId, String localPath) async {
+    if (await isPinned(serverId)) return true;
+    final db = await _database;
+    // Pins are few (user-chosen), so scan-and-filter over the pinned rows
+    // only — same trade-off as _rowsUnder.
+    final pinned = await db.rawQuery(
+      'SELECT f.localPath FROM $_pinsTable p JOIN $_filesTable f ON f.serverId = p.serverId '
+      'WHERE f.isFolder = 1',
+    );
+    // Case-insensitive like every other path comparison in sync.
+    final key = syncPathKey(localPath);
+    return pinned.any((row) => key.startsWith(_childPrefix(syncPathKey(row['localPath'] as String))));
   }
 
   @override
@@ -283,6 +346,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
       await txn.delete(_cursorTable);
       await txn.delete(_bootstrapTable);
       await txn.delete(_failedTable);
+      await txn.delete(_pinsTable);
     });
   }
 
@@ -341,6 +405,7 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
     final batch = executor.batch();
     for (final row in rows) {
       batch.delete(_filesTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
+      batch.delete(_pinsTable, where: 'serverId = ?', whereArgs: [row['serverId']]);
     }
     await batch.commit(noResult: true);
   }
@@ -358,5 +423,6 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
         contentHash: row['contentHash'] as String?,
         updatedAt: DateTime.parse(row['updatedAt'] as String),
         syncedAt: DateTime.parse(row['syncedAt'] as String),
+        downloaded: (row['downloaded'] as int) == 1,
       );
 }

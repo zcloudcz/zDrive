@@ -71,6 +71,11 @@ void main() {
     // empty by default so existing tests don't also have to stub it; tests
     // that care about quarantine/retry override it.
     when(() => mockMirror.getFailedEvents()).thenAnswer((_) async => []);
+    // Cloud-only is the new default, but every test below this point was
+    // written for "pull mirrors everything" — treat everything as pinned so
+    // they keep exercising the download paths. Cloud-only behaviour has its
+    // own group at the bottom, which overrides this to false.
+    when(() => mockMirror.isEffectivelyPinned(any(), any())).thenAnswer((_) async => true);
   });
 
   tearDown(() {

@@ -96,6 +96,7 @@ class _StatefulMirror {
         contentHash: e.contentHash,
         updatedAt: e.updatedAt,
         syncedAt: e.syncedAt,
+        downloaded: e.downloaded,
       );
 
   SyncMirrorEntry? row(String serverId) => rows.where((e) => e.serverId == serverId).firstOrNull;
@@ -1614,5 +1615,111 @@ void main() {
       // (case-sensitive)").
       skip: _isCaseInsensitiveHost ? 'host filesystem is case-insensitive' : false,
     );
+  });
+
+  group('cloud-only entries', () {
+    test('CloudOnly_NoFileOnDisk_IsNotPushedAsDelete', () async {
+      // The data-loss case: a cloud-only file/folder has a mirror row but,
+      // by design, nothing on disk. Reading that as "deleted locally" would
+      // trash the user's cloud copy.
+      final mirror = stateful([
+        SyncMirrorEntry(serverId: 'cloud-file', localPath: p.join(tempDir.path, 'remote.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'cloud-dir', localPath: p.join(tempDir.path, 'Docs'),
+          isFolder: true, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'cloud-nested', localPath: p.join(tempDir.path, 'Docs', 'inner.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+      ]);
+
+      final pushed = await scanner.scanOnce(tempDir.path);
+
+      expect(pushed, 0);
+      verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
+      expect(mirror.rows.map((e) => e.serverId), containsAll(['cloud-file', 'cloud-dir', 'cloud-nested']));
+    });
+
+    test('DownloadedNextToCloudOnly_MissingDownloadedStillPushedAsDelete', () async {
+      // Teeth check: the exclusion must be per row, not a blanket "skip
+      // deletes" - a downloaded file the user removed is still a delete.
+      stateful([
+        SyncMirrorEntry(serverId: 'cloud-file', localPath: p.join(tempDir.path, 'remote.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'local-gone', localPath: p.join(tempDir.path, 'gone.txt'),
+          isFolder: false, sizeBytes: 5, contentHash: 'h', updatedAt: past, syncedAt: past),
+      ]);
+      when(() => mockFileRepository.deleteFile('local-gone', originDeviceId: any(named: 'originDeviceId')))
+          .thenAnswer((_) async {});
+
+      expect(await scanner.scanOnce(tempDir.path), 1);
+
+      verify(() => mockFileRepository.deleteFile('local-gone', originDeviceId: 'dev-1')).called(1);
+      verifyNever(() => mockFileRepository.deleteFile('cloud-file', originDeviceId: any(named: 'originDeviceId')));
+    });
+
+    test('CloudOnlyFileCollision_LocalFileAtItsPath_IsQuarantinedNotUploaded', () async {
+      // Scenario A: the user copies an unrelated file over a cloud-only
+      // name. Uploading would 409 -> adopt by name -> uploadNewVersion and
+      // overwrite the remote file.
+      File(p.join(tempDir.path, 'top.txt')).writeAsStringSync('my own file');
+      final mirror = stateful([
+        SyncMirrorEntry(serverId: 'cloud-top', localPath: p.join(tempDir.path, 'top.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+      ]);
+      when(() => mockMirror.recordFailedEvent(any(), any(), any())).thenAnswer((_) async {});
+
+      expect(await scanner.scanOnce(tempDir.path), 0);
+
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
+      verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
+      verify(() => mockMirror.recordFailedEvent('cloud-top', any(), any())).called(1);
+      expect(mirror.row('cloud-top')!.downloaded, isFalse);
+    });
+
+    test('CloudOnlyFileCollision_RenameOntoItsPath_SourceIsNotTrashedOnServer', () async {
+      // Regression from review round 2: quarantining the destination hid the
+      // rename from move detection, so the tracked source looked deleted and
+      // was trashed on the server while its bytes sat under the new name.
+      final dest = p.join(tempDir.path, 'Report.pdf');
+      File(dest).writeAsStringSync('draft'); // draft.pdf renamed to Report.pdf
+      final mirror = stateful([
+        SyncMirrorEntry(serverId: 'cloud-report', localPath: dest,
+          isFolder: false, sizeBytes: 99, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'draft', localPath: p.join(tempDir.path, 'draft.pdf'),
+          isFolder: false, sizeBytes: 5, contentHash: 'h-draft', updatedAt: past, syncedAt: past),
+      ]);
+      when(() => mockMirror.recordFailedEvent(any(), any(), any())).thenAnswer((_) async {});
+
+      expect(await scanner.scanOnce(tempDir.path), 0);
+
+      verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadNewVersion(any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken')));
+      expect(mirror.row('draft'), isNotNull);
+    });
+
+    test('CloudOnlyFolderCollision_LocalFolderAtItsPath_NotAdoptedAndDeleteNeverTrashesSubtree', () async {
+      // Scenario B: local "Docs" next to a cloud-only "Docs" with children.
+      // Adopting it would let a later local delete trash the server subtree.
+      final docsDir = Directory(p.join(tempDir.path, 'Docs'))..createSync();
+      File(p.join(docsDir.path, 'mine.txt')).writeAsStringSync('mine');
+      final mirror = stateful([
+        SyncMirrorEntry(serverId: 'cloud-docs', localPath: docsDir.path,
+          isFolder: true, updatedAt: past, syncedAt: past, downloaded: false),
+        SyncMirrorEntry(serverId: 'cloud-child', localPath: p.join(docsDir.path, 'child.txt'),
+          isFolder: false, sizeBytes: 5, updatedAt: past, syncedAt: past, downloaded: false),
+      ]);
+      when(() => mockMirror.recordFailedEvent(any(), any(), any())).thenAnswer((_) async {});
+
+      expect(await scanner.scanOnce(tempDir.path), 0);
+      verifyNever(() => mockFileRepository.createFolder(any(), any(), originDeviceId: any(named: 'originDeviceId')));
+      verifyNever(() => mockFileRepository.uploadFile(any(), any(), any(), any(), any(), originDeviceId: any(named: 'originDeviceId'), cancelToken: any(named: 'cancelToken'), onNodeCreated: any(named: 'onNodeCreated')));
+      verify(() => mockMirror.recordFailedEvent('cloud-docs', any(), any())).called(1);
+
+      // The user removes the colliding local folder: still no server delete.
+      docsDir.deleteSync(recursive: true);
+      expect(await scanner.scanOnce(tempDir.path), 0);
+      verifyNever(() => mockFileRepository.deleteFile(any(), originDeviceId: any(named: 'originDeviceId')));
+      expect(mirror.rows.map((e) => e.serverId), containsAll(['cloud-docs', 'cloud-child']));
+    });
   });
 }
