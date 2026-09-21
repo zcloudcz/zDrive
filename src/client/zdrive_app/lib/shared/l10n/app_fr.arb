@@ -148,5 +148,14 @@
   "offlineAlwaysKeep": "Toujours conservé sur cet appareil",
   "keepOnDevice": "Toujours conserver sur cet appareil",
   "freeUpSpace": "Libérer de l'espace",
-  "freeUpSkippedUnsynced": "{count} conservés sur cet appareil : modifications non synchronisées"
+  "freeUpSkippedUnsynced": "{count} conservés sur cet appareil : modifications non synchronisées",
+  "cloudMigrationTitle": "Libérer de l’espace sur cet appareil ?",
+  "cloudMigrationBody": "Les fichiers de votre dossier de synchronisation sont désormais conservés dans le cloud et ne sont téléchargés que lorsque vous en avez besoin. Fichiers pouvant être supprimés de cet appareil : {count}, jusqu’à {size}.",
+  "cloudMigrationReassure": "Vos fichiers restent disponibles dans le cloud et sur le web, et vous pouvez les télécharger à nouveau à tout moment. Les fichiers dont les modifications ne sont pas encore synchronisées sont toujours conservés.",
+  "cloudMigrationKeepAll": "Tout conserver sur cet appareil",
+  "cloudMigrationLater": "Décider plus tard",
+  "cloudMigrationWorking": "Libération d’espace…",
+  "cloudMigrationFreed": "{count} fichiers libérés, {size}",
+  "freeUpKeptPinned": "{count} conservés sur cet appareil : toujours conserver",
+  "cloudMigrationKeeping": "Conservation de tout sur cet appareil…"
 }

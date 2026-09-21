@@ -494,4 +494,38 @@ class AppLocalizationsSv extends AppLocalizations {
   String freeUpSkippedUnsynced(int count) {
     return '$count behölls på den här enheten: osynkade ändringar';
   }
+
+  @override
+  String get cloudMigrationTitle => 'Frigör utrymme på den här enheten?';
+
+  @override
+  String cloudMigrationBody(int count, String size) {
+    return 'Filerna i din synkroniseringsmapp lagras nu i molnet och laddas bara ned när du behöver dem. Filer som kan tas bort från den här enheten: $count, upp till $size.';
+  }
+
+  @override
+  String get cloudMigrationReassure =>
+      'Dina filer finns kvar i molnet och på webben, och du kan ladda ned dem igen när som helst. Filer med ändringar som ännu inte synkats behålls alltid.';
+
+  @override
+  String get cloudMigrationKeepAll => 'Behåll allt på den här enheten';
+
+  @override
+  String get cloudMigrationLater => 'Bestäm senare';
+
+  @override
+  String get cloudMigrationWorking => 'Frigör utrymme…';
+
+  @override
+  String cloudMigrationFreed(int count, String size) {
+    return '$count filer frigjorda, $size';
+  }
+
+  @override
+  String freeUpKeptPinned(int count) {
+    return '$count behölls på den här enheten: behåll alltid';
+  }
+
+  @override
+  String get cloudMigrationKeeping => 'Behåller allt på den här enheten…';
 }

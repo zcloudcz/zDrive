@@ -66,6 +66,30 @@ final class FreeUpSpaceRequested extends SyncEvent {
   List<Object?> get props => [serverId];
 }
 
+/// Asks whether the one-time cloud-only migration dialog is due. Fired once
+/// per load; see [SyncBloc._onMigrationCheck].
+final class CloudOnlyMigrationCheckRequested extends SyncEvent {
+  const CloudOnlyMigrationCheckRequested();
+}
+
+/// How the user answered the one-time cloud-only migration dialog.
+enum CloudOnlyMigrationChoice { freeUp, keepAll, later }
+
+/// The user answered the migration dialog (see [SyncLoaded.migration]).
+final class CloudOnlyMigrationChosen extends SyncEvent {
+  final CloudOnlyMigrationChoice choice;
+
+  const CloudOnlyMigrationChosen(this.choice);
+
+  @override
+  List<Object?> get props => [choice];
+}
+
+/// The user closed the result page of the migration free-up.
+final class CloudOnlyMigrationAcknowledged extends SyncEvent {
+  const CloudOnlyMigrationAcknowledged();
+}
+
 // --- States ---
 
 sealed class SyncState extends Equatable {
@@ -73,6 +97,35 @@ sealed class SyncState extends Equatable {
 
   @override
   List<Object?> get props => [];
+}
+
+/// What the migration dialog shows: the question ([estimate]), then while the
+/// free-up runs ([running], progress is [SyncLoaded.progress]), then the
+/// outcome ([result]). Non-null on [SyncLoaded] exactly while the dialog is up.
+class CloudOnlyMigration extends Equatable {
+  final FreeableEstimate estimate;
+  final bool running;
+
+  /// While [running]: the run is "Keep everything" (a few pin writes that may
+  /// still wait behind a sync) rather than the free-up, so the dialog must not
+  /// claim it is freeing space.
+  final bool keeping;
+  final FreeUpResult? result;
+
+  const CloudOnlyMigration(this.estimate, {this.running = false, this.keeping = false, this.result});
+
+  // FreeUpResult is a mutable class without value equality, so its numbers are
+  // compared instead; the state must change when the result arrives.
+  @override
+  List<Object?> get props => [
+    estimate,
+    running,
+    keeping,
+    result?.freed,
+    result?.freedBytes,
+    result?.keptPinned,
+    result?.skippedUnsynced.length,
+  ];
 }
 
 final class SyncInitial extends SyncState {
@@ -97,6 +150,13 @@ final class SyncLoaded extends SyncState {
   /// UI: reset to 0 when the next keep/free-up starts.
   final int freeUpSkipped;
 
+  /// Files the last "Free up space" left because a pin still covers them.
+  final int freeUpKeptPinned;
+
+  /// The one-time migration dialog, when it is due (desktop only, see
+  /// [SyncBloc]).
+  final CloudOnlyMigration? migration;
+
   /// Bumped when a keep/free-up action finishes (also when it changed nothing
   /// visible), so the file browser knows to re-read its per-item state.
   final int offlineRevision;
@@ -110,6 +170,8 @@ final class SyncLoaded extends SyncState {
     this.progress,
     this.failedFiles = 0,
     this.freeUpSkipped = 0,
+    this.freeUpKeptPinned = 0,
+    this.migration,
     this.offlineRevision = 0,
   });
 
@@ -122,6 +184,8 @@ final class SyncLoaded extends SyncState {
     SyncProgress? Function()? progress,
     int? failedFiles,
     int? freeUpSkipped,
+    int? freeUpKeptPinned,
+    CloudOnlyMigration? Function()? migration,
     int? offlineRevision,
   }) {
     return SyncLoaded(
@@ -133,6 +197,8 @@ final class SyncLoaded extends SyncState {
       progress: progress != null ? progress() : this.progress,
       failedFiles: failedFiles ?? this.failedFiles,
       freeUpSkipped: freeUpSkipped ?? this.freeUpSkipped,
+      freeUpKeptPinned: freeUpKeptPinned ?? this.freeUpKeptPinned,
+      migration: migration != null ? migration() : this.migration,
       offlineRevision: offlineRevision ?? this.offlineRevision,
     );
   }
@@ -147,6 +213,8 @@ final class SyncLoaded extends SyncState {
     progress,
     failedFiles,
     freeUpSkipped,
+    freeUpKeptPinned,
+    migration,
     offlineRevision,
   ];
 }
@@ -216,6 +284,11 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   // not start a run for the folder that replaced it.
   bool _syncRequestedWhileRunning = false;
 
+  // The migration dialog is offered at most once per bloc, i.e. per session,
+  // whatever the answer ("Decide later" persists nothing but must not nag
+  // again until the next start).
+  bool _migrationOffered = false;
+
   SyncBloc({
     required SyncRemoteDataSource dataSource,
     required SyncCoordinator syncCoordinator,
@@ -243,17 +316,19 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         emit,
         (path, progress) async {
           await _syncCoordinator.keepOnDevice(event.serverId, path, progress: progress);
-          return 0;
+          return null;
         },
       ),
     );
     on<FreeUpSpaceRequested>(
       (event, emit) => _runOfflineAction(
         emit,
-        (path, _) async =>
-            (await _syncCoordinator.freeUpSpace(event.serverId, path)).skippedUnsynced.length,
+        (path, _) => _syncCoordinator.freeUpSpace(event.serverId, path),
       ),
     );
+    on<CloudOnlyMigrationCheckRequested>(_onMigrationCheck);
+    on<CloudOnlyMigrationChosen>(_onMigrationChosen);
+    on<CloudOnlyMigrationAcknowledged>(_onMigrationAcknowledged);
   }
 
   Future<void> _onLoadSyncStatus(
@@ -284,6 +359,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         _startPolling();
         _startWatching(loaded.syncFolderPath!);
         add(const PullRequested());
+        add(const CloudOnlyMigrationCheckRequested());
       }
     } catch (e, stack) {
       Diagnostics.error('sync.status.failed', e, stack);
@@ -316,6 +392,12 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
       } else {
         await _preferences.setSyncFolderPath(event.path);
       }
+      // A genuinely different folder starts cloud-only, so there is no
+      // pre-upgrade full mirror to migrate: never ask about it (a file the
+      // user already had in that folder and that got uploaded is not "space to
+      // free"). Re-picking the SAME folder changes nothing and must not hide
+      // the offer for good.
+      if (previousPath != event.path) await _preferences.setCloudOnlyMigrationDecided();
       // The bloc can close while the await above is pending (e.g. logout
       // during a folder switch). emit.isDone alone does not cover that:
       // Bloc.close() (bloc 9.x) awaits _eventController.close() FIRST and
@@ -355,6 +437,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
             isPulling: false,
             progress: () => null,
             failedFiles: 0,
+            migration: () => null,
           ),
         );
       } else {
@@ -572,7 +655,7 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
   /// the coordinator's lock already makes a sync run wait for this action.
   Future<void> _runOfflineAction(
     Emitter<SyncState> emit,
-    Future<int> Function(String path, SyncProgressTracker progress) action,
+    Future<FreeUpResult?> Function(String path, SyncProgressTracker progress) action,
   ) async {
     final current = state;
     if (current is! SyncLoaded || current.syncFolderPath == null) return;
@@ -580,9 +663,9 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
     final path = current.syncFolderPath!;
     bool stale() => generation != _syncGeneration || emit.isDone || isClosed;
 
-    emit(current.copyWith(pullError: () => null, freeUpSkipped: 0));
+    emit(current.copyWith(pullError: () => null, freeUpSkipped: 0, freeUpKeptPinned: 0));
     try {
-      final skipped = await action(
+      final freed = await action(
         path,
         SyncProgressTracker((progress) {
           final latest = state;
@@ -597,7 +680,8 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         failedEvents: failedEvents,
         progress: () => null,
         failedFiles: 0,
-        freeUpSkipped: skipped,
+        freeUpSkipped: freed?.skippedUnsynced.length ?? 0,
+        freeUpKeptPinned: freed?.keptPinned ?? 0,
         offlineRevision: latest.offlineRevision + 1,
       ));
     } catch (e, stack) {
@@ -609,6 +693,127 @@ class SyncBloc extends Bloc<SyncEvent, SyncState> {
         progress: () => null,
         offlineRevision: latest.offlineRevision + 1,
       ));
+    }
+  }
+
+  /// Decides whether the one-time cloud-only migration dialog is due (see
+  /// [SyncCoordinator.pendingCloudOnlyMigration]). Guarded by
+  /// [_migrationOffered] so it is asked at most once per session, whatever
+  /// the answer; the flag is set before the first await so two racing
+  /// requests cannot both open the dialog. A failed check is not retried this
+  /// session: the next start asks again, and nothing was decided.
+  Future<void> _onMigrationCheck(
+    CloudOnlyMigrationCheckRequested event,
+    Emitter<SyncState> emit,
+  ) async {
+    final current = state;
+    if (_migrationOffered || current is! SyncLoaded || current.syncFolderPath == null) return;
+    _migrationOffered = true;
+    final generation = _syncGeneration;
+    try {
+      final estimate = await _syncCoordinator.pendingCloudOnlyMigration(current.syncFolderPath!);
+      final latest = state;
+      if (estimate == null ||
+          generation != _syncGeneration ||
+          emit.isDone ||
+          isClosed ||
+          latest is! SyncLoaded) {
+        return;
+      }
+      emit(latest.copyWith(migration: () => CloudOnlyMigration(estimate)));
+    } catch (e, stack) {
+      Diagnostics.error('sync.migration.check.failed', e, stack);
+    }
+  }
+
+  Future<void> _onMigrationChosen(
+    CloudOnlyMigrationChosen event,
+    Emitter<SyncState> emit,
+  ) async {
+    final current = state;
+    final migration = current is SyncLoaded ? current.migration : null;
+    // Ignores a second tap and any answer once the run has started or ended.
+    if (current is! SyncLoaded ||
+        migration == null ||
+        migration.running ||
+        migration.result != null ||
+        current.syncFolderPath == null) {
+      return;
+    }
+    final generation = _syncGeneration;
+    final path = current.syncFolderPath!;
+    bool stale() => generation != _syncGeneration || emit.isDone || isClosed;
+
+    if (event.choice == CloudOnlyMigrationChoice.later) {
+      emit(current.copyWith(migration: () => null));
+      return;
+    }
+    if (event.choice == CloudOnlyMigrationChoice.keepAll) {
+      emit(current.copyWith(
+        migration: () => CloudOnlyMigration(migration.estimate, running: true, keeping: true),
+        freeUpSkipped: 0,
+        freeUpKeptPinned: 0,
+      ));
+      try {
+        await _syncCoordinator.keepEverythingOnDevice(path);
+      } catch (e, stack) {
+        Diagnostics.error('sync.migration.failed', e, stack);
+        final latest = state;
+        if (stale() || latest is! SyncLoaded) return;
+        emit(latest.copyWith(pullError: () => e.toString(), migration: () => null));
+        return;
+      }
+      final latest = state;
+      if (stale() || latest is! SyncLoaded) return;
+      emit(latest.copyWith(migration: () => null, offlineRevision: latest.offlineRevision + 1));
+      return;
+    }
+
+    emit(current.copyWith(
+      migration: () => CloudOnlyMigration(migration.estimate, running: true),
+      freeUpSkipped: 0,
+      freeUpKeptPinned: 0,
+    ));
+    try {
+      final result = await _syncCoordinator.freeUpEverythingUnpinned(
+        path,
+        progress: SyncProgressTracker((progress) {
+          final latest = state;
+          if (stale() || latest is! SyncLoaded || latest.syncFolderPath != path) return;
+          emit(latest.copyWith(progress: () => progress));
+        }),
+      );
+      final failedEvents = await _pullService.getFailedEvents();
+      final latest = state;
+      if (stale() || latest is! SyncLoaded) return;
+      emit(latest.copyWith(
+        failedEvents: failedEvents,
+        progress: () => null,
+        migration: () => CloudOnlyMigration(migration.estimate, result: result),
+        offlineRevision: latest.offlineRevision + 1,
+      ));
+    } catch (e, stack) {
+      // Nothing was recorded as decided, so the next start offers it again and
+      // the run simply continues with what is still on disk.
+      Diagnostics.error('sync.migration.failed', e, stack);
+      final latest = state;
+      if (stale() || latest is! SyncLoaded) return;
+      emit(latest.copyWith(
+        pullError: () => e.toString(),
+        progress: () => null,
+        migration: () => null,
+        offlineRevision: latest.offlineRevision + 1,
+      ));
+    }
+  }
+
+  void _onMigrationAcknowledged(
+    CloudOnlyMigrationAcknowledged event,
+    Emitter<SyncState> emit,
+  ) {
+    final current = state;
+    if (current is SyncLoaded && current.migration?.result != null) {
+      emit(current.copyWith(migration: () => null));
     }
   }
 

@@ -50,9 +50,10 @@ class LocalConflictException implements Exception {
 
 /// What [PullSyncService.freeUp] did: how many files left the disk, which
 /// ones stayed because of an unsynced local edit (or an unreadable file), and
-/// how many stayed because a pin still covers them.
+/// how many files stayed because a pin still covers them (folders are not counted).
 class FreeUpResult {
   int freed = 0;
+  int freedBytes = 0;
   int keptPinned = 0;
   final List<String> skippedUnsynced = [];
 }
@@ -774,24 +775,52 @@ class PullSyncService {
   ///
   /// A folder row is flipped (and the empty directory removed) only when
   /// nothing under it stays local. Same [_exclusive] rules as [hydrate].
-  Future<FreeUpResult> freeUp(String serverId, String syncFolderPath) => _exclusive(() async {
+  ///
+  /// [progress], when given, gets one start/finish per file examined (kept or
+  /// freed alike); the caller owns beginPhase and the total, so several calls
+  /// can share one bar (the bulk migration free-up).
+  Future<FreeUpResult> freeUp(
+    String serverId,
+    String syncFolderPath, {
+    SyncProgressTracker? progress,
+  }) => _exclusive(() async {
         final result = FreeUpResult();
         final entry = await _mirror.getByServerId(serverId);
         if (entry == null || !entry.downloaded) return result;
-        if (entry.isFolder) {
-          await _freeUpFolder(entry, syncFolderPath, result);
-        } else {
-          await _freeUpFile(entry, syncFolderPath, result);
+        _progress = progress;
+        try {
+          if (entry.isFolder) {
+            await _freeUpFolder(entry, syncFolderPath, result);
+          } else {
+            await _freeUpFile(entry, syncFolderPath, result);
+          }
+        } finally {
+          _progress = null;
         }
         return result;
       });
 
   /// Returns whether the file is off the disk now.
   Future<bool> _freeUpFile(SyncMirrorEntry entry, String syncFolderPath, FreeUpResult result) async {
+    // A pinned file is not work: it is neither in the bulk estimate that sizes
+    // the progress total nor examined, so it must not advance the bar.
     if (await _mirror.isEffectivelyPinned(entry.serverId, entry.localPath)) {
       result.keptPinned++;
       return false;
     }
+    _progress?.startFile(
+      entry.serverId,
+      p.relative(entry.localPath, from: syncFolderPath),
+      totalBytes: entry.sizeBytes,
+    );
+    try {
+      return await _freeUpFileCore(entry, syncFolderPath, result);
+    } finally {
+      _progress?.finishFile(entry.serverId);
+    }
+  }
+
+  Future<bool> _freeUpFileCore(SyncMirrorEntry entry, String syncFolderPath, FreeUpResult result) async {
     String? onDisk;
     try {
       await _assertNoLinks(syncFolderPath, entry.localPath);
@@ -816,6 +845,7 @@ class PullSyncService {
       return false;
     }
     result.freed++;
+    result.freedBytes += entry.sizeBytes ?? 0;
     return true;
   }
 
@@ -836,8 +866,8 @@ class PullSyncService {
         kept.add(dir.localPath);
         continue;
       }
+      // Not counted in keptPinned: that counter is files only, like the others.
       if (await _mirror.isEffectivelyPinned(dir.serverId, dir.localPath)) {
-        result.keptPinned++;
         kept.add(dir.localPath);
         continue;
       }

@@ -502,4 +502,38 @@ class AppLocalizationsDe extends AppLocalizations {
   String freeUpSkippedUnsynced(int count) {
     return '$count auf diesem Gerät behalten: nicht synchronisierte Änderungen';
   }
+
+  @override
+  String get cloudMigrationTitle => 'Speicherplatz auf diesem Gerät freigeben?';
+
+  @override
+  String cloudMigrationBody(int count, String size) {
+    return 'Dateien in Ihrem Synchronisierungsordner werden jetzt in der Cloud gehalten und erst heruntergeladen, wenn Sie sie brauchen. Dateien, die von diesem Gerät entfernt werden können: $count, bis zu $size.';
+  }
+
+  @override
+  String get cloudMigrationReassure =>
+      'Ihre Dateien bleiben in der Cloud und im Web verfügbar, und Sie können sie jederzeit erneut herunterladen. Dateien mit noch nicht synchronisierten Änderungen bleiben immer erhalten.';
+
+  @override
+  String get cloudMigrationKeepAll => 'Alles auf diesem Gerät behalten';
+
+  @override
+  String get cloudMigrationLater => 'Später entscheiden';
+
+  @override
+  String get cloudMigrationWorking => 'Speicherplatz wird freigegeben…';
+
+  @override
+  String cloudMigrationFreed(int count, String size) {
+    return '$count Dateien freigegeben, $size';
+  }
+
+  @override
+  String freeUpKeptPinned(int count) {
+    return '$count auf diesem Gerät behalten: immer behalten';
+  }
+
+  @override
+  String get cloudMigrationKeeping => 'Alles wird auf diesem Gerät behalten…';
 }

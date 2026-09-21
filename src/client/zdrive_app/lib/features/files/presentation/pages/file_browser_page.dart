@@ -127,9 +127,15 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       listener: (context, state) {
         offline.refresh();
         final skipped = state is SyncLoaded ? state.freeUpSkipped : 0;
-        if (skipped > 0) {
+        final keptPinned = state is SyncLoaded ? state.freeUpKeptPinned : 0;
+        if (skipped > 0 || keptPinned > 0) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l10n.freeUpSkippedUnsynced(skipped))),
+            SnackBar(
+              content: Text([
+                if (skipped > 0) l10n.freeUpSkippedUnsynced(skipped),
+                if (keptPinned > 0) l10n.freeUpKeptPinned(keptPinned),
+              ].join('\n')),
+            ),
           );
         }
       },

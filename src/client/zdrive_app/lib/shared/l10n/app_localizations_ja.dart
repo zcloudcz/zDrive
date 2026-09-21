@@ -482,4 +482,38 @@ class AppLocalizationsJa extends AppLocalizations {
   String freeUpSkippedUnsynced(int count) {
     return '$count 件をこのデバイスに保持しました: 未同期の変更があります';
   }
+
+  @override
+  String get cloudMigrationTitle => 'このデバイスの空き容量を増やしますか?';
+
+  @override
+  String cloudMigrationBody(int count, String size) {
+    return '同期フォルダ内のファイルはクラウドに保管され、必要なときにだけダウンロードされるようになりました。このデバイスから削除できるファイル: $count 件、最大 $size。';
+  }
+
+  @override
+  String get cloudMigrationReassure =>
+      'ファイルはクラウドとWebで引き続き利用でき、いつでも再ダウンロードできます。まだ同期されていない変更があるファイルは常に保持されます。';
+
+  @override
+  String get cloudMigrationKeepAll => 'すべてこのデバイスに保持する';
+
+  @override
+  String get cloudMigrationLater => '後で決める';
+
+  @override
+  String get cloudMigrationWorking => '空き容量を確保しています…';
+
+  @override
+  String cloudMigrationFreed(int count, String size) {
+    return '$count 件を解放しました ($size)';
+  }
+
+  @override
+  String freeUpKeptPinned(int count) {
+    return '$count 件をこのデバイスに保持しました: 常に保持';
+  }
+
+  @override
+  String get cloudMigrationKeeping => 'すべてをこのデバイスに保持しています…';
 }

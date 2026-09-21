@@ -18,6 +18,7 @@ import '../../features/sync/data/pull_sync_service.dart';
 import '../../features/sync/data/sync_coordinator.dart';
 import '../../features/sync/data/sync_remote_data_source.dart';
 import '../../core/storage/app_preferences.dart';
+import '../../features/sync/presentation/cloud_only_migration_dialog.dart';
 import '../../features/sync/presentation/sync_bloc.dart';
 import '../../features/sync/presentation/sync_page.dart';
 import '../../features/sync/sync_support.dart';
@@ -104,7 +105,7 @@ Widget buildSyncShellProvider({
   return BlocProvider<SyncBloc>(
     lazy: false,
     create: (_) => createBloc()..add(const LoadSyncStatus()),
-    child: child,
+    child: CloudOnlyMigrationHost(child: child),
   );
 }
 

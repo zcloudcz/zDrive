@@ -480,4 +480,38 @@ class AppLocalizationsZh extends AppLocalizations {
   String freeUpSkippedUnsynced(int count) {
     return '$count 项已保留在此设备上：有未同步的更改';
   }
+
+  @override
+  String get cloudMigrationTitle => '要释放此设备上的空间吗?';
+
+  @override
+  String cloudMigrationBody(int count, String size) {
+    return '同步文件夹中的文件现在保存在云端，只有在需要时才会下载。可从此设备移除的文件: $count 个，最多 $size。';
+  }
+
+  @override
+  String get cloudMigrationReassure =>
+      '您的文件仍可在云端和网页上访问，随时可以重新下载。含有尚未同步更改的文件始终会被保留。';
+
+  @override
+  String get cloudMigrationKeepAll => '将所有内容保留在此设备上';
+
+  @override
+  String get cloudMigrationLater => '稍后决定';
+
+  @override
+  String get cloudMigrationWorking => '正在释放空间…';
+
+  @override
+  String cloudMigrationFreed(int count, String size) {
+    return '已释放 $count 个文件，$size';
+  }
+
+  @override
+  String freeUpKeptPinned(int count) {
+    return '$count 项已保留在此设备上: 始终保留';
+  }
+
+  @override
+  String get cloudMigrationKeeping => '正在将所有内容保留在此设备上…';
 }

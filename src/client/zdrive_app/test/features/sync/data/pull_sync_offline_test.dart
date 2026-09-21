@@ -275,7 +275,7 @@ void main() {
 
       expect(File(path('Docs/inner.txt')).existsSync(), isFalse);
       expect(File(path('Docs/Sub/deep.txt')).existsSync(), isTrue);
-      expect(result.keptPinned, greaterThan(0));
+      expect(result.keptPinned, 1); // deep.txt; the pinned folder rows are not counted
       expect((await mirror.getByServerId('docs'))!.downloaded, isTrue);
     });
 

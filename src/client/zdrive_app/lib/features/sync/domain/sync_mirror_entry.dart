@@ -67,6 +67,19 @@ enum OfflineStatus {
   alwaysKeepViaFolder,
 }
 
+/// Cheap, mirror-only estimate of what a bulk "free up space" could remove:
+/// downloaded, unpinned files that have a content hash. An upper bound: the
+/// real run still refuses any file with an unsynced local edit.
+class FreeableEstimate extends Equatable {
+  final int count;
+  final int bytes;
+
+  const FreeableEstimate({required this.count, required this.bytes});
+
+  @override
+  List<Object?> get props => [count, bytes];
+}
+
 /// A pull event that could not be applied for a reason a retry will not fix
 /// (an unsafe/unwritable name, or a local file pull refuses to overwrite —
 /// see F1/F3/F5 in the PR #12 review). Recorded so one bad file quarantines

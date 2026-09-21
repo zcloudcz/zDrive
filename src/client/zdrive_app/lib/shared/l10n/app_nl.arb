@@ -148,5 +148,14 @@
   "offlineAlwaysKeep": "Altijd op dit apparaat bewaard",
   "keepOnDevice": "Altijd op dit apparaat bewaren",
   "freeUpSpace": "Ruimte vrijmaken",
-  "freeUpSkippedUnsynced": "{count} bewaard op dit apparaat: niet-gesynchroniseerde wijzigingen"
+  "freeUpSkippedUnsynced": "{count} bewaard op dit apparaat: niet-gesynchroniseerde wijzigingen",
+  "cloudMigrationTitle": "Ruimte vrijmaken op dit apparaat?",
+  "cloudMigrationBody": "Bestanden in je synchronisatiemap worden nu in de cloud bewaard en pas gedownload wanneer je ze nodig hebt. Bestanden die van dit apparaat kunnen worden verwijderd: {count}, tot {size}.",
+  "cloudMigrationReassure": "Je bestanden blijven beschikbaar in de cloud en op het web, en je kunt ze op elk moment opnieuw downloaden. Bestanden met wijzigingen die nog niet zijn gesynchroniseerd blijven altijd bewaard.",
+  "cloudMigrationKeepAll": "Alles op dit apparaat bewaren",
+  "cloudMigrationLater": "Later beslissen",
+  "cloudMigrationWorking": "Ruimte vrijmaken…",
+  "cloudMigrationFreed": "{count} bestanden vrijgemaakt, {size}",
+  "freeUpKeptPinned": "{count} bewaard op dit apparaat: altijd bewaren",
+  "cloudMigrationKeeping": "Alles op dit apparaat bewaren…"
 }

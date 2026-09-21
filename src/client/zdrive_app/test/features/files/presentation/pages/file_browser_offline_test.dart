@@ -170,6 +170,23 @@ void main() {
       verify(() => mirror.getOfflineStatuses(any(), parentId: any(named: 'parentId'))).called(2);
       expect(find.text('2 kept on this device: unsynced changes'), findsOneWidget);
     });
+
+    testWidgets('FinishedAction_TellsAboutFilesKeptBecauseAPinCoversThem', (tester) async {
+      whenListen(
+        syncBloc,
+        Stream.value(const SyncLoaded(
+          devices: [],
+          syncFolderPath: '/s',
+          freeUpKeptPinned: 3,
+          offlineRevision: 1,
+        )),
+        initialState: const SyncLoaded(devices: [], syncFolderPath: '/s'),
+      );
+      await tester.pumpWidget(build(desktop: true));
+      await tester.pumpAndSettle();
+
+      expect(find.text('3 kept on this device: always kept'), findsOneWidget);
+    });
   });
 
   group('web / mobile (no SyncBloc provided)', () {

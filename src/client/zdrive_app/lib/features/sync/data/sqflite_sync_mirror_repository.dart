@@ -414,6 +414,40 @@ class SqfliteSyncMirrorRepository implements SyncMirrorRepository {
   }
 
   @override
+  Future<FreeableEstimate> estimateFreeable() async {
+    final db = await _database;
+    final rows = await db.query(
+      _filesTable,
+      where: 'downloaded = 1 AND isFolder = 0 AND contentHash IS NOT NULL',
+    );
+    final directPins = {
+      for (final row in await db.query(_pinsTable)) row['serverId'] as String,
+    };
+    final prefixes = await _pinnedFolderPrefixes(db);
+    var count = 0;
+    var bytes = 0;
+    for (final row in rows) {
+      if (directPins.contains(row['serverId']) || _underAny(row['localPath'] as String, prefixes)) {
+        continue;
+      }
+      count++;
+      bytes += (row['sizeBytes'] as int?) ?? 0;
+    }
+    return FreeableEstimate(count: count, bytes: bytes);
+  }
+
+  @override
+  Future<List<SyncMirrorEntry>> getTopLevelDownloaded(String syncFolderPath) async {
+    final db = await _database;
+    final rootKey = syncPathKey(p.normalize(syncFolderPath));
+    final rows = await db.query(_filesTable, where: 'downloaded = 1');
+    return [
+      for (final row in rows)
+        if (syncPathKey(p.dirname(row['localPath'] as String)) == rootKey) _fromRow(row),
+    ];
+  }
+
+  @override
   Future<void> clearAll() async {
     final db = await _database;
     await db.transaction((txn) async {

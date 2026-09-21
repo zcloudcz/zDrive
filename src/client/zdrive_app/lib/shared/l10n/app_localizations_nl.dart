@@ -498,4 +498,38 @@ class AppLocalizationsNl extends AppLocalizations {
   String freeUpSkippedUnsynced(int count) {
     return '$count bewaard op dit apparaat: niet-gesynchroniseerde wijzigingen';
   }
+
+  @override
+  String get cloudMigrationTitle => 'Ruimte vrijmaken op dit apparaat?';
+
+  @override
+  String cloudMigrationBody(int count, String size) {
+    return 'Bestanden in je synchronisatiemap worden nu in de cloud bewaard en pas gedownload wanneer je ze nodig hebt. Bestanden die van dit apparaat kunnen worden verwijderd: $count, tot $size.';
+  }
+
+  @override
+  String get cloudMigrationReassure =>
+      'Je bestanden blijven beschikbaar in de cloud en op het web, en je kunt ze op elk moment opnieuw downloaden. Bestanden met wijzigingen die nog niet zijn gesynchroniseerd blijven altijd bewaard.';
+
+  @override
+  String get cloudMigrationKeepAll => 'Alles op dit apparaat bewaren';
+
+  @override
+  String get cloudMigrationLater => 'Later beslissen';
+
+  @override
+  String get cloudMigrationWorking => 'Ruimte vrijmaken…';
+
+  @override
+  String cloudMigrationFreed(int count, String size) {
+    return '$count bestanden vrijgemaakt, $size';
+  }
+
+  @override
+  String freeUpKeptPinned(int count) {
+    return '$count bewaard op dit apparaat: altijd bewaren';
+  }
+
+  @override
+  String get cloudMigrationKeeping => 'Alles op dit apparaat bewaren…';
 }

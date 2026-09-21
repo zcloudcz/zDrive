@@ -497,4 +497,38 @@ class AppLocalizationsFi extends AppLocalizations {
   String freeUpSkippedUnsynced(int count) {
     return '$count säilytetty tällä laitteella: synkronoimattomia muutoksia';
   }
+
+  @override
+  String get cloudMigrationTitle => 'Vapautetaanko tilaa tältä laitteelta?';
+
+  @override
+  String cloudMigrationBody(int count, String size) {
+    return 'Synkronointikansiosi tiedostot säilytetään nyt pilvessä ja ladataan vasta, kun tarvitset niitä. Tältä laitteelta poistettavissa olevia tiedostoja: $count, enintään $size.';
+  }
+
+  @override
+  String get cloudMigrationReassure =>
+      'Tiedostosi pysyvät saatavilla pilvessä ja verkossa, ja voit ladata ne uudelleen milloin tahansa. Tiedostot, joiden muutoksia ei ole vielä synkronoitu, säilytetään aina.';
+
+  @override
+  String get cloudMigrationKeepAll => 'Säilytä kaikki tällä laitteella';
+
+  @override
+  String get cloudMigrationLater => 'Päätä myöhemmin';
+
+  @override
+  String get cloudMigrationWorking => 'Vapautetaan tilaa…';
+
+  @override
+  String cloudMigrationFreed(int count, String size) {
+    return 'Vapautettu $count tiedostoa, $size';
+  }
+
+  @override
+  String freeUpKeptPinned(int count) {
+    return '$count säilytetty tällä laitteella: säilytä aina';
+  }
+
+  @override
+  String get cloudMigrationKeeping => 'Säilytetään kaikki tällä laitteella…';
 }

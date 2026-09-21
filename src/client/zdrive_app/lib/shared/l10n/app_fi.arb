@@ -148,5 +148,14 @@
   "offlineAlwaysKeep": "Säilytetään aina tällä laitteella",
   "keepOnDevice": "Säilytä aina tällä laitteella",
   "freeUpSpace": "Vapauta tilaa",
-  "freeUpSkippedUnsynced": "{count} säilytetty tällä laitteella: synkronoimattomia muutoksia"
+  "freeUpSkippedUnsynced": "{count} säilytetty tällä laitteella: synkronoimattomia muutoksia",
+  "cloudMigrationTitle": "Vapautetaanko tilaa tältä laitteelta?",
+  "cloudMigrationBody": "Synkronointikansiosi tiedostot säilytetään nyt pilvessä ja ladataan vasta, kun tarvitset niitä. Tältä laitteelta poistettavissa olevia tiedostoja: {count}, enintään {size}.",
+  "cloudMigrationReassure": "Tiedostosi pysyvät saatavilla pilvessä ja verkossa, ja voit ladata ne uudelleen milloin tahansa. Tiedostot, joiden muutoksia ei ole vielä synkronoitu, säilytetään aina.",
+  "cloudMigrationKeepAll": "Säilytä kaikki tällä laitteella",
+  "cloudMigrationLater": "Päätä myöhemmin",
+  "cloudMigrationWorking": "Vapautetaan tilaa…",
+  "cloudMigrationFreed": "Vapautettu {count} tiedostoa, {size}",
+  "freeUpKeptPinned": "{count} säilytetty tällä laitteella: säilytä aina",
+  "cloudMigrationKeeping": "Säilytetään kaikki tällä laitteella…"
 }

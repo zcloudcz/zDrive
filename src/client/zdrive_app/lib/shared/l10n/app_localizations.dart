@@ -1007,6 +1007,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} kept on this device: unsynced changes'**
   String freeUpSkippedUnsynced(int count);
+
+  /// No description provided for @cloudMigrationTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Free up space on this device?'**
+  String get cloudMigrationTitle;
+
+  /// No description provided for @cloudMigrationBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Files in your sync folder are now kept in the cloud and downloaded only when you need them. Files that can be removed from this device: {count}, up to {size}.'**
+  String cloudMigrationBody(int count, String size);
+
+  /// No description provided for @cloudMigrationReassure.
+  ///
+  /// In en, this message translates to:
+  /// **'Your files stay available in the cloud and on the web, and you can download them again at any time. Files with changes that are not synced yet are always kept.'**
+  String get cloudMigrationReassure;
+
+  /// No description provided for @cloudMigrationKeepAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep everything on this device'**
+  String get cloudMigrationKeepAll;
+
+  /// No description provided for @cloudMigrationLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Decide later'**
+  String get cloudMigrationLater;
+
+  /// No description provided for @cloudMigrationWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'Freeing up space…'**
+  String get cloudMigrationWorking;
+
+  /// No description provided for @cloudMigrationFreed.
+  ///
+  /// In en, this message translates to:
+  /// **'Freed {count} files, {size}'**
+  String cloudMigrationFreed(int count, String size);
+
+  /// No description provided for @freeUpKeptPinned.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} kept on this device: always kept'**
+  String freeUpKeptPinned(int count);
+
+  /// No description provided for @cloudMigrationKeeping.
+  ///
+  /// In en, this message translates to:
+  /// **'Keeping everything on this device…'**
+  String get cloudMigrationKeeping;
 }
 
 class _AppLocalizationsDelegate
