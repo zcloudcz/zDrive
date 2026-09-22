@@ -29,7 +29,7 @@ public sealed class BackupCliFlowTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _email = $"backup-{Guid.NewGuid():N}@zdrive.test";
-        using var authClient = _env.AuthFactory.CreateClient();
+        using var authClient = _env.ApiFactory.CreateClient();
         var response = await authClient.PostAsJsonAsync("/api/v1/auth/register",
             new { email = _email, password = Password, displayName = "Backup Bot" });
         response.EnsureSuccessStatusCode();

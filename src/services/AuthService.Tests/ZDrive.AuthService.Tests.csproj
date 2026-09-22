@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AuthService\ZDrive.AuthService.Api\ZDrive.AuthService.Api.csproj" />
+    <ProjectReference Include="..\Api\ZDrive.Api.csproj" />
     <ProjectReference Include="..\AuthService\ZDrive.AuthService.Infrastructure\ZDrive.AuthService.Infrastructure.csproj" />
     <ProjectReference Include="..\AuthService\ZDrive.AuthService.Application\ZDrive.AuthService.Application.csproj" />
   </ItemGroup>

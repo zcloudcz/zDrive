@@ -1,7 +1,6 @@
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
-using ZDrive.FileService.Application.Behaviors;
 using ZDrive.FileService.Application.Interfaces;
 using ZDrive.FileService.Application.Services;
 
@@ -15,7 +14,6 @@ public static class DependencyInjection
 
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(assembly));
         services.AddValidatorsFromAssembly(assembly);
-        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
         services.AddScoped<IStorageQuota, StorageQuota>();
 
         return services;

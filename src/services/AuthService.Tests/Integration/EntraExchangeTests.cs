@@ -49,17 +49,19 @@ public sealed class EntraEnabledFactory : WebApplicationFactory<Program>, IAsync
             });
         });
 
+        // The merged host migrates all four contexts on startup, so all four
+        // connection strings must point at this factory's single Postgres
+        // container (each context's own schema, matching DependencyInjection.cs).
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
+            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
+            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
+            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+        }));
+
         builder.ConfigureServices(services =>
         {
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<AuthDbContext>));
-            if (descriptor is not null)
-                services.Remove(descriptor);
-
-            services.AddDbContext<AuthDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=auth",
-                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
-
             // Real validator fetches signing keys over the network — replace it
             // with a fake the tests drive directly.
             services.RemoveAll<IEntraTokenValidator>();
@@ -70,10 +72,6 @@ public sealed class EntraEnabledFactory : WebApplicationFactory<Program>, IAsync
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
-
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()

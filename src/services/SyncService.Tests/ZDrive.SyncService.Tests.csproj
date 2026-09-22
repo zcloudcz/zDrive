@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SyncService\ZDrive.SyncService.Api\ZDrive.SyncService.Api.csproj" />
+    <ProjectReference Include="..\Api\ZDrive.Api.csproj" />
     <ProjectReference Include="..\SyncService\ZDrive.SyncService.Infrastructure\ZDrive.SyncService.Infrastructure.csproj" />
     <ProjectReference Include="..\SyncService\ZDrive.SyncService.Application\ZDrive.SyncService.Application.csproj" />
   </ItemGroup>

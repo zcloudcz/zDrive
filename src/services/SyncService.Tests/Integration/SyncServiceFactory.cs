@@ -3,12 +3,11 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Testcontainers.PostgreSql;
 using Xunit;
-using ZDrive.SyncService.Infrastructure.Persistence;
 
 namespace ZDrive.SyncService.Tests.Integration;
 
@@ -39,33 +38,21 @@ public sealed class SyncServiceFactory : WebApplicationFactory<Program>, IAsyncL
                 options => options.TokenValidationParameters.IssuerSigningKey = new RsaSecurityKey(Rsa));
         });
 
-        builder.ConfigureServices(services =>
+        // The merged host migrates all four contexts on startup, so all four
+        // connection strings must point at this factory's single Postgres
+        // container (each context's own schema, matching DependencyInjection.cs).
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            // Remove the real DbContext registration
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<SyncDbContext>));
-            if (descriptor is not null)
-                services.Remove(descriptor);
-
-            // Register DbContext pointing to testcontainer
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // DependencyInjection.cs) — otherwise it falls back to the connection's
-            // search_path, which points at a schema that doesn't exist until the
-            // first migration creates it, and Migrate() fails before it gets there.
-            services.AddDbContext<SyncDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=sync",
-                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "sync")));
-        });
+            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
+            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
+            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
+            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+        }));
     }
 
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
-
-        // Apply migrations / ensure schema
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()

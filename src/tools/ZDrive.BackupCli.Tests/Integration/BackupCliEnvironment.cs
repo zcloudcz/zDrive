@@ -1,55 +1,34 @@
-// Each service's Api project declares its own top-level "Program" class in
-// the global namespace (needed for WebApplicationFactory<Program>).
-// Referencing all three Api assemblies unaliased would make "Program"
-// ambiguous, so two of them are pulled in under an alias (see the .csproj).
-extern alias FileApi;
-extern alias StorageApi;
-
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
 using Xunit;
-using ZDrive.AuthService.Infrastructure.Persistence;
 using ZDrive.Shared.Auth;
 using ZDrive.StorageService.Application.Interfaces;
 using ZDrive.StorageService.Infrastructure.BlobStorage;
-using FileDbContext = ZDrive.FileService.Infrastructure.Persistence.FileDbContext;
-using StorageDbContext = ZDrive.StorageService.Infrastructure.Persistence.StorageDbContext;
 
 namespace ZDrive.BackupCli.Tests.Integration;
 
 /// <summary>
-/// Hosts AuthService, FileService and StorageService together in-process
-/// (one Postgres container per service + one shared Azurite, via
-/// Testcontainers) so the backup CLI can be exercised through the exact
-/// multi-service flow it uses in production: real login, real file-node
-/// creation, real chunked upload.
-///
-/// Each service gets its own Postgres container rather than one shared
-/// database. This predates the switch to real EF migrations (each context
-/// now tracks its own applied migrations in its own schema's
-/// __EFMigrationsHistory table, so three contexts could safely share one
-/// database) but is kept for test isolation between the three services.
+/// Hosts the merged Api (Auth + File + Storage + Sync, one Postgres
+/// container + one shared Azurite, via Testcontainers) so the backup CLI can
+/// be exercised through the exact flow it uses in production: real login,
+/// real file-node creation, real chunked upload.
 ///
 /// There is no real API Gateway here — BackupCliGatewayHandler (see that
-/// file) routes by URL path prefix instead, which is enough to reproduce the
-/// gateway's contract without standing up YARP.
+/// file) forwards straight to this one host, which is enough to reproduce
+/// the gateway's contract without standing up YARP.
 /// </summary>
 public sealed class BackupCliEnvironment : IAsyncLifetime
 {
     private readonly string _devKeyDir = Directory.CreateTempSubdirectory("zdrive-backup-cli-jwt-").FullName;
 
-    private readonly PostgreSqlContainer _authPostgres = CreatePostgres();
-    private readonly PostgreSqlContainer _filePostgres = CreatePostgres();
-    private readonly PostgreSqlContainer _storagePostgres = CreatePostgres();
-
-    private static PostgreSqlContainer CreatePostgres() => new PostgreSqlBuilder()
+    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
         .WithImage("postgres:16-alpine")
         .WithDatabase("zdrive_test")
         .WithUsername("test")
@@ -62,102 +41,51 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
         .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(10000))
         .Build();
 
-    public WebApplicationFactory<Program> AuthFactory { get; }
-    public WebApplicationFactory<FileApi::Program> FileFactory { get; }
-    public WebApplicationFactory<StorageApi::Program> StorageFactory { get; }
+    public WebApplicationFactory<Program> ApiFactory { get; }
 
     public BackupCliEnvironment()
     {
-        // All three hosts run in Development and fall back to
-        // DevJwtKeyProvider; pointing them at one temp dir (instead of the
-        // real machine's ~/.zdrive/dev-keys) makes them share a signing key
-        // with each other and isolates the test run from any local state.
+        // Development fallback to DevJwtKeyProvider; pointing it at one temp
+        // dir (instead of the real machine's ~/.zdrive/dev-keys) isolates the
+        // test run from any local state.
         Environment.SetEnvironmentVariable(DevJwtKeyProvider.KeyDirEnvVar, _devKeyDir);
 
-        AuthFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(ConfigureAuth);
-        FileFactory = new WebApplicationFactory<FileApi::Program>().WithWebHostBuilder(ConfigureFile);
-        StorageFactory = new WebApplicationFactory<StorageApi::Program>().WithWebHostBuilder(ConfigureStorage);
+        ApiFactory = new WebApplicationFactory<Program>().WithWebHostBuilder(ConfigureApi);
     }
 
     public async Task InitializeAsync()
     {
         await Task.WhenAll(
-            _authPostgres.StartAsync(),
-            _filePostgres.StartAsync(),
-            _storagePostgres.StartAsync(),
+            _postgres.StartAsync(),
             _azurite.StartAsync());
-
-        await using (var scope = AuthFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
-        await using (var scope = FileFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<FileDbContext>().Database.MigrateAsync();
-        await using (var scope = StorageFactory.Services.CreateAsyncScope())
-            await scope.ServiceProvider.GetRequiredService<StorageDbContext>().Database.MigrateAsync();
     }
 
     public async Task DisposeAsync()
     {
-        AuthFactory.Dispose();
-        FileFactory.Dispose();
-        StorageFactory.Dispose();
+        ApiFactory.Dispose();
         await Task.WhenAll(
-            _authPostgres.DisposeAsync().AsTask(),
-            _filePostgres.DisposeAsync().AsTask(),
-            _storagePostgres.DisposeAsync().AsTask(),
+            _postgres.DisposeAsync().AsTask(),
             _azurite.DisposeAsync().AsTask());
         Directory.Delete(_devKeyDir, recursive: true);
     }
 
-    private void ConfigureAuth(IWebHostBuilder builder)
+    private void ConfigureApi(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+
+        // The merged host migrates all four contexts on startup, so all four
+        // connection strings must point at this one Postgres container (each
+        // context's own schema, matching DependencyInjection.cs).
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
+            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
+            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
+            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+        }));
+
         builder.ConfigureServices(services =>
         {
-            Replace<DbContextOptions<AuthDbContext>>(services);
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // AuthService's DependencyInjection.cs) — otherwise it falls back to
-            // the connection's search_path, which points at a schema that doesn't
-            // exist until the first migration creates it, and Migrate() fails
-            // before it gets there.
-            services.AddDbContext<AuthDbContext>(o =>
-                o.UseNpgsql(_authPostgres.GetConnectionString() + ";Search Path=auth",
-                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
-        });
-    }
-
-    private void ConfigureFile(IWebHostBuilder builder)
-    {
-        builder.UseEnvironment("Development");
-        builder.ConfigureServices(services =>
-        {
-            Replace<DbContextOptions<FileDbContext>>(services);
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // FileService's DependencyInjection.cs) — otherwise it falls back to
-            // the connection's search_path, which points at a schema that doesn't
-            // exist until the first migration creates it, and Migrate() fails
-            // before it gets there.
-            services.AddDbContext<FileDbContext>(o =>
-                o.UseNpgsql(_filePostgres.GetConnectionString() + ";Search Path=files",
-                        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
-                    .UseSnakeCaseNamingConvention());
-        });
-    }
-
-    private void ConfigureStorage(IWebHostBuilder builder)
-    {
-        builder.UseEnvironment("Development");
-        builder.ConfigureServices(services =>
-        {
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // StorageService's DependencyInjection.cs) — otherwise it falls back to
-            // the connection's search_path, which points at a schema that doesn't
-            // exist until the first migration creates it, and Migrate() fails
-            // before it gets there.
-            Replace<DbContextOptions<StorageDbContext>>(services);
-            services.AddDbContext<StorageDbContext>(o =>
-                o.UseNpgsql(_storagePostgres.GetConnectionString() + ";Search Path=storage",
-                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "storage")));
-
             Replace<BlobServiceClient>(services);
             Replace<StorageSharedKeyCredential>(services);
             Replace<IBlobStorageService>(services);

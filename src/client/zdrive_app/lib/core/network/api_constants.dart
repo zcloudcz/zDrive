@@ -33,10 +33,10 @@ class ApiConstants {
   static const String storage = '/storage';
   static const String uploadInit = '/storage/upload/init';
 
-  // StorageService's App Service plan runs without AlwaysOn (deliberate —
+  // The backend API app's App Service plan runs without AlwaysOn (deliberate —
   // the plan is memory-constrained), so it unloads when idle and the first
   // request after that hits a cold start — measured at 48s in production on
-  // 2026-09-18. Only the FIRST StorageService call of an upload/download
+  // 2026-09-18. Only the FIRST storage call of an upload/download
   // flow needs this longer budget: it wakes the service, so every call after
   // it hits a warm instance and can keep the normal 15s receiveTimeout.
   //

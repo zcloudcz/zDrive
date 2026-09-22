@@ -1,10 +1,8 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Testcontainers.PostgreSql;
 using Xunit;
-using ZDrive.AuthService.Infrastructure.Persistence;
 
 namespace ZDrive.AuthService.Tests.Integration;
 
@@ -21,33 +19,21 @@ public sealed class AuthServiceFactory : WebApplicationFactory<Program>, IAsyncL
     {
         builder.UseEnvironment("Development");
 
-        builder.ConfigureServices(services =>
+        // The merged host migrates all four contexts on startup, so all four
+        // connection strings must point at this factory's single Postgres
+        // container (each context's own schema, matching DependencyInjection.cs).
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            // Remove the real DbContext registration
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<AuthDbContext>));
-            if (descriptor is not null)
-                services.Remove(descriptor);
-
-            // Register DbContext pointing to testcontainer
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // DependencyInjection.cs) — otherwise it falls back to the connection's
-            // search_path, which points at a schema that doesn't exist until the
-            // first migration creates it, and Migrate() fails before it gets there.
-            services.AddDbContext<AuthDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=auth",
-                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
-        });
+            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
+            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
+            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
+            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+        }));
     }
 
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
-
-        // Apply migrations
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
