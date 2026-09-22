@@ -9,20 +9,14 @@ namespace ZDrive.BackupCli.Tests.Integration;
 /// </summary>
 public sealed class BackupCliGatewayHandler(BackupCliEnvironment env) : HttpMessageHandler
 {
-    private readonly HttpClient _auth = env.AuthFactory.CreateClient();
-    private readonly HttpClient _files = env.FileFactory.CreateClient();
-    private readonly HttpClient _storage = env.StorageFactory.CreateClient();
+    private readonly HttpClient _api = env.ApiFactory.CreateClient();
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var path = request.RequestUri!.AbsolutePath;
-        var target = path switch
-        {
-            _ when path.StartsWith("/api/v1/auth") || path.StartsWith("/api/v1/users") => _auth,
-            _ when path.StartsWith("/api/v1/files") || path.StartsWith("/api/v1/shares") => _files,
-            _ when path.StartsWith("/api/v1/storage") => _storage,
-            _ => throw new InvalidOperationException($"No fake-gateway route for '{path}'.")
-        };
+        if (!path.StartsWith("/api/v1/"))
+            throw new InvalidOperationException($"No fake-gateway route for '{path}'.");
+        var target = _api;
 
         // An HttpRequestMessage can only ever be sent once via HttpClient —
         // the caller's own HttpClient already "sent" it to reach this

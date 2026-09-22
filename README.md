@@ -9,10 +9,7 @@ Cloud storage platform with file sync and photo management. See [CLAUDE.md](CLAU
 docker-compose up -d
 
 # Run backend services (each in its own terminal; ports come from launchSettings.json)
-dotnet run --project src/services/AuthService/ZDrive.AuthService.Api          # :5101
-dotnet run --project src/services/FileService/ZDrive.FileService.Api         # :5102
-dotnet run --project src/services/StorageService/ZDrive.StorageService.Api   # :5103
-dotnet run --project src/services/SyncService/ZDrive.SyncService.Api         # :5104
+dotnet run --project src/services/Api                                        # :5101 (Auth + File + Storage + Sync)
 dotnet run --project src/services/PhotoService/ZDrive.PhotoService.Api       # :5105
 dotnet run --project src/services/NotificationService/ZDrive.NotificationService.Api  # :5106
 dotnet run --project src/services/ApiGateway                                 # :5100

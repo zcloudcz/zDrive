@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using FluentAssertions;
 using Xunit;
-using ZDrive.FileService.Api.Middleware;
+using ZDrive.Api.Middleware;
 using ZDrive.Shared.DTOs;
 using ZDrive.Shared.Exceptions;
 

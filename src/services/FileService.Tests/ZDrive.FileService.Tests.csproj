@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\FileService\ZDrive.FileService.Api\ZDrive.FileService.Api.csproj" />
+    <ProjectReference Include="..\Api\ZDrive.Api.csproj" />
     <ProjectReference Include="..\FileService\ZDrive.FileService.Infrastructure\ZDrive.FileService.Infrastructure.csproj" />
     <ProjectReference Include="..\FileService\ZDrive.FileService.Application\ZDrive.FileService.Application.csproj" />
   </ItemGroup>

@@ -33,6 +33,12 @@ Microservices behind an API Gateway (YARP):
 | `photo-service` | Photo processing pipeline, AI tagging, face clustering, albums, memories |
 | `notification-service` | Real-time events (SignalR), push (FCM/APNs), email |
 
+`auth-service`, `file-service`, `storage-service` and `sync-service` run in one
+process, `src/services/Api` (`ZDrive.Api`), to cut App Service count on the
+shared hosting plan — each still owns its Domain/Application/Infrastructure
+layers and its own PostgreSQL schema, only the API host is merged.
+`photo-service` and `notification-service` remain separate (and undeployed).
+
 Inter-service communication: Azure Service Bus (async events), gRPC (sync calls).
 
 ## Repository structure
@@ -42,10 +48,11 @@ zDrive/
 ├── src/
 │   ├── services/
 │   │   ├── ApiGateway/
-│   │   ├── AuthService/
-│   │   ├── FileService/
-│   │   ├── StorageService/
-│   │   ├── SyncService/
+│   │   ├── Api/                    # merged host: Auth + File + Storage + Sync
+│   │   ├── AuthService/            # Domain/Application/Infrastructure only
+│   │   ├── FileService/            # Domain/Application/Infrastructure only
+│   │   ├── StorageService/         # Domain/Application/Infrastructure only
+│   │   ├── SyncService/            # Domain/Application/Infrastructure only
 │   │   ├── PhotoService/
 │   │   └── NotificationService/
 │   ├── shared/                    # shared .NET libs (DTOs, contracts, utils)
@@ -66,6 +73,17 @@ zDrive/
 dotnet build src/services/{ServiceName}
 dotnet test src/services/{ServiceName}.Tests
 dotnet run --project src/services/{ServiceName}
+```
+
+Auth/File/Storage/Sync run as one host, `src/services/Api`
+(`dotnet run --project src/services/Api`), but each still owns its
+Infrastructure project's EF migrations. `src/services/Api` is now the only
+startup project for `dotnet ef`, for every one of those four contexts:
+
+```bash
+dotnet ef migrations add <Name> \
+  --project src/services/FileService/ZDrive.FileService.Infrastructure \
+  --startup-project src/services/Api
 ```
 
 ### Full backend (Docker Compose)

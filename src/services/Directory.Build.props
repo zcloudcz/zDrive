@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- ReadyToRun needs a RuntimeIdentifier (NETSDK1094 otherwise), so it only
+         kicks in for RID-specific publishes — the App Service ZIPs are built with
+         `dotnet publish -r linux-x64 [self-contained:false]`. The Dockerfiles
+         publish without a RID and are unaffected. -->
+    <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
+  </PropertyGroup>
+</Project>

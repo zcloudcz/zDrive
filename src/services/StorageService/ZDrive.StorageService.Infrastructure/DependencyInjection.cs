@@ -1,11 +1,8 @@
-using System.Security.Cryptography;
 using Azure.Storage;
 using Azure.Storage.Blobs;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.IdentityModel.Tokens;
 using ZDrive.StorageService.Application.Interfaces;
 using ZDrive.StorageService.Infrastructure.BlobStorage;
 using ZDrive.StorageService.Infrastructure.Persistence;
@@ -96,50 +93,8 @@ public static class DependencyInjection
         services.AddSingleton(sp => sharedKeyCredential!);
         services.AddSingleton<IBlobStorageService, AzureBlobStorageService>();
 
-        // Authentication (JWT validation — same pattern as AuthService, for incoming
-        // tokens). Missing key never silently disables auth: outside Development it
-        // is a hard startup failure, in Development we use the shared dev key pair.
-        var jwtSection = configuration.GetSection("Jwt");
-        var publicKeyPem = jwtSection["RsaPublicKeyPem"];
-
-        if (string.IsNullOrWhiteSpace(publicKeyPem))
-        {
-            if (!isDevelopment)
-            {
-                throw new InvalidOperationException(
-                    "Jwt:RsaPublicKeyPem must be configured outside Development.");
-            }
-
-            // Same per-machine dev key pair AuthService signs with.
-            publicKeyPem = DevJwtKeyProvider.GetOrCreateKeyPair().PublicKeyPem;
-        }
-
-        var rsa = RSA.Create();
-        rsa.ImportFromPem(publicKeyPem);
-
-        services.AddAuthentication(options =>
-        {
-            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-        })
-        .AddJwtBearer(options =>
-        {
-            // Keep raw JWT claim names ("sub", "tenant_id") — ClaimsHelper reads them directly.
-            options.MapInboundClaims = false;
-
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidIssuer = jwtSection["Issuer"] ?? "zdrive",
-                ValidateAudience = true,
-                ValidAudience = jwtSection["Audience"] ?? "zdrive-api",
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new RsaSecurityKey(rsa),
-                ClockSkew = TimeSpan.FromSeconds(30)
-            };
-        });
-
+        // Authentication (JWT bearer scheme) is registered once by
+        // ZDrive.AuthService.Infrastructure — see merge plan section 2a.
         services.AddAuthorization();
 
         return services;

@@ -91,8 +91,8 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
     /// budget rather than sharing "fixed" or "auth" with unrelated traffic.
     /// </summary>
     [Theory]
-    [InlineData("sharesLinkRoute", "/api/v1/shares/link/{**catch-all}", "fileCluster")]
-    [InlineData("storageSharedRoute", "/api/v1/storage/shared/{**catch-all}", "storageCluster")]
+    [InlineData("sharesLinkRoute", "/api/v1/shares/link/{**catch-all}", "apiCluster")]
+    [InlineData("storageSharedRoute", "/api/v1/storage/shared/{**catch-all}", "apiCluster")]
     public void PublicShareRoute_IsAnonymousWithPublicShareRateLimit(string routeId, string path, string clusterId)
     {
         var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Azure.Storage;
 using Azure.Storage.Blobs;
@@ -14,7 +14,6 @@ using Testcontainers.PostgreSql;
 using Xunit;
 using ZDrive.StorageService.Application.Interfaces;
 using ZDrive.StorageService.Infrastructure.BlobStorage;
-using ZDrive.StorageService.Infrastructure.Persistence;
 
 namespace ZDrive.StorageService.Tests.Integration;
 
@@ -65,22 +64,19 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
                 options => options.DownloadGrantKey = TestShareGrantKey);
         });
 
+        // The merged host migrates all four contexts on startup, so all four
+        // connection strings must point at this factory's single Postgres
+        // container (each context's own schema, matching DependencyInjection.cs).
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
+            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
+            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
+            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+        }));
+
         builder.ConfigureServices(services =>
         {
-            // Remove real DbContext
-            var dbDescriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<StorageDbContext>));
-            if (dbDescriptor is not null)
-                services.Remove(dbDescriptor);
-
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // DependencyInjection.cs) — otherwise it falls back to the connection's
-            // search_path, which points at a schema that doesn't exist until the
-            // first migration creates it, and Migrate() fails before it gets there.
-            services.AddDbContext<StorageDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=storage",
-                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "storage")));
-
             // Remove real blob storage services
             RemoveService<BlobServiceClient>(services);
             RemoveService<StorageSharedKeyCredential>(services);
@@ -136,11 +132,6 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
         await Task.WhenAll(
             _postgres.StartAsync(),
             _azurite.StartAsync());
-
-        // Apply migrations / create schema
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<StorageDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()

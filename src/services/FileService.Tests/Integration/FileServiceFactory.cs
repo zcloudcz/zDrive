@@ -5,13 +5,11 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Testcontainers.PostgreSql;
 using Xunit;
-using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.Shared.Auth;
 
 namespace ZDrive.FileService.Tests.Integration;
@@ -45,22 +43,23 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     {
         builder.UseEnvironment("Development");
 
-        // Point FileDb at the ephemeral Testcontainers instance instead of the
-        // dev connection string in appsettings.json. AddInfrastructure reads
-        // this configuration value lazily — inside the AddDbContext options
-        // delegate, evaluated on first DbContext resolution, not when
-        // AddInfrastructure itself runs — so overriding just the value here
-        // is enough to redirect it. Everything else about the registration
-        // (snake_case naming, schema-qualified migrations history table, and
-        // the FileChangeInterceptor wiring) stays exactly what production
-        // wires in DependencyInjection.cs. Previously this factory called its
-        // own AddDbContext (re-adding the interceptor itself too), so a test
-        // would keep passing even if production stopped wiring the
-        // interceptor there — this way, that would actually fail a test.
-        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new[]
+        // Point all four connection strings at this factory's ephemeral
+        // Testcontainers instance instead of the dev connection strings in
+        // appsettings.json. AddInfrastructure reads this configuration value
+        // lazily — inside the AddDbContext options delegate, evaluated on
+        // first DbContext resolution, not when AddInfrastructure itself runs —
+        // so overriding just the values here is enough to redirect them.
+        // Everything else about the registration (snake_case naming,
+        // schema-qualified migrations history table, and the
+        // FileChangeInterceptor wiring) stays exactly what production wires
+        // in DependencyInjection.cs. The merged host migrates all four
+        // contexts on startup, so all four must point here, not just FileDb.
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            new KeyValuePair<string, string?>(
-                "ConnectionStrings:FileDb", _postgres.GetConnectionString() + ";Search Path=files")
+            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
+            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
+            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
+            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
         }));
 
         // Make the service validate tokens signed by this factory's key instead
@@ -85,11 +84,6 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
-
-        // Apply migrations / create schema
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<FileDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()

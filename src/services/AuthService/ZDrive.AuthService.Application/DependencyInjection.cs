@@ -1,7 +1,6 @@
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
-using ZDrive.AuthService.Application.Behaviors;
 
 namespace ZDrive.AuthService.Application;
 
@@ -13,7 +12,6 @@ public static class DependencyInjection
 
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(assembly));
         services.AddValidatorsFromAssembly(assembly);
-        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
         return services;
     }

@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using ZDrive.Shared.Auth;
 using ZDrive.Shared.DTOs;
-using ZDrive.StorageService.Api.Controllers;
+using ZDrive.Api.Controllers.Storage;
 using ZDrive.StorageService.Application.DTOs;
 using ZDrive.StorageService.Domain.Enums;
 using ZDrive.StorageService.Infrastructure.Persistence;

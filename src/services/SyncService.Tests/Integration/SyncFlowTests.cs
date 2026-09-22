@@ -30,6 +30,21 @@ public sealed class SyncFlowTests : IClassFixture<SyncServiceFactory>
     }
 
     [Fact]
+    public async Task GetDevices_WithoutToken_Returns401()
+    {
+        // Review of PR #68 (merging the 4 backend services into one process):
+        // Sync's own Infrastructure had its AddJwtBearer registration stripped
+        // (only Auth's registers the scheme now, see the merge plan) — this is
+        // the only one of the four services with no test proving [Authorize]
+        // still bites on its own endpoints after that change.
+        using var anonymousClient = _factory.CreateClient();
+
+        var response = await anonymousClient.GetAsync("/api/v1/sync/devices");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task RegisterDevice_PushEvents_PullFromAnotherDevice_FullFlow()
     {
         // Register device A
