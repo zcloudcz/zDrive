@@ -2,6 +2,7 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # Copy project files for restore
+COPY src/services/Directory.Build.props services/
 COPY src/shared/ shared/
 COPY src/services/AuthService/ services/AuthService/
 COPY src/services/FileService/ services/FileService/
