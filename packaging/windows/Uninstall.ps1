@@ -14,6 +14,7 @@ try {
     if (-not $releases.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe uninstall path.' }
     if (Test-Path -LiteralPath $releases) { Remove-Item -LiteralPath $releases -Recurse -Force }
     Remove-Item -LiteralPath 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/zDrive' -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -LiteralPath 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Run' -Name 'zDrive' -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $root 'Uninstall.ps1') -Force
     # Keep user configuration, credentials and synchronized files.
 }

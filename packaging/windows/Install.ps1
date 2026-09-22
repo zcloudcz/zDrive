@@ -68,3 +68,10 @@ $values = @{
 }
 foreach ($name in $values.Keys) { New-ItemProperty -Path $key -Name $name -Value $values[$name] -PropertyType String -Force | Out-Null }
 foreach ($name in @('NoModify', 'NoRepair')) { New-ItemProperty -Path $key -Name $name -Value 1 -PropertyType DWord -Force | Out-Null }
+# Launch at login so sync stays continuous instead of only running while the
+# user remembers to open the app. Rewritten on every install/update, since
+# $target is per-version (releases/<version>) and would otherwise go stale
+# the moment an update moves the exe. --start-hidden skips the window and
+# goes straight to the tray icon (see windows/runner/flutter_window.cpp).
+New-ItemProperty -Path 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Run' -Name 'zDrive' `
+    -Value ('"{0}" --start-hidden' -f (Join-Path $target 'zdrive_app.exe')) -PropertyType String -Force | Out-Null
