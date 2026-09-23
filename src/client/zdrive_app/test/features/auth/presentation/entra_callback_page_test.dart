@@ -208,4 +208,38 @@ void main() {
     expect(find.text(l10n.errorNoConnection), findsOneWidget);
     verifyNever(() => authBloc.add(any(that: isA<EntraLoginRequested>())));
   });
+
+  testWidgets('bloc-originated error (e.g. backend has Entra disabled) still '
+      'shows a way back — round-1 review of PR #70: the back button used to '
+      'be gated only on the local `message`, so an AuthBloc-reported error '
+      '(the exchange succeeded, but /auth/entra itself failed) left the '
+      'page stuck with no escape', (tester) async {
+    when(
+      () => tokenExchange.exchangeCodeForAccessToken(
+        code: any(named: 'code'),
+        codeVerifier: any(named: 'codeVerifier'),
+      ),
+    ).thenAnswer((_) async => 'backend-access-token');
+    whenListen(
+      authBloc,
+      Stream<AuthState>.fromIterable([const AuthError('server says no')]),
+      initialState: const AuthInitial(),
+    );
+
+    await tester.pumpWidget(
+      build(
+        EntraCallbackPage(
+          code: 'auth-code',
+          error: null,
+          returnedState: 'returned-state',
+          signIn: FakeEntraSignIn('the-verifier'),
+          tokenExchange: tokenExchange,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('server says no'), findsOneWidget);
+    expect(find.byIcon(Icons.arrow_back), findsOneWidget);
+  });
 }

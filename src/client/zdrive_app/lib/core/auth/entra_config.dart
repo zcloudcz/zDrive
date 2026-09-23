@@ -26,14 +26,52 @@ const String entraTokenUrl =
     'https://$_entraHost/$_entraTenantId/oauth2/v2.0/token';
 
 /// Whether the "Sign in with your ZCLOUD account" button should be shown.
-/// Direct browser PKCE against Entra is web-only, and gated behind a
-/// configured client id so the whole feature is unreachable until a
-/// production Entra app registration exists — the default build has none.
-const bool kEntraSignInVisible = kIsWeb && kEntraClientId != '';
+/// Direct browser PKCE against Entra is web-only, and gated behind both a
+/// configured client id AND scope — a build with a client id but no scope
+/// would still redirect the user through the whole Entra flow only to fail
+/// far from the cause (no `access_token` in the response, or a token whose
+/// `aud` the backend rejects). Neither exists until a production Entra app
+/// registration is done.
+const bool kEntraSignInVisible = kIsWeb && kEntraClientId != '' && kEntraApiScope != '';
 
-/// This app's own callback path, appended to its current origin to build the
-/// `redirect_uri` sent to Entra. Only meaningful on web, where [Uri.base] is
-/// the browser's current URL.
-String entraRedirectUri() => Uri.base
-    .replace(path: '/auth/entra-callback', query: '', fragment: '')
-    .toString();
+/// Pure form of the [kEntraSignInVisible] gate, so the "needs both, not
+/// just one" rule is unit-testable without juggling `--dart-define` per
+/// test case (those three consts are fixed for the whole `flutter test`
+/// process).
+bool computeEntraSignInVisible({required bool isWeb, required String clientId, required String scope}) =>
+    isWeb && clientId != '' && scope != '';
+
+/// The `redirect_uri` sent to Entra: this app's plain origin, no path.
+///
+/// Two constraints rule out a dedicated path like `/auth/entra-callback`
+/// here (review round 1 of PR #70 caught both):
+/// - OAuth forbids a fragment in `redirect_uri` (RFC 6749 §3.1.2), so a
+///   client-side hash route (this app uses hash-based routing — no
+///   `usePathUrlStrategy()` — see `share_dialog.dart`'s `#/s/...` links for
+///   the same pattern) can never be the registered value.
+/// - A real path *would* be legal, but GitHub Pages serves this app with no
+///   SPA fallback (`deploy-web.yml` uploads a plain `build/web`, no
+///   `404.html` rewrite): Entra navigating the browser straight to
+///   `origin/auth/entra-callback?code=...` gets Pages' own 404, and the app
+///   never loads to handle it.
+///
+/// The origin root is the one URL Pages always serves. `code`/`state`/
+/// `error` land in its real query string, which coexists with the hash
+/// fragment go_router reads — `app_router.dart`'s `redirect` callback reads
+/// them from [Uri.base] on first load and forwards them into the in-app
+/// `/auth/entra-callback` hash route.
+String entraRedirectUri() {
+  final base = Uri.base;
+  // Uri.replace(query: '', fragment: '') does NOT clear these — it sets
+  // them to present-but-empty, which still serializes as a trailing "?#"
+  // (verified: https://drive.zcloud.cz/#/login -> ".../?#"). Entra compares
+  // redirect_uri as an exact string, so that would never match what gets
+  // registered. Omitting query/fragment from the constructor entirely is
+  // the only way to actually drop them.
+  return Uri(
+    scheme: base.scheme,
+    host: base.host,
+    port: base.hasPort ? base.port : null,
+    path: '/',
+  ).toString();
+}

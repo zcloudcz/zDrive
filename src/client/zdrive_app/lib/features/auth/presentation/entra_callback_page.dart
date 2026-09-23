@@ -130,28 +130,33 @@ class _EntraCallbackPageState extends State<EntraCallbackPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final message = _localErrorMessage(l10n);
-    return AuthScaffold(
-      appBar: message == null
-          ? null
-          : AppBar(
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () => context.go('/login'),
-              ),
-            ),
-      child: BlocBuilder<AuthBloc, AuthState>(
-        builder: (context, state) {
-          final text = message ?? (state is AuthError ? state.message : null);
-          if (text != null) {
-            return Text(
-              text,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-              textAlign: TextAlign.center,
-            );
-          }
-          return const Center(child: CircularProgressIndicator());
-        },
-      ),
+    return BlocBuilder<AuthBloc, AuthState>(
+      builder: (context, state) {
+        // Combine local failures (denial, CSRF, code exchange) with a
+        // failure AuthBloc reports once it got as far as calling the
+        // backend (e.g. Entra:Enabled=false -> 404). Either way, once
+        // there's an error there must be a way out: round-1 review of
+        // PR #70 found a bloc-originated error left the page stuck with no
+        // back button, since only the local `message` gated it before.
+        final text = message ?? (state is AuthError ? state.message : null);
+        return AuthScaffold(
+          appBar: text == null
+              ? null
+              : AppBar(
+                  leading: IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => context.go('/login'),
+                  ),
+                ),
+          child: text != null
+              ? Text(
+                  text,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  textAlign: TextAlign.center,
+                )
+              : const Center(child: CircularProgressIndicator()),
+        );
+      },
     );
   }
 }

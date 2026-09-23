@@ -30,6 +30,21 @@ GoRouter createRouter(AuthBloc authBloc) {
     initialLocation: '/login',
     refreshListenable: _AuthRefreshListenable(authBloc),
     redirect: (context, state) {
+      // Entra's redirect_uri is this app's plain origin (see entra_config.dart
+      // for why: no fragment allowed in redirect_uri, and GitHub Pages has no
+      // SPA fallback for a real path). code/state/error therefore land in the
+      // ROOT URL's real query string, not in the hash go_router reads its own
+      // location from — Uri.base still sees them regardless of the current
+      // hash location, so they're forwarded here into the in-app hash route
+      // that already knows how to handle them. This only fires once: once
+      // forwarded, the params live in the hash portion, not Uri.base's query
+      // string, so Uri.base no longer matches on the next redirect call.
+      final rootQuery = Uri.base.queryParameters;
+      final isEntraRedirect = rootQuery.containsKey('code') || rootQuery.containsKey('error');
+      if (isEntraRedirect && state.matchedLocation != '/auth/entra-callback') {
+        return Uri(path: '/auth/entra-callback', queryParameters: rootQuery).toString();
+      }
+
       final authState = authBloc.state;
       final isAuthenticated = authState is Authenticated;
       final isAuthRoute =
