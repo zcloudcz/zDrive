@@ -70,12 +70,25 @@ jobs:
       # deployed origin has to be decided here rather than at runtime. The
       # base-href is "/" because the site is served from a custom domain root,
       # not from /<repo>/.
+      #
+      # ENTRA_CLIENT_ID/ENTRA_API_SCOPE follow the same pattern (ADR
+      # docs/adr/0002-shared-zcloud-login-entra-sso.md): both are plain repo
+      # variables, not secrets — an OAuth public-client id and a scope URI
+      # identify a registration, they don't authenticate anything on their
+      # own. Empty (the default until the vars are set) is the feature's own
+      # safety gate: entra_config.dart's kEntraSignInVisible hides the
+      # sign-in button when either is blank, so an unset var ships a build
+      # identical to today's, not a broken one.
       - name: Build web
         env:
           API_BASE_URL: ${{ vars.WEB_API_BASE_URL || 'https://zdrive-gateway.azurewebsites.net/api/v1' }}
+          ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
+          ENTRA_API_SCOPE: ${{ vars.ENTRA_API_SCOPE }}
         run: >-
           flutter build web --release
           --dart-define=API_BASE_URL="$API_BASE_URL"
+          --dart-define=ENTRA_CLIENT_ID="$ENTRA_CLIENT_ID"
+          --dart-define=ENTRA_API_SCOPE="$ENTRA_API_SCOPE"
           --base-href /
         working-directory: src/client/zdrive_app
 
