@@ -24,8 +24,10 @@ enum _CallbackFailure {
   exchangeFailed,
 }
 
-/// Lands here after Entra's hosted sign-in page redirects back
-/// (`redirect_uri` = this app's own origin + `/auth/entra-callback`).
+/// Lands here after Entra's hosted sign-in page redirects back. `redirect_uri`
+/// is this app's plain origin (see `entra_config.dart`'s `entraRedirectUri`);
+/// `app_router.dart`'s `redirect` callback forwards the real URL's query
+/// string into this in-app hash route.
 ///
 /// Runs the parts of the PKCE flow that only make sense once, back on this
 /// page: verify Entra didn't report an error, check the returned `state`

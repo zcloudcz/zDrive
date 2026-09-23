@@ -60,6 +60,27 @@ bool computeEntraSignInVisible({required bool isWeb, required String clientId, r
 /// fragment go_router reads — `app_router.dart`'s `redirect` callback reads
 /// them from [Uri.base] on first load and forwards them into the in-app
 /// `/auth/entra-callback` hash route.
+/// Where to send the browser next when [rootQuery] (the real URL's query
+/// string — see [entraRedirectUri]) carries an Entra `code`/`error`, or
+/// `null` if there's nothing to forward. Pure so the "forward once, not on
+/// every rebuild" logic is unit-testable without a real browser (round 2 of
+/// PR #70's review: [rootQuery] alone can't answer this on its own once the
+/// caller has stripped it after forwarding — that side effect lives in
+/// [stripEntraQueryFromUrl], called right after this returns non-null).
+String? entraForwardTarget(Map<String, String> rootQuery, String matchedLocation) {
+  final isEntraRedirect = rootQuery.containsKey('code') || rootQuery.containsKey('error');
+  // Gated to '/login' specifically, not merely "not already on the callback
+  // route": a real Entra redirect always lands as a fresh, hash-less page
+  // load (redirect_uri has no fragment), which resolves to '/login' before
+  // auth state is known. A crafted link like
+  // `https://drive.zcloud.cz/?code=x&state=y#/s/<token>` would otherwise
+  // hijack a public share-link visit into an Entra-callback error page on
+  // every load (should-fix, round 2 of PR #70's review) — with this gate
+  // its matchedLocation is '/s/<token>', not '/login', so it's ignored.
+  if (!isEntraRedirect || matchedLocation != '/login') return null;
+  return Uri(path: '/auth/entra-callback', queryParameters: rootQuery).toString();
+}
+
 String entraRedirectUri() {
   final base = Uri.base;
   // Uri.replace(query: '', fragment: '') does NOT clear these — it sets

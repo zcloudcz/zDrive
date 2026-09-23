@@ -30,6 +30,43 @@ void main() {
     });
   });
 
+  group('entraForwardTarget', () {
+    test('null with no code/error in the query, regardless of location', () {
+      expect(entraForwardTarget({}, '/login'), isNull);
+      expect(entraForwardTarget({}, '/home/files'), isNull);
+    });
+
+    test('forwards code+state when landing at the entry point (/login) — '
+        'the shape a real Entra redirect actually arrives as', () {
+      final target = entraForwardTarget({'code': 'X', 'state': 'Y'}, '/login');
+      expect(target, '/auth/entra-callback?code=X&state=Y');
+    });
+
+    test('forwards an `error` the same way', () {
+      final target = entraForwardTarget({'error': 'access_denied'}, '/login');
+      expect(target, '/auth/entra-callback?error=access_denied');
+    });
+
+    test('round-2 review of PR #70, the redirect-loop case: does NOT '
+        're-forward once already on the callback route, even though the '
+        'params are still in the caller-supplied query map (the caller is '
+        'expected to have stripped the real URL by then; this asserts the '
+        'route itself is also a hard stop, not just the strip)', () {
+      expect(entraForwardTarget({'code': 'X', 'state': 'Y'}, '/auth/entra-callback'), isNull);
+    });
+
+    test('round-2 review of PR #70, share-link hijack case: a crafted link '
+        'like https://drive.zcloud.cz/?code=x#/s/abc must not divert a '
+        'public share-link visit into the Entra callback', () {
+      expect(entraForwardTarget({'code': 'x'}, '/s/abc123'), isNull);
+    });
+
+    test('does not forward once authenticated and already elsewhere '
+        '(e.g. a stale bookmarked link with old query params)', () {
+      expect(entraForwardTarget({'code': 'stale'}, '/home/files'), isNull);
+    });
+  });
+
   group('entraRedirectUri', () {
     test('drops query and fragment instead of leaving a bare "?#" — round-1 '
         'review of PR #70: Uri.replace(query: "", fragment: "") sets them '

@@ -3,6 +3,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/auth/auth_bloc.dart';
+import '../../core/auth/entra_browser.dart';
+import '../../core/auth/entra_config.dart';
 import '../../core/di/injection.dart';
 import '../../core/events/remote_file_change_notifier.dart';
 import '../../features/auth/presentation/entra_callback_page.dart';
@@ -36,13 +38,21 @@ GoRouter createRouter(AuthBloc authBloc) {
       // ROOT URL's real query string, not in the hash go_router reads its own
       // location from — Uri.base still sees them regardless of the current
       // hash location, so they're forwarded here into the in-app hash route
-      // that already knows how to handle them. This only fires once: once
-      // forwarded, the params live in the hash portion, not Uri.base's query
-      // string, so Uri.base no longer matches on the next redirect call.
-      final rootQuery = Uri.base.queryParameters;
-      final isEntraRedirect = rootQuery.containsKey('code') || rootQuery.containsKey('error');
-      if (isEntraRedirect && state.matchedLocation != '/auth/entra-callback') {
-        return Uri(path: '/auth/entra-callback', queryParameters: rootQuery).toString();
+      // that already knows how to handle them.
+      //
+      // Round 2 of PR #70's review: the hash URL strategy re-serializes the
+      // real query string on EVERY in-app navigation (it's not part of what
+      // go_router owns), so leaving it in place made this branch fire again
+      // right after a successful sign-in navigated to /home/files — forwarding
+      // back to /auth/entra-callback a second time, which go_router detects as
+      // a redirect loop and fails the whole navigation. stripEntraQueryFromUrl
+      // makes the forward actually one-time by removing the real query string
+      // the moment it's been read, so the next redirect() call has nothing
+      // left to forward.
+      final forward = entraForwardTarget(Uri.base.queryParameters, state.matchedLocation);
+      if (forward != null) {
+        stripEntraQueryFromUrl();
+        return forward;
       }
 
       final authState = authBloc.state;
