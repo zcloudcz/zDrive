@@ -13,10 +13,7 @@ class AuthRepositoryImpl implements AuthRepository {
   AuthRepositoryImpl(this._remoteDataSource, this._tokenStorage);
 
   @override
-  Future<User> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<User> login({required String email, required String password}) async {
     final response = await _remoteDataSource.login(
       email: email,
       password: password,
@@ -39,6 +36,19 @@ class AuthRepositoryImpl implements AuthRepository {
       email: email,
       password: password,
       displayName: displayName,
+    );
+    await _tokenStorage.saveTokens(
+      accessToken: response.accessToken,
+      refreshToken: response.refreshToken,
+    );
+    // Backend returns tokens only; load the profile with the new token.
+    return getCurrentUser();
+  }
+
+  @override
+  Future<User> loginWithEntra(String accessToken) async {
+    final response = await _remoteDataSource.entraExchange(
+      accessToken: accessToken,
     );
     await _tokenStorage.saveTokens(
       accessToken: response.accessToken,

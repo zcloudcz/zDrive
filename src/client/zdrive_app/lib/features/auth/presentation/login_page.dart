@@ -4,11 +4,20 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/auth_bloc.dart';
+import '../../../core/auth/entra_config.dart';
+import '../../../core/auth/entra_sign_in.dart';
 import '../../../shared/widgets/windows_download_button.dart';
 import 'widgets/auth_scaffold.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  // Defaults to the real, compile-time gate (web + a configured client id).
+  // Threaded in as a param rather than read from kEntraSignInVisible inside
+  // build(): a widget test runs on the Dart VM, never web, so kIsWeb is
+  // always false there — without this seam the button's visibility could
+  // only ever be exercised in an actual browser.
+  const LoginPage({super.key, this.entraSignInVisible = kEntraSignInVisible});
+
+  final bool entraSignInVisible;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -37,11 +46,11 @@ class _LoginPageState extends State<LoginPage> {
     }
     if (_formKey.currentState!.validate()) {
       context.read<AuthBloc>().add(
-            LoginRequested(
-              email: _emailController.text.trim(),
-              password: _passwordController.text,
-            ),
-          );
+        LoginRequested(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        ),
+      );
     }
   }
 
@@ -139,9 +148,7 @@ class _LoginPageState extends State<LoginPage> {
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Text(l10n.loginButton),
                   ),
@@ -153,6 +160,16 @@ class _LoginPageState extends State<LoginPage> {
               onPressed: () => context.go('/register'),
               child: Text(l10n.createAccount),
             ),
+            if (widget.entraSignInVisible) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => const EntraSignIn().beginSignIn(),
+                  child: Text(l10n.entraSignInButton),
+                ),
+              ),
+            ],
             const Divider(height: 32),
             const WindowsDownloadButton(),
           ],

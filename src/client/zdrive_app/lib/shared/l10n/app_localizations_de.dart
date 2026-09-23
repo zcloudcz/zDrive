@@ -82,6 +82,16 @@ class AppLocalizationsDe extends AppLocalizations {
   String get loginButton => 'Anmelden';
 
   @override
+  String get entraSignInButton => 'Mit deinem ZCLOUD-Konto anmelden';
+
+  @override
+  String get entraStateMismatch =>
+      'Die Anmeldung konnte nicht überprüft werden. Bitte versuche es erneut.';
+
+  @override
+  String get entraSignInDenied => 'Die Anmeldung wurde abgebrochen.';
+
+  @override
   String get registerButton => 'Konto erstellen';
 
   @override

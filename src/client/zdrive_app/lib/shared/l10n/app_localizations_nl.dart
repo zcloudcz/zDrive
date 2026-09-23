@@ -82,6 +82,16 @@ class AppLocalizationsNl extends AppLocalizations {
   String get loginButton => 'Aanmelden';
 
   @override
+  String get entraSignInButton => 'Aanmelden met je ZCLOUD-account';
+
+  @override
+  String get entraStateMismatch =>
+      'Aanmelden kon niet worden geverifieerd. Probeer het opnieuw.';
+
+  @override
+  String get entraSignInDenied => 'Aanmelden geannuleerd.';
+
+  @override
   String get registerButton => 'Account maken';
 
   @override

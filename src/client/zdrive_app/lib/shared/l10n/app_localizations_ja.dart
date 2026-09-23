@@ -80,6 +80,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get loginButton => 'ログイン';
 
   @override
+  String get entraSignInButton => 'ZCLOUDアカウントでサインイン';
+
+  @override
+  String get entraStateMismatch => 'サインインを確認できませんでした。もう一度お試しください。';
+
+  @override
+  String get entraSignInDenied => 'サインインがキャンセルされました。';
+
+  @override
   String get registerButton => 'アカウントを作成';
 
   @override

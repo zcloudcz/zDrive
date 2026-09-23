@@ -81,6 +81,16 @@ class AppLocalizationsSk extends AppLocalizations {
   String get loginButton => 'Prihlásiť sa';
 
   @override
+  String get entraSignInButton => 'Prihlásiť sa účtom ZCLOUD';
+
+  @override
+  String get entraStateMismatch =>
+      'Prihlásenie sa nepodarilo overiť. Skúste to znova.';
+
+  @override
+  String get entraSignInDenied => 'Prihlásenie bolo zrušené.';
+
+  @override
   String get registerButton => 'Vytvoriť účet';
 
   @override

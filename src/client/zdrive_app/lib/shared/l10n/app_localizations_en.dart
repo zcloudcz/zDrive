@@ -80,6 +80,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get loginButton => 'Sign in';
 
   @override
+  String get entraSignInButton => 'Sign in with your ZCLOUD account';
+
+  @override
+  String get entraStateMismatch =>
+      'Sign-in could not be verified. Please try signing in again.';
+
+  @override
+  String get entraSignInDenied => 'Sign-in was cancelled.';
+
+  @override
   String get registerButton => 'Create account';
 
   @override

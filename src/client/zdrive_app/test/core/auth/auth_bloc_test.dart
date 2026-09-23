@@ -26,16 +26,15 @@ void main() {
   });
 
   AuthBloc buildBloc() => AuthBloc(
-        authRepository: mockAuthRepository,
-        tokenStorage: mockTokenStorage,
-      );
+    authRepository: mockAuthRepository,
+    tokenStorage: mockTokenStorage,
+  );
 
   group('CheckAuthStatus', () {
     blocTest<AuthBloc, AuthState>(
       'emits [Unauthenticated] when no tokens stored',
       build: () {
-        when(() => mockTokenStorage.hasTokens)
-            .thenAnswer((_) async => false);
+        when(() => mockTokenStorage.hasTokens).thenAnswer((_) async => false);
         return buildBloc();
       },
       act: (bloc) => bloc.add(const CheckAuthStatus()),
@@ -45,10 +44,10 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits [Authenticated] when valid tokens exist',
       build: () {
-        when(() => mockTokenStorage.hasTokens)
-            .thenAnswer((_) async => true);
-        when(() => mockAuthRepository.getCurrentUser())
-            .thenAnswer((_) async => testUser);
+        when(() => mockTokenStorage.hasTokens).thenAnswer((_) async => true);
+        when(
+          () => mockAuthRepository.getCurrentUser(),
+        ).thenAnswer((_) async => testUser);
         return buildBloc();
       },
       act: (bloc) => bloc.add(const CheckAuthStatus()),
@@ -58,51 +57,55 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits [Unauthenticated] when token is invalid',
       build: () {
-        when(() => mockTokenStorage.hasTokens)
-            .thenAnswer((_) async => true);
-        when(() => mockAuthRepository.getCurrentUser())
-            .thenThrow(Exception('unauthorized'));
-        when(() => mockTokenStorage.clear())
-            .thenAnswer((_) async {});
+        when(() => mockTokenStorage.hasTokens).thenAnswer((_) async => true);
+        when(
+          () => mockAuthRepository.getCurrentUser(),
+        ).thenThrow(Exception('unauthorized'));
+        when(() => mockTokenStorage.clear()).thenAnswer((_) async {});
         return buildBloc();
       },
       act: (bloc) => bloc.add(const CheckAuthStatus()),
       expect: () => [const Unauthenticated()],
     );
 
-    test('a failed session check (tokens exist but getCurrentUser throws) '
-        'also runs beforeLogout — not just the logout button — so sync '
-        'stops promptly on that path too (PR #16 review round 1, F3)',
-        () async {
-      when(() => mockTokenStorage.hasTokens).thenAnswer((_) async => true);
-      when(() => mockAuthRepository.getCurrentUser())
-          .thenThrow(Exception('unauthorized'));
-      when(() => mockTokenStorage.clear()).thenAnswer((_) async {});
-      var beforeLogoutCalled = false;
-      final bloc = AuthBloc(
-        authRepository: mockAuthRepository,
-        tokenStorage: mockTokenStorage,
-        beforeLogout: () async {
-          beforeLogoutCalled = true;
-        },
-      );
-      addTearDown(bloc.close);
+    test(
+      'a failed session check (tokens exist but getCurrentUser throws) '
+      'also runs beforeLogout — not just the logout button — so sync '
+      'stops promptly on that path too (PR #16 review round 1, F3)',
+      () async {
+        when(() => mockTokenStorage.hasTokens).thenAnswer((_) async => true);
+        when(
+          () => mockAuthRepository.getCurrentUser(),
+        ).thenThrow(Exception('unauthorized'));
+        when(() => mockTokenStorage.clear()).thenAnswer((_) async {});
+        var beforeLogoutCalled = false;
+        final bloc = AuthBloc(
+          authRepository: mockAuthRepository,
+          tokenStorage: mockTokenStorage,
+          beforeLogout: () async {
+            beforeLogoutCalled = true;
+          },
+        );
+        addTearDown(bloc.close);
 
-      bloc.add(const CheckAuthStatus());
-      await bloc.stream.firstWhere((s) => s is Unauthenticated);
+        bloc.add(const CheckAuthStatus());
+        await bloc.stream.firstWhere((s) => s is Unauthenticated);
 
-      expect(beforeLogoutCalled, isTrue);
-    });
+        expect(beforeLogoutCalled, isTrue);
+      },
+    );
   });
 
   group('LoginRequested', () {
     blocTest<AuthBloc, AuthState>(
       'emits [AuthLoading, Authenticated] on successful login',
       build: () {
-        when(() => mockAuthRepository.login(
-              email: any(named: 'email'),
-              password: any(named: 'password'),
-            )).thenAnswer((_) async => testUser);
+        when(
+          () => mockAuthRepository.login(
+            email: any(named: 'email'),
+            password: any(named: 'password'),
+          ),
+        ).thenAnswer((_) async => testUser);
         return buildBloc();
       },
       act: (bloc) => bloc.add(
@@ -114,19 +117,54 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits [AuthLoading, AuthError] on failed login',
       build: () {
-        when(() => mockAuthRepository.login(
-              email: any(named: 'email'),
-              password: any(named: 'password'),
-            )).thenThrow(Exception('invalid credentials'));
+        when(
+          () => mockAuthRepository.login(
+            email: any(named: 'email'),
+            password: any(named: 'password'),
+          ),
+        ).thenThrow(Exception('invalid credentials'));
         return buildBloc();
       },
       act: (bloc) => bloc.add(
         const LoginRequested(email: 'test@example.com', password: 'wrong'),
       ),
-      expect: () => [
-        const AuthLoading(),
-        isA<AuthError>(),
-      ],
+      expect: () => [const AuthLoading(), isA<AuthError>()],
+    );
+  });
+
+  group('EntraLoginRequested', () {
+    blocTest<AuthBloc, AuthState>(
+      'emits [AuthLoading, Authenticated] on successful Entra exchange',
+      build: () {
+        when(
+          () => mockAuthRepository.loginWithEntra(any()),
+        ).thenAnswer((_) async => testUser);
+        return buildBloc();
+      },
+      act: (bloc) => bloc.add(
+        const EntraLoginRequested(accessToken: 'entra-access-token'),
+      ),
+      expect: () => [const AuthLoading(), const Authenticated(testUser)],
+      verify: (_) {
+        verify(
+          () => mockAuthRepository.loginWithEntra('entra-access-token'),
+        ).called(1);
+      },
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'emits [AuthLoading, AuthError] when the backend rejects the Entra '
+      'token (e.g. entra-exchange disabled server-side, 404)',
+      build: () {
+        when(
+          () => mockAuthRepository.loginWithEntra(any()),
+        ).thenThrow(Exception('404'));
+        return buildBloc();
+      },
+      act: (bloc) => bloc.add(
+        const EntraLoginRequested(accessToken: 'entra-access-token'),
+      ),
+      expect: () => [const AuthLoading(), isA<AuthError>()],
     );
   });
 
@@ -134,11 +172,13 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits [AuthLoading, Authenticated] on successful registration',
       build: () {
-        when(() => mockAuthRepository.register(
-              email: any(named: 'email'),
-              password: any(named: 'password'),
-              displayName: any(named: 'displayName'),
-            )).thenAnswer((_) async => testUser);
+        when(
+          () => mockAuthRepository.register(
+            email: any(named: 'email'),
+            password: any(named: 'password'),
+            displayName: any(named: 'displayName'),
+          ),
+        ).thenAnswer((_) async => testUser);
         return buildBloc();
       },
       act: (bloc) => bloc.add(
@@ -156,8 +196,7 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits [Unauthenticated] on logout',
       build: () {
-        when(() => mockAuthRepository.logout())
-            .thenAnswer((_) async {});
+        when(() => mockAuthRepository.logout()).thenAnswer((_) async {});
         return buildBloc();
       },
       act: (bloc) => bloc.add(const LogoutRequested()),
@@ -191,8 +230,7 @@ void main() {
       'still logs out normally when no beforeLogout is given — it is '
       'optional',
       build: () {
-        when(() => mockAuthRepository.logout())
-            .thenAnswer((_) async {});
+        when(() => mockAuthRepository.logout()).thenAnswer((_) async {});
         return buildBloc(); // no beforeLogout passed
       },
       act: (bloc) => bloc.add(const LogoutRequested()),

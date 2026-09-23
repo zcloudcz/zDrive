@@ -254,6 +254,24 @@ abstract class AppLocalizations {
   /// **'Sign in'**
   String get loginButton;
 
+  /// No description provided for @entraSignInButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in with your ZCLOUD account'**
+  String get entraSignInButton;
+
+  /// No description provided for @entraStateMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign-in could not be verified. Please try signing in again.'**
+  String get entraStateMismatch;
+
+  /// No description provided for @entraSignInDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign-in was cancelled.'**
+  String get entraSignInDenied;
+
   /// No description provided for @registerButton.
   ///
   /// In en, this message translates to:
