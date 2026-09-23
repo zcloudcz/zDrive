@@ -29,11 +29,15 @@ class AuthRemoteDataSource {
   }) async {
     final response = await _dio.post(
       ApiConstants.authRegister,
-      data: {
-        'email': email,
-        'password': password,
-        'displayName': displayName,
-      },
+      data: {'email': email, 'password': password, 'displayName': displayName},
+    );
+    return AuthResponseDto.fromJson(unwrapMap(response));
+  }
+
+  Future<AuthResponseDto> entraExchange({required String accessToken}) async {
+    final response = await _dio.post(
+      ApiConstants.authEntraExchange,
+      data: {'accessToken': accessToken},
     );
     return AuthResponseDto.fromJson(unwrapMap(response));
   }

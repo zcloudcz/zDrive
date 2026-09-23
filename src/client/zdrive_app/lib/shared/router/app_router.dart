@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/auth/auth_bloc.dart';
 import '../../core/di/injection.dart';
 import '../../core/events/remote_file_change_notifier.dart';
+import '../../features/auth/presentation/entra_callback_page.dart';
 import '../../features/auth/presentation/login_page.dart';
 import '../../features/auth/presentation/register_page.dart';
 import '../../features/files/presentation/pages/file_browser_page.dart';
@@ -33,7 +34,8 @@ GoRouter createRouter(AuthBloc authBloc) {
       final isAuthenticated = authState is Authenticated;
       final isAuthRoute =
           state.matchedLocation == '/login' ||
-          state.matchedLocation == '/register';
+          state.matchedLocation == '/register' ||
+          state.matchedLocation == '/auth/entra-callback';
       // A share link is public: it must render for both an anonymous visitor
       // and a logged-in user, so it is exempt from the auth redirect exactly
       // like the auth routes themselves.
@@ -47,8 +49,17 @@ GoRouter createRouter(AuthBloc authBloc) {
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
       GoRoute(path: '/register', builder: (_, _) => const RegisterPage()),
       GoRoute(
+        path: '/auth/entra-callback',
+        builder: (_, state) => EntraCallbackPage(
+          code: state.uri.queryParameters['code'],
+          error: state.uri.queryParameters['error'],
+          returnedState: state.uri.queryParameters['state'],
+        ),
+      ),
+      GoRoute(
         path: '/s/:token',
-        builder: (_, state) => ShareLinkPage(token: state.pathParameters['token']!),
+        builder: (_, state) =>
+            ShareLinkPage(token: state.pathParameters['token']!),
       ),
       StatefulShellRoute.indexedStack(
         // SyncBloc lives here, not inside SyncPage: sync then runs for the
@@ -114,7 +125,9 @@ Widget buildSyncShellProvider({
 /// [photosEnabled] without building a real [GoRouter]. Order matches
 /// [buildHomeDestinations] in `home_page.dart`: [StatefulNavigationShell]
 /// indexes branches positionally, so the two lists must stay in lockstep.
-List<StatefulShellBranch> buildHomeBranches({bool photosEnabled = kPhotosEnabled}) {
+List<StatefulShellBranch> buildHomeBranches({
+  bool photosEnabled = kPhotosEnabled,
+}) {
   return [
     StatefulShellBranch(
       routes: [
@@ -124,18 +137,11 @@ List<StatefulShellBranch> buildHomeBranches({bool photosEnabled = kPhotosEnabled
           routes: [
             GoRoute(
               path: 'folder/:folderId',
-              builder: (_, state) => FileBrowserPage(
-                folderId: state.pathParameters['folderId'],
-              ),
+              builder: (_, state) =>
+                  FileBrowserPage(folderId: state.pathParameters['folderId']),
             ),
-            GoRoute(
-              path: 'trash',
-              builder: (_, _) => const TrashPage(),
-            ),
-            GoRoute(
-              path: 'search',
-              builder: (_, _) => const SearchPage(),
-            ),
+            GoRoute(path: 'trash', builder: (_, _) => const TrashPage()),
+            GoRoute(path: 'search', builder: (_, _) => const SearchPage()),
           ],
         ),
       ],
@@ -147,20 +153,14 @@ List<StatefulShellBranch> buildHomeBranches({bool photosEnabled = kPhotosEnabled
             path: '/home/photos',
             builder: (_, _) => const PhotosTab(),
             routes: [
-              GoRoute(
-                path: 'albums',
-                builder: (_, _) => const AlbumsPage(),
-              ),
+              GoRoute(path: 'albums', builder: (_, _) => const AlbumsPage()),
             ],
           ),
         ],
       ),
     StatefulShellBranch(
       routes: [
-        GoRoute(
-          path: '/home/settings',
-          builder: (_, _) => const SyncPage(),
-        ),
+        GoRoute(path: '/home/settings', builder: (_, _) => const SyncPage()),
       ],
     ),
   ];

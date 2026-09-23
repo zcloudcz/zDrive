@@ -49,6 +49,19 @@ final class LogoutRequested extends AuthEvent {
   const LogoutRequested();
 }
 
+/// Dispatched once the web client already holds an Entra access token (after
+/// the browser-side PKCE code exchange — see EntraCallbackPage). Mirrors
+/// [LoginRequested]: exchanges it with our own backend and reuses the same
+/// post-login states.
+final class EntraLoginRequested extends AuthEvent {
+  final String accessToken;
+
+  const EntraLoginRequested({required this.accessToken});
+
+  @override
+  List<Object?> get props => [accessToken];
+}
+
 // --- States ---
 
 sealed class AuthState extends Equatable {
@@ -104,12 +117,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     required AuthRepository authRepository,
     required TokenStorage tokenStorage,
     Future<void> Function()? beforeLogout,
-  })  : _authRepository = authRepository,
-        _tokenStorage = tokenStorage,
-        _beforeLogout = beforeLogout,
-        super(const AuthInitial()) {
+  }) : _authRepository = authRepository,
+       _tokenStorage = tokenStorage,
+       _beforeLogout = beforeLogout,
+       super(const AuthInitial()) {
     on<CheckAuthStatus>(_onCheckAuthStatus);
     on<LoginRequested>(_onLoginRequested);
+    on<EntraLoginRequested>(_onEntraLoginRequested);
     on<RegisterRequested>(_onRegisterRequested);
     on<LogoutRequested>(_onLogoutRequested);
   }
@@ -152,6 +166,19 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
+  Future<void> _onEntraLoginRequested(
+    EntraLoginRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(const AuthLoading());
+    try {
+      final user = await _authRepository.loginWithEntra(event.accessToken);
+      emit(Authenticated(user));
+    } catch (e) {
+      emit(AuthError(e.toString()));
+    }
+  }
+
   Future<void> _onRegisterRequested(
     RegisterRequested event,
     Emitter<AuthState> emit,
@@ -187,7 +214,12 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     try {
       await _beforeLogout?.call();
     } catch (e, st) {
-      log('beforeLogout failed; logging out anyway', error: e, stackTrace: st, name: 'AuthBloc');
+      log(
+        'beforeLogout failed; logging out anyway',
+        error: e,
+        stackTrace: st,
+        name: 'AuthBloc',
+      );
     }
   }
 }

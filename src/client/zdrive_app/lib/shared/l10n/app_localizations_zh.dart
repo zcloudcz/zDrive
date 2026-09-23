@@ -80,6 +80,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get loginButton => '登录';
 
   @override
+  String get entraSignInButton => '使用您的 ZCLOUD 账户登录';
+
+  @override
+  String get entraStateMismatch => '无法验证登录。请重试。';
+
+  @override
+  String get entraSignInDenied => '登录已取消。';
+
+  @override
   String get registerButton => '创建账号';
 
   @override

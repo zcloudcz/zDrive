@@ -108,7 +108,7 @@ flutter build ipa
 
 #### Build-time defines
 
-Both are `const` in the client (`String.fromEnvironment` /
+All are `const` in the client (`String.fromEnvironment` /
 `bool.fromEnvironment`), so they are baked in at compile time and cannot be
 changed at runtime. Their defaults describe the **deployed** setup, not the
 docker-compose one:
@@ -117,6 +117,8 @@ docker-compose one:
 |--------|---------|--------------|
 | `API_BASE_URL` | `http://localhost:5100/api/v1` | Building for a deployed gateway — CI does this for the Pages build (`.github/workflows/deploy-web.yml`) |
 | `PHOTOS_ENABLED` | `false` | Running PhotoService locally. PhotoService and NotificationService are **not deployed** (MVP scope) and the gateway proxies their routes to localhost, so a deployed build answers 502 for them; the Photos tab and its route are therefore hidden by default |
+| `ENTRA_CLIENT_ID` | `` (empty) | Enabling web sign-in via Drive's own Entra app registration (ADR `docs/adr/0002-shared-zcloud-login-entra-sso.md`). Empty is the safety gate: with no client id the "Sign in with your ZCLOUD account" button on the login page does not render at all, web-only. No production registration exists yet — see that ADR's Migration order step 1 for what a human needs to create in the Entra admin portal first |
+| `ENTRA_API_SCOPE` | `` (empty) | Same feature — the API scope requested alongside `openid`, e.g. `api://<drive-api-app-id>/access_as_user`. Depends on how Drive's API app registration exposes its scope |
 
 `docker-compose up` **does** start PhotoService, so local work on photos needs
 the flag or the tab will not be there:

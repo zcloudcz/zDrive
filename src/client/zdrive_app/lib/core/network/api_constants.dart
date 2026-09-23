@@ -19,6 +19,7 @@ class ApiConstants {
   static const String authRegister = '/auth/register';
   static const String authLogin = '/auth/login';
   static const String authRefresh = '/auth/refresh';
+  static const String authEntraExchange = '/auth/entra';
   static const String usersMe = '/users/me';
 
   // Files (file-service)

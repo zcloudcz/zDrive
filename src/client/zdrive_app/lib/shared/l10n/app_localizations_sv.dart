@@ -80,6 +80,16 @@ class AppLocalizationsSv extends AppLocalizations {
   String get loginButton => 'Logga in';
 
   @override
+  String get entraSignInButton => 'Logga in med ditt ZCLOUD-konto';
+
+  @override
+  String get entraStateMismatch =>
+      'Inloggningen kunde inte verifieras. Försök igen.';
+
+  @override
+  String get entraSignInDenied => 'Inloggningen avbröts.';
+
+  @override
   String get registerButton => 'Skapa konto';
 
   @override

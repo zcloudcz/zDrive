@@ -82,6 +82,16 @@ class AppLocalizationsFr extends AppLocalizations {
   String get loginButton => 'Se connecter';
 
   @override
+  String get entraSignInButton => 'Se connecter avec votre compte ZCLOUD';
+
+  @override
+  String get entraStateMismatch =>
+      'La connexion n\'a pas pu être vérifiée. Veuillez réessayer.';
+
+  @override
+  String get entraSignInDenied => 'La connexion a été annulée.';
+
+  @override
   String get registerButton => 'Créer un compte';
 
   @override

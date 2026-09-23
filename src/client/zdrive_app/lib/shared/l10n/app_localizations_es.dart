@@ -83,6 +83,16 @@ class AppLocalizationsEs extends AppLocalizations {
   String get loginButton => 'Iniciar sesión';
 
   @override
+  String get entraSignInButton => 'Iniciar sesión con tu cuenta ZCLOUD';
+
+  @override
+  String get entraStateMismatch =>
+      'No se pudo verificar el inicio de sesión. Inténtalo de nuevo.';
+
+  @override
+  String get entraSignInDenied => 'Se canceló el inicio de sesión.';
+
+  @override
   String get registerButton => 'Crear cuenta';
 
   @override

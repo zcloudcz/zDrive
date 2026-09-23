@@ -81,6 +81,16 @@ class AppLocalizationsCs extends AppLocalizations {
   String get loginButton => 'Přihlásit se';
 
   @override
+  String get entraSignInButton => 'Přihlásit se účtem ZCLOUD';
+
+  @override
+  String get entraStateMismatch =>
+      'Přihlášení se nepodařilo ověřit. Zkuste to prosím znovu.';
+
+  @override
+  String get entraSignInDenied => 'Přihlášení bylo zrušeno.';
+
+  @override
   String get registerButton => 'Vytvořit účet';
 
   @override

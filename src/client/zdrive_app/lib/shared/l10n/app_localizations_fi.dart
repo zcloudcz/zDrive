@@ -80,6 +80,16 @@ class AppLocalizationsFi extends AppLocalizations {
   String get loginButton => 'Kirjaudu sisään';
 
   @override
+  String get entraSignInButton => 'Kirjaudu ZCLOUD-tilillä';
+
+  @override
+  String get entraStateMismatch =>
+      'Kirjautumista ei voitu vahvistaa. Yritä uudelleen.';
+
+  @override
+  String get entraSignInDenied => 'Kirjautuminen peruutettiin.';
+
+  @override
   String get registerButton => 'Luo tili';
 
   @override

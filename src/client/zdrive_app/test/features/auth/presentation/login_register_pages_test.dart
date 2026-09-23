@@ -66,8 +66,9 @@ void main() {
   }
 
   group('LoginPage', () {
-    testWidgets('narrow screen stacks the lockup above a single form column',
-        (tester) async {
+    testWidgets('narrow screen stacks the lockup above a single form column', (
+      tester,
+    ) async {
       await setSize(tester, const Size(400, 800));
 
       await tester.pumpWidget(build(const LoginPage()));
@@ -77,47 +78,53 @@ void main() {
       // No brand-panel Container (petrol fill) at this width.
       expect(
         find.byWidgetPredicate(
-          (widget) => widget is Container && widget.color == AppTheme.brandPetrol,
+          (widget) =>
+              widget is Container && widget.color == AppTheme.brandPetrol,
         ),
         findsNothing,
       );
     });
 
     testWidgets(
-        'wide screen shows the petrol brand panel and the form side by side',
-        (tester) async {
-      await setSize(tester, const Size(1200, 800));
+      'wide screen shows the petrol brand panel and the form side by side',
+      (tester) async {
+        await setSize(tester, const Size(1200, 800));
 
-      await tester.pumpWidget(build(const LoginPage()));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(build(const LoginPage()));
+        await tester.pumpAndSettle();
 
-      // Exactly one BrandLockup: the brand panel's (mono). The form column
-      // no longer repeats it (bug: brand appeared twice in the wide layout).
-      expect(find.byType(BrandLockup), findsOneWidget);
-      expect(
-        find.byWidgetPredicate(
-          (widget) => widget is Container && widget.color == AppTheme.brandPetrol,
-        ),
-        findsOneWidget,
-      );
-      expect(find.byType(TextFormField), findsNWidgets(2));
+        // Exactly one BrandLockup: the brand panel's (mono). The form column
+        // no longer repeats it (bug: brand appeared twice in the wide layout).
+        expect(find.byType(BrandLockup), findsOneWidget);
+        expect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is Container && widget.color == AppTheme.brandPetrol,
+          ),
+          findsOneWidget,
+        );
+        expect(find.byType(TextFormField), findsNWidgets(2));
 
-      // The panel lockup must be the monochrome (white wordmark) variant —
-      // the default variant uses onSurface, which is close to black and
-      // would be unreadable on the petrol fill.
-      final panelLockup = tester.widget<BrandLockup>(find.byType(BrandLockup));
-      expect(panelLockup.monochrome, isTrue);
-      final wordmark = tester.widget<Text>(
-        find.descendant(
-          of: find.byType(BrandLockup),
-          matching: find.text('zDrive'),
-        ),
-      );
-      expect(wordmark.style?.color, Colors.white);
-    });
+        // The panel lockup must be the monochrome (white wordmark) variant —
+        // the default variant uses onSurface, which is close to black and
+        // would be unreadable on the petrol fill.
+        final panelLockup = tester.widget<BrandLockup>(
+          find.byType(BrandLockup),
+        );
+        expect(panelLockup.monochrome, isTrue);
+        final wordmark = tester.widget<Text>(
+          find.descendant(
+            of: find.byType(BrandLockup),
+            matching: find.text('zDrive'),
+          ),
+        );
+        expect(wordmark.style?.color, Colors.white);
+      },
+    );
 
-    testWidgets('loading state disables the button and shows progress',
-        (tester) async {
+    testWidgets('loading state disables the button and shows progress', (
+      tester,
+    ) async {
       whenListen(
         authBloc,
         const Stream<AuthState>.empty(),
@@ -145,8 +152,9 @@ void main() {
       expect(find.text('Invalid credentials'), findsOneWidget);
     });
 
-    testWidgets('Enter in the password field submits exactly once when idle',
-        (tester) async {
+    testWidgets('Enter in the password field submits exactly once when idle', (
+      tester,
+    ) async {
       await tester.pumpWidget(build(const LoginPage()));
       await tester.pumpAndSettle();
 
@@ -171,45 +179,46 @@ void main() {
       ).called(1);
     });
 
-    testWidgets('Enter in the password field dispatches nothing while loading',
-        (tester) async {
-      whenListen(
-        authBloc,
-        const Stream<AuthState>.empty(),
-        initialState: const AuthLoading(),
-      );
+    testWidgets(
+      'Enter in the password field dispatches nothing while loading',
+      (tester) async {
+        whenListen(
+          authBloc,
+          const Stream<AuthState>.empty(),
+          initialState: const AuthLoading(),
+        );
 
-      await tester.pumpWidget(build(const LoginPage()));
-      // Not pumpAndSettle: AuthLoading renders an indeterminate
-      // CircularProgressIndicator, which animates forever.
-      await tester.pump();
+        await tester.pumpWidget(build(const LoginPage()));
+        // Not pumpAndSettle: AuthLoading renders an indeterminate
+        // CircularProgressIndicator, which animates forever.
+        await tester.pump();
 
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Email'),
-        'user@example.com',
-      );
-      await tester.enterText(
-        find.widgetWithText(TextFormField, 'Password'),
-        'longenoughpassword',
-      );
-      // The button is already disabled by AuthLoading; Enter is the second
-      // entry point that must be guarded the same way (SHOULD-FIX review
-      // finding: a second Enter mid-request used to dispatch a duplicate
-      // LoginRequested).
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pump();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Email'),
+          'user@example.com',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Password'),
+          'longenoughpassword',
+        );
+        // The button is already disabled by AuthLoading; Enter is the second
+        // entry point that must be guarded the same way (SHOULD-FIX review
+        // finding: a second Enter mid-request used to dispatch a duplicate
+        // LoginRequested).
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
 
-      verifyNever(() => authBloc.add(any()));
-    });
+        verifyNever(() => authBloc.add(any()));
+      },
+    );
 
-    testWidgets('has a heading distinguishing it from the register page',
-        (tester) async {
+    testWidgets('has a heading distinguishing it from the register page', (
+      tester,
+    ) async {
       await tester.pumpWidget(build(const LoginPage()));
       await tester.pumpAndSettle();
 
-      final l10n = AppLocalizations.of(
-        tester.element(find.byType(LoginPage)),
-      )!;
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
       expect(find.text(l10n.login), findsOneWidget);
     });
 
@@ -226,11 +235,36 @@ void main() {
 
       expect(tester.takeException(), isNull);
     });
+
+    // Real gate is kEntraSignInVisible (kIsWeb && ENTRA_CLIENT_ID configured)
+    // — always false in a `flutter test` run since it never runs on web and
+    // no client id is passed. `entraSignInVisible` threads that same pure
+    // boolean through as a param instead, so both branches are exercisable
+    // here without any browser test infra.
+    testWidgets('Entra sign-in button is hidden by default (no client id '
+        'configured — the default build)', (tester) async {
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(find.text(l10n.entraSignInButton), findsNothing);
+    });
+
+    testWidgets('Entra sign-in button shows once entraSignInVisible is true', (
+      tester,
+    ) async {
+      await tester.pumpWidget(build(const LoginPage(entraSignInVisible: true)));
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(find.text(l10n.entraSignInButton), findsOneWidget);
+    });
   });
 
   group('RegisterPage', () {
-    testWidgets('email required / short password validation still fires',
-        (tester) async {
+    testWidgets('email required / short password validation still fires', (
+      tester,
+    ) async {
       await setSize(tester, const Size(400, 900));
       await tester.pumpWidget(build(const RegisterPage()));
       await tester.pumpAndSettle();
@@ -254,8 +288,9 @@ void main() {
       expect(find.text(l10n.passwordTooShort), findsOneWidget);
     });
 
-    testWidgets('has a heading distinguishing it from the login page',
-        (tester) async {
+    testWidgets('has a heading distinguishing it from the login page', (
+      tester,
+    ) async {
       await tester.pumpWidget(build(const RegisterPage()));
       await tester.pumpAndSettle();
 
