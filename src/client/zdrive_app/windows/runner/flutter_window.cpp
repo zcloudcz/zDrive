@@ -5,8 +5,9 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             bool start_hidden)
+    : start_hidden_(start_hidden), project_(project) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -51,9 +52,15 @@ bool FlutterWindow::OnCreate() {
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
-  });
+  // Starting hidden still needs the tray icon (added above) and the first
+  // Flutter frame to render, so the window is ready to restore instantly the
+  // moment the user opens it from the tray — only the initial Show() is
+  // skipped.
+  if (!start_hidden_) {
+    flutter_controller_->engine()->SetNextFrameCallback([&]() {
+      this->Show();
+    });
+  }
 
   // Flutter can complete the first frame before the "show window" callback is
   // registered. The following call ensures a frame is pending to ensure the

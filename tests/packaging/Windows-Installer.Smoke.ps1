@@ -5,6 +5,7 @@ $repository = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('zDrive-Install-Test-' + [guid]::NewGuid().ToString('N'))
 $originalLocalAppData = $env:LOCALAPPDATA
 $global:zDriveTestRegistry = @{}
+$global:zDriveTestRunKey = @{}
 $global:zDriveTestShortcuts = @{}
 $global:zDriveTestRunningPath = $null
 $global:zDriveTestFailure = $null
@@ -17,8 +18,18 @@ function New-Item {
 }
 function New-ItemProperty {
     param($Path, $Name, $Value, $PropertyType, [switch]$Force)
+    if ($Path -eq 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Run') {
+        Assert ($Name -eq 'zDrive') 'Unexpected Run key value name'
+        $global:zDriveTestRunKey[$Name] = $Value
+        return
+    }
     Assert ($Path -eq 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/zDrive') 'Unexpected registry key'
     $global:zDriveTestRegistry[$Name] = $Value
+}
+function Remove-ItemProperty {
+    param($LiteralPath, $Name, [switch]$Force, $ErrorAction)
+    Assert ($LiteralPath -eq 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Run' -and $Name -eq 'zDrive') 'Unexpected Run key removal'
+    $global:zDriveTestRunKey.Remove($Name)
 }
 function Copy-Item {
     param($Path, $LiteralPath, $Destination, [switch]$Recurse, [switch]$Force)
@@ -77,6 +88,7 @@ try {
     Assert (Test-Path -LiteralPath (Join-Path $root 'releases/0.1.0/plugin.dll')) 'Plugin missing after install'
     Assert ($global:zDriveTestRegistry.DisplayVersion -eq '0.1.0') 'Wrong install version'
     Assert ($global:zDriveTestShortcuts.Count -eq 2) 'Expected two shortcuts'
+    Assert ($global:zDriveTestRunKey.zDrive -eq ('"{0}" --start-hidden' -f (Join-Path $root 'releases/0.1.0/zdrive_app.exe'))) 'Wrong Run key after install'
     $global:zDriveTestRunningPath = Join-Path $root 'releases/0.1.0/zdrive_app.exe'
     try { & (Join-Path $package 'Install.ps1'); throw 'Running app was not rejected' }
     catch { Assert ($_.Exception.Message -like 'Close zDrive*') 'Unexpected running-app error' }
@@ -86,6 +98,7 @@ try {
     & (Join-Path $package 'Install.ps1')
     Assert ($global:zDriveTestRegistry.DisplayVersion -eq '0.2.0') 'Upgrade registration failed'
     foreach ($target in $global:zDriveTestShortcuts.Values) { Assert ($target -like '*releases*0.2.0*zdrive_app.exe') 'Shortcut not upgraded' }
+    Assert ($global:zDriveTestRunKey.zDrive -like '*releases*0.2.0*zdrive_app.exe*--start-hidden') 'Run key not upgraded to the new version'
     Assert ((Get-Content -LiteralPath (Join-Path $root 'releases/0.2.0/zdrive_app.exe')) -eq 'version two fixture') 'Upgrade did not copy new binary'
     $installedExe = Join-Path $root 'releases/0.2.0/zdrive_app.exe'
     Set-Content -LiteralPath (Join-Path $package 'app/zdrive_app.exe') -Value 'reinstalled version two'
@@ -117,8 +130,9 @@ try {
     Assert (-not (Test-Path -LiteralPath (Join-Path $root 'releases'))) 'Uninstall left binaries'
     Assert ($global:zDriveTestRegistry.Count -eq 0) 'Uninstall left registry entry'
     Assert ($global:zDriveTestShortcuts.Count -eq 0) 'Uninstall left shortcuts'
+    Assert ($global:zDriveTestRunKey.Count -eq 0) 'Uninstall left the Run key — app would keep autostarting'
     Assert ((Get-Content -LiteralPath $userData) -eq 'preserve me') 'Uninstall removed user data'
-    'PASS: install, running-app guards, upgrade, same-version copy/swap rollback, reinstall, invalid payload and uninstall; user data preserved.'
+    'PASS: install, running-app guards, upgrade, same-version copy/swap rollback, reinstall, invalid payload, uninstall and autostart Run key lifecycle; user data preserved.'
 }
 finally {
     $env:LOCALAPPDATA = $originalLocalAppData
@@ -126,5 +140,5 @@ finally {
     if ([IO.Path]::GetFullPath($fixture).StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) {
         Microsoft.PowerShell.Management\Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
     }
-    Remove-Variable -Name zDriveTestRegistry, zDriveTestShortcuts, zDriveTestRunningPath, zDriveTestFailure -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name zDriveTestRegistry, zDriveTestRunKey, zDriveTestShortcuts, zDriveTestRunningPath, zDriveTestFailure -Scope Global -ErrorAction SilentlyContinue
 }

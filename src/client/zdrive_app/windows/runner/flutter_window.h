@@ -14,7 +14,10 @@
 class FlutterWindow : public Win32Window {
  public:
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
-  explicit FlutterWindow(const flutter::DartProject& project);
+  // |start_hidden| skips the initial show so the app starts straight into
+  // the tray (autostart at login, see packaging/windows/Install.ps1).
+  explicit FlutterWindow(const flutter::DartProject& project,
+                        bool start_hidden = false);
   virtual ~FlutterWindow();
 
  protected:
@@ -25,6 +28,7 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  bool start_hidden_;
   std::unique_ptr<TrayWindow> tray_window_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> lifecycle_channel_;
 
