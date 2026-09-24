@@ -5,13 +5,21 @@ import 'entra_config.dart';
 import 'entra_pkce.dart';
 import 'entra_token_exchange.dart';
 
+/// Which of the native browser-step failures this is — [LoginPage] needs
+/// this to show the right message: Entra's own `error=` (the user denied
+/// consent) reads very differently from a CSRF state mismatch or a missing
+/// `code` (Opus review of PR #72, finding 5: both used to show the same
+/// "state mismatch" text).
+enum EntraNativeSignInFailureKind { denied, rejected }
+
 /// Thrown for failures specific to the native browser step — Entra reported
 /// `error=`, or the returned `state` doesn't match what was sent (CSRF
 /// check). Distinguished from [EntraTokenExchangeException]/[DioException]
 /// the token exchange step throws, so the caller can tell "Entra/CSRF
 /// rejected this" apart from "the exchange call itself failed."
 class EntraNativeSignInException implements Exception {
-  const EntraNativeSignInException(this.message);
+  const EntraNativeSignInException(this.kind, this.message);
+  final EntraNativeSignInFailureKind kind;
   final String message;
 
   @override
@@ -88,14 +96,23 @@ class EntraNativeSignIn {
 
     final query = Uri.parse(callbackUrl).queryParameters;
     if (query.containsKey('error')) {
-      throw EntraNativeSignInException(query['error']!);
+      throw EntraNativeSignInException(
+        EntraNativeSignInFailureKind.denied,
+        query['error']!,
+      );
     }
     if (query['state'] != state) {
-      throw const EntraNativeSignInException('state mismatch');
+      throw const EntraNativeSignInException(
+        EntraNativeSignInFailureKind.rejected,
+        'state mismatch',
+      );
     }
     final code = query['code'];
     if (code == null) {
-      throw const EntraNativeSignInException('missing code');
+      throw const EntraNativeSignInException(
+        EntraNativeSignInFailureKind.rejected,
+        'missing code',
+      );
     }
 
     return _tokenExchange.exchangeCodeForNativeTokens(

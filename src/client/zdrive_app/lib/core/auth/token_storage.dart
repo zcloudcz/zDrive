@@ -31,6 +31,16 @@ class TokenStorage {
   Future<void> saveEntraRefreshToken(String token) =>
       _storage.write(key: _entraRefreshTokenKey, value: token);
 
+  /// Drops a stale Entra refresh token without touching the zDrive
+  /// access/refresh tokens — used by password login/register (Opus review
+  /// of PR #72, finding 1): a device that previously signed in via Entra
+  /// and then switches to a *different* user's password must not leave the
+  /// old user's Entra refresh token behind, or a later silent renewal
+  /// (auth_interceptor.dart) would revive the previous user's session
+  /// under the new user's login.
+  Future<void> clearEntraRefreshToken() =>
+      _storage.delete(key: _entraRefreshTokenKey);
+
   Future<void> clear() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);

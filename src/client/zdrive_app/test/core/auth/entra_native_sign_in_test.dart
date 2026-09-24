@@ -79,7 +79,16 @@ void main() {
 
       await expectLater(
         signIn.signIn(),
-        throwsA(isA<EntraNativeSignInException>()),
+        throwsA(
+          isA<EntraNativeSignInException>().having(
+            (e) => e.kind,
+            'kind',
+            // Opus review of PR #72, finding 5: a state mismatch is
+            // "rejected", not "denied" — LoginPage shows a different
+            // message for each.
+            EntraNativeSignInFailureKind.rejected,
+          ),
+        ),
       );
       verifyNever(
         () => tokenExchange.exchangeCodeForNativeTokens(
@@ -102,7 +111,13 @@ void main() {
 
       await expectLater(
         signIn.signIn(),
-        throwsA(isA<EntraNativeSignInException>()),
+        throwsA(
+          isA<EntraNativeSignInException>().having(
+            (e) => e.kind,
+            'kind',
+            EntraNativeSignInFailureKind.denied,
+          ),
+        ),
       );
       verifyNever(
         () => tokenExchange.exchangeCodeForNativeTokens(

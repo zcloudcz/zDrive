@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
@@ -16,11 +17,13 @@ import 'widgets/auth_scaffold.dart';
 
 /// What went wrong in the native (ADR 0003) sign-in step, before AuthBloc
 /// ever got involved — mirrors `_CallbackFailure` in EntraCallbackPage
-/// (web's equivalent). `authFailed` covers both Entra's `error=` (denied
-/// consent) and the CSRF state-mismatch check: either way sign-in did not
-/// complete, and one message is enough for both (per ADR 0003: "same
-/// handling as web").
-enum _EntraNativeFailure { authFailed, exchangeFailed }
+/// (web's equivalent). `denied` (Entra's own `error=`) and `authFailed`
+/// (CSRF state mismatch / missing code) show different messages — Opus
+/// review of PR #72, finding 5, caught both collapsing into one. `unexpected`
+/// is the catch-all for anything else (finding 2: a Windows loopback port
+/// conflict, a missing platform channel, ...) — only an actual user cancel
+/// stays silent now, not everything.
+enum _EntraNativeFailure { denied, authFailed, exchangeFailed, unexpected }
 
 class LoginPage extends StatefulWidget {
   // Left null by default so the real gate (kEntraSignInVisible, resolved at
@@ -29,9 +32,16 @@ class LoginPage extends StatefulWidget {
   // platform. `bool?` rather than a `bool` default: kEntraSignInVisible is
   // no longer `const` (ADR 0003 needs a runtime platform check), and a
   // default parameter value must be a compile-time constant.
-  const LoginPage({super.key, this.entraSignInVisible});
+  const LoginPage({super.key, this.entraSignInVisible, this.entraNativeSignInFactory});
 
   final bool? entraSignInVisible;
+
+  // Same reasoning as EntraCallbackPage's `signIn`/`tokenExchange` params: a
+  // real `EntraNativeSignIn` calls the actual `flutter_web_auth_2` platform
+  // channel, which never resolves in a plain `flutter_test` run (no native
+  // implementation replies), so a widget test needs to fake the whole
+  // browser step to exercise the catch branches below at all.
+  final EntraNativeSignIn Function()? entraNativeSignInFactory;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -66,7 +76,8 @@ class _LoginPageState extends State<LoginPage> {
       _entraExchangeError = null;
     });
     try {
-      final result = await EntraNativeSignIn().signIn();
+      final signIn = widget.entraNativeSignInFactory?.call() ?? EntraNativeSignIn();
+      final result = await signIn.signIn();
       if (!mounted) return;
       context.read<AuthBloc>().add(
         EntraLoginRequested(
@@ -74,9 +85,13 @@ class _LoginPageState extends State<LoginPage> {
           entraRefreshToken: result.refreshToken,
         ),
       );
-    } on EntraNativeSignInException {
+    } on EntraNativeSignInException catch (e) {
       if (!mounted) return;
-      setState(() => _entraFailure = _EntraNativeFailure.authFailed);
+      setState(
+        () => _entraFailure = e.kind == EntraNativeSignInFailureKind.denied
+            ? _EntraNativeFailure.denied
+            : _EntraNativeFailure.authFailed,
+      );
     } on DioException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -86,11 +101,21 @@ class _LoginPageState extends State<LoginPage> {
     } on EntraTokenExchangeException {
       if (!mounted) return;
       setState(() => _entraFailure = _EntraNativeFailure.exchangeFailed);
+    } on PlatformException catch (e) {
+      // flutter_web_auth_2 throws PlatformException(code: 'CANCELED') when
+      // the user dismisses the browser sheet — back to the login page with
+      // no error, per ADR 0003's failure modes, same as web treats a user
+      // simply not completing the redirect. Any OTHER platform exception
+      // (e.g. the Windows loopback port already in use) is a real failure
+      // and must be visible (Opus review of PR #72, finding 2).
+      if (e.code == 'CANCELED') return;
+      if (!mounted) return;
+      setState(() => _entraFailure = _EntraNativeFailure.unexpected);
     } catch (_) {
-      // flutter_web_auth_2 throws a plain PlatformException(code: CANCELED)
-      // when the user dismisses the browser sheet — back to the login page
-      // with no error, per ADR 0003's failure modes, same as web treats a
-      // user simply not completing the redirect.
+      // Anything else (a missing platform channel, ...) is also a real
+      // failure, not a silent cancel — finding 2.
+      if (!mounted) return;
+      setState(() => _entraFailure = _EntraNativeFailure.unexpected);
     }
   }
 
@@ -117,12 +142,16 @@ class _LoginPageState extends State<LoginPage> {
     switch (_entraFailure) {
       case null:
         return null;
+      case _EntraNativeFailure.denied:
+        return l10n.entraSignInDenied;
       case _EntraNativeFailure.authFailed:
         return l10n.entraStateMismatch;
       case _EntraNativeFailure.exchangeFailed:
         return _entraExchangeError != null
             ? describeError(_entraExchangeError!, l10n)
             : l10n.errorRequestFailed;
+      case _EntraNativeFailure.unexpected:
+        return l10n.errorRequestFailed;
     }
   }
 

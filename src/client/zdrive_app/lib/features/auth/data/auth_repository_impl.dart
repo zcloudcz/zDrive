@@ -22,6 +22,12 @@ class AuthRepositoryImpl implements AuthRepository {
       accessToken: response.accessToken,
       refreshToken: response.refreshToken,
     );
+    // Password login never carries an Entra refresh token — drop any stale
+    // one a previous Entra sign-in on this device left behind (Opus review
+    // of PR #72, finding 1: otherwise a later silent renewal in
+    // auth_interceptor.dart would revive that other identity's session
+    // under this password-login user).
+    await _tokenStorage.clearEntraRefreshToken();
     // Backend returns tokens only; load the profile with the new token.
     return getCurrentUser();
   }
@@ -41,6 +47,8 @@ class AuthRepositoryImpl implements AuthRepository {
       accessToken: response.accessToken,
       refreshToken: response.refreshToken,
     );
+    // See login()'s comment above — same identity-mix-up risk.
+    await _tokenStorage.clearEntraRefreshToken();
     // Backend returns tokens only; load the profile with the new token.
     return getCurrentUser();
   }
@@ -57,13 +65,25 @@ class AuthRepositoryImpl implements AuthRepository {
       accessToken: response.accessToken,
       refreshToken: response.refreshToken,
     );
-    // Native only (ADR 0003): stash the Entra refresh token for silent
-    // renewal — see auth_interceptor.dart. Web never passes one.
-    if (entraRefreshToken != null) {
-      await _tokenStorage.saveEntraRefreshToken(entraRefreshToken);
+    try {
+      // Native only (ADR 0003): stash the Entra refresh token for silent
+      // renewal — see auth_interceptor.dart. Web never passes one.
+      if (entraRefreshToken != null) {
+        await _tokenStorage.saveEntraRefreshToken(entraRefreshToken);
+      }
+      // Backend returns tokens only; load the profile with the new token.
+      return await getCurrentUser();
+    } catch (_) {
+      // Opus review of PR #72, finding 1: a failure here (e.g. getCurrentUser
+      // hits a network error) must not leave a fully-formed session for this
+      // Entra identity sitting in storage — the caller sees AuthError and
+      // assumes nothing was saved. Without this, a *different* user logging
+      // in right after with a password would only overwrite the zDrive
+      // tokens, leaving this user's Entra refresh token in place for silent
+      // renewal to later revive.
+      await _tokenStorage.clear();
+      rethrow;
     }
-    // Backend returns tokens only; load the profile with the new token.
-    return getCurrentUser();
   }
 
   @override
