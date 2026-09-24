@@ -27,34 +27,20 @@ import '../../features/sync/presentation/sync_page.dart';
 import '../../features/sync/sync_support.dart';
 import '../../features/share_link/presentation/pages/share_link_page.dart';
 
-GoRouter createRouter(AuthBloc authBloc) {
+GoRouter createRouter(AuthBloc authBloc, {Uri? launchUri}) {
+  // Entra's redirect_uri is this app's plain origin (see entra_config.dart),
+  // so code/state/error arrive in the ROOT URL's real query string, not in
+  // the hash go_router reads. They become the router's initial location
+  // (see entraInitialLocation for why not a redirect), and the real query
+  // string is stripped right away: the hash URL strategy re-serializes it on
+  // every in-app navigation, and a code left there would keep reappearing
+  // in the address bar and re-submit on F5.
+  final initialLocation = entraInitialLocation(launchUri ?? Uri.base);
+  if (initialLocation != '/login') stripEntraQueryFromUrl();
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: initialLocation,
     refreshListenable: _AuthRefreshListenable(authBloc),
     redirect: (context, state) {
-      // Entra's redirect_uri is this app's plain origin (see entra_config.dart
-      // for why: no fragment allowed in redirect_uri, and GitHub Pages has no
-      // SPA fallback for a real path). code/state/error therefore land in the
-      // ROOT URL's real query string, not in the hash go_router reads its own
-      // location from — Uri.base still sees them regardless of the current
-      // hash location, so they're forwarded here into the in-app hash route
-      // that already knows how to handle them.
-      //
-      // Round 2 of PR #70's review: the hash URL strategy re-serializes the
-      // real query string on EVERY in-app navigation (it's not part of what
-      // go_router owns), so leaving it in place made this branch fire again
-      // right after a successful sign-in navigated to /home/files — forwarding
-      // back to /auth/entra-callback a second time, which go_router detects as
-      // a redirect loop and fails the whole navigation. stripEntraQueryFromUrl
-      // makes the forward actually one-time by removing the real query string
-      // the moment it's been read, so the next redirect() call has nothing
-      // left to forward.
-      final forward = entraForwardTarget(Uri.base.queryParameters, state.matchedLocation);
-      if (forward != null) {
-        stripEntraQueryFromUrl();
-        return forward;
-      }
-
       final authState = authBloc.state;
       final isAuthenticated = authState is Authenticated;
       final isAuthRoute =
