@@ -96,9 +96,8 @@ final bool kEntraSignInVisible = computeEntraSignInVisible(
 ///
 /// The origin root is the one URL Pages always serves. `code`/`state`/
 /// `error` land in its real query string, which coexists with the hash
-/// fragment go_router reads — `app_router.dart`'s `redirect` callback reads
-/// them from [Uri.base] on first load and forwards them into the in-app
-/// `/auth/entra-callback` hash route.
+/// fragment go_router reads — [entraInitialLocation] turns them into the
+/// router's initial location, the in-app `/auth/entra-callback` hash route.
 /// Where to send the browser next when [rootQuery] (the real URL's query
 /// string — see [entraRedirectUri]) carries an Entra `code`/`error`, or
 /// `null` if there's nothing to forward. Pure so the "forward once, not on
@@ -118,6 +117,25 @@ String? entraForwardTarget(Map<String, String> rootQuery, String matchedLocation
   // its matchedLocation is '/s/<token>', not '/login', so it's ignored.
   if (!isEntraRedirect || matchedLocation != '/login') return null;
   return Uri(path: '/auth/entra-callback', queryParameters: rootQuery).toString();
+}
+
+/// The router's initial location for a page load of [launchUri]: the
+/// in-app Entra callback route when the page is Entra's redirect back
+/// (hash-less, `code`/`error` in the real query string), otherwise '/login'.
+///
+/// Decided once, when the router is created, instead of inside
+/// `GoRouter.redirect` (live-site bug after PR #70): the first redirect did
+/// forward to the callback, but AuthBloc's startup CheckAuthStatus fires
+/// `refreshListenable` right after, and that refresh re-resolves the
+/// ORIGINAL platform route ('/' → initialLocation '/login'). By then the
+/// query string was already stripped, so nothing forwarded again — the
+/// callback page flashed and the user landed back on the login page. As
+/// the router's own initialLocation, the callback route is what every
+/// refresh re-resolves to. A non-empty fragment means an in-app route
+/// (e.g. a `#/s/<token>` share link) is being opened, so it is left alone.
+String entraInitialLocation(Uri launchUri) {
+  if (launchUri.fragment.isNotEmpty) return '/login';
+  return entraForwardTarget(launchUri.queryParameters, '/login') ?? '/login';
 }
 
 String entraRedirectUri() {

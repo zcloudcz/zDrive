@@ -124,6 +124,26 @@ void main() {
     });
   });
 
+  group('entraInitialLocation', () {
+    test('Entra redirect back (no fragment, code in query) -> callback route', () {
+      expect(entraInitialLocation(Uri.parse('https://drive.zcloud.cz/?code=a&state=b')),
+          '/auth/entra-callback?code=a&state=b');
+    });
+
+    test('Entra error redirect -> callback route', () {
+      expect(entraInitialLocation(Uri.parse('https://drive.zcloud.cz/?error=access_denied')),
+          '/auth/entra-callback?error=access_denied');
+    });
+
+    test('plain load -> /login', () {
+      expect(entraInitialLocation(Uri.parse('https://drive.zcloud.cz/')), '/login');
+    });
+
+    test('a fragment (in-app route such as a share link) is never hijacked', () {
+      expect(entraInitialLocation(Uri.parse('https://drive.zcloud.cz/?code=x#/s/abc')), '/login');
+    });
+  });
+
   group('entraRedirectUri', () {
     test('drops query and fragment instead of leaving a bare "?#" — round-1 '
         'review of PR #70: Uri.replace(query: "", fragment: "") sets them '
