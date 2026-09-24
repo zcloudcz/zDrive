@@ -345,6 +345,30 @@ class AppLocalizationsEs extends AppLocalizations {
   String get errorRequestFailed => 'No se pudo completar la solicitud.';
 
   @override
+  String get authInvalidCredentials =>
+      'Correo electrónico o contraseña no válidos.';
+
+  @override
+  String get authEmailAlreadyRegistered =>
+      'Ya existe una cuenta con este correo electrónico.';
+
+  @override
+  String get authEntraAccountExists =>
+      'Ya existe una cuenta con este correo electrónico que usa otro método de inicio de sesión. Usa tu contraseña o ese método.';
+
+  @override
+  String get authEntraVerificationFailed =>
+      'No se pudo verificar tu cuenta de ZCLOUD. Inténtalo de nuevo o contacta con soporte.';
+
+  @override
+  String get authEntraUnavailable =>
+      'El inicio de sesión de ZCLOUD no está disponible en este momento.';
+
+  @override
+  String get authTooManyAttempts =>
+      'Demasiados intentos. Inténtalo de nuevo más tarde.';
+
+  @override
   String get syncConnecting => 'Conectando…';
 
   @override

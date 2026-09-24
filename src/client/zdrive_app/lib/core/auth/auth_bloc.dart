@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../features/auth/domain/auth_repository.dart';
 import '../../features/auth/domain/user.dart';
+import '../diagnostics/diagnostics.dart';
 import 'token_storage.dart';
 
 // --- Events ---
@@ -98,12 +99,16 @@ final class Unauthenticated extends AuthState {
 }
 
 final class AuthError extends AuthState {
-  final String message;
+  // Carries the caught error object rather than a pre-rendered string --
+  // same reasoning as error_message.dart: blocs carry the error, pages turn
+  // it into text (describeAuthError), so the rendering stays localized and
+  // never leaks raw exception/server text.
+  final Object error;
 
-  const AuthError(this.message);
+  const AuthError(this.error);
 
   @override
-  List<Object?> get props => [message];
+  List<Object?> get props => [error];
 }
 
 // --- Bloc ---
@@ -166,8 +171,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         password: event.password,
       );
       emit(Authenticated(user));
-    } catch (e) {
-      emit(AuthError(e.toString()));
+    } catch (e, st) {
+      Diagnostics.error('auth.login_failed', e, st);
+      emit(AuthError(e));
     }
   }
 
@@ -182,8 +188,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         entraRefreshToken: event.entraRefreshToken,
       );
       emit(Authenticated(user));
-    } catch (e) {
-      emit(AuthError(e.toString()));
+    } catch (e, st) {
+      Diagnostics.error('auth.entra_login_failed', e, st);
+      emit(AuthError(e));
     }
   }
 
@@ -199,8 +206,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         displayName: event.displayName,
       );
       emit(Authenticated(user));
-    } catch (e) {
-      emit(AuthError(e.toString()));
+    } catch (e, st) {
+      Diagnostics.error('auth.register_failed', e, st);
+      emit(AuthError(e));
     }
   }
 

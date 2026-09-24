@@ -341,6 +341,29 @@ class AppLocalizationsFi extends AppLocalizations {
   String get errorRequestFailed => 'Pyyntöä ei voitu suorittaa.';
 
   @override
+  String get authInvalidCredentials => 'Virheellinen sähköposti tai salasana.';
+
+  @override
+  String get authEmailAlreadyRegistered =>
+      'Tällä sähköpostiosoitteella on jo tili.';
+
+  @override
+  String get authEntraAccountExists =>
+      'Tällä sähköpostiosoitteella on jo tili, joka kirjautuu toisella tavalla. Käytä salasanaa tai kyseistä kirjautumistapaa.';
+
+  @override
+  String get authEntraVerificationFailed =>
+      'ZCLOUD-tiliä ei voitu vahvistaa. Yritä uudelleen tai ota yhteyttä tukeen.';
+
+  @override
+  String get authEntraUnavailable =>
+      'ZCLOUD-kirjautuminen ei ole juuri nyt käytettävissä.';
+
+  @override
+  String get authTooManyAttempts =>
+      'Liian monta yritystä. Yritä myöhemmin uudelleen.';
+
+  @override
   String get syncConnecting => 'Yhdistetään…';
 
   @override

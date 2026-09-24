@@ -222,7 +222,18 @@ void main() {
     ).thenAnswer((_) async => 'backend-access-token');
     whenListen(
       authBloc,
-      Stream<AuthState>.fromIterable([const AuthError('server says no')]),
+      Stream<AuthState>.fromIterable([
+        AuthError(
+          DioException(
+            requestOptions: RequestOptions(path: '/auth/entra'),
+            response: Response(
+              requestOptions: RequestOptions(path: '/auth/entra'),
+              statusCode: 404,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        ),
+      ]),
       initialState: const AuthInitial(),
     );
 
@@ -239,7 +250,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('server says no'), findsOneWidget);
+    final l10n = AppLocalizations.of(
+      tester.element(find.byType(EntraCallbackPage)),
+    )!;
+    expect(find.text(l10n.authEntraUnavailable), findsOneWidget);
     expect(find.byIcon(Icons.arrow_back), findsOneWidget);
   });
 }

@@ -7,6 +7,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import '../../../core/auth/auth_bloc.dart';
 import '../../../core/auth/entra_sign_in.dart';
 import '../../../core/auth/entra_token_exchange.dart';
+import '../../../core/diagnostics/diagnostics.dart';
 import '../../../core/network/error_message.dart';
 import 'widgets/auth_scaffold.dart';
 
@@ -99,13 +100,15 @@ class _EntraCallbackPageState extends State<EntraCallbackPage> {
       context.read<AuthBloc>().add(
         EntraLoginRequested(accessToken: accessToken),
       );
-    } on DioException catch (e) {
+    } on DioException catch (e, st) {
+      Diagnostics.error('auth.entra_callback_exchange_failed', e, st);
       if (!mounted) return;
       setState(() {
         _failure = _CallbackFailure.exchangeFailed;
         _exchangeError = e;
       });
-    } on EntraTokenExchangeException {
+    } on EntraTokenExchangeException catch (e, st) {
+      Diagnostics.error('auth.entra_callback_exchange_failed', e, st);
       if (!mounted) return;
       setState(() => _failure = _CallbackFailure.exchangeFailed);
     }
@@ -123,7 +126,7 @@ class _EntraCallbackPageState extends State<EntraCallbackPage> {
         return l10n.errorRequestFailed;
       case _CallbackFailure.exchangeFailed:
         return _exchangeError != null
-            ? describeError(_exchangeError!, l10n)
+            ? describeAuthError(_exchangeError!, l10n)
             : l10n.errorRequestFailed;
     }
   }
@@ -140,7 +143,9 @@ class _EntraCallbackPageState extends State<EntraCallbackPage> {
         // there's an error there must be a way out: round-1 review of
         // PR #70 found a bloc-originated error left the page stuck with no
         // back button, since only the local `message` gated it before.
-        final text = message ?? (state is AuthError ? state.message : null);
+        final text =
+            message ??
+            (state is AuthError ? describeAuthError(state.error, l10n) : null);
         return AuthScaffold(
           appBar: text == null
               ? null

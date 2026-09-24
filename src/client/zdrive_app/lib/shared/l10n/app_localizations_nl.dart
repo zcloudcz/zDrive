@@ -343,6 +343,29 @@ class AppLocalizationsNl extends AppLocalizations {
   String get errorRequestFailed => 'Het verzoek kon niet worden voltooid.';
 
   @override
+  String get authInvalidCredentials => 'Ongeldig e-mailadres of wachtwoord.';
+
+  @override
+  String get authEmailAlreadyRegistered =>
+      'Er bestaat al een account met dit e-mailadres.';
+
+  @override
+  String get authEntraAccountExists =>
+      'Er bestaat al een account met dit e-mailadres dat op een andere manier is aangemeld. Gebruik je wachtwoord of die aanmeldmethode.';
+
+  @override
+  String get authEntraVerificationFailed =>
+      'Je ZCLOUD-account kon niet worden geverifieerd. Probeer het opnieuw of neem contact op met support.';
+
+  @override
+  String get authEntraUnavailable =>
+      'ZCLOUD-aanmelden is momenteel niet beschikbaar.';
+
+  @override
+  String get authTooManyAttempts =>
+      'Te veel pogingen. Probeer het later opnieuw.';
+
+  @override
   String get syncConnecting => 'Verbinding maken…';
 
   @override

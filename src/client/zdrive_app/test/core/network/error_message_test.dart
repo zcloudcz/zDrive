@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zdrive_app/core/network/api_envelope.dart';
 import 'package:zdrive_app/core/network/error_message.dart';
+import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations_cs.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
 
@@ -88,4 +89,93 @@ void main() {
       expect(describeError(error, cs), cs.errorRequestFailed);
     });
   }
+
+  group('describeAuthError', () {
+    DioException byPathAndStatus(String path, int statusCode) => DioException(
+      requestOptions: RequestOptions(path: path),
+      response: Response(
+        requestOptions: RequestOptions(path: path),
+        statusCode: statusCode,
+        // The backend's own message may contain the email address the user
+        // typed, so it must never leak into the mapped text below.
+        data: {
+          'success': false,
+          'error': {
+            'code': 'CONFLICT',
+            'message': 'A user with email someone@example.com already exists.',
+          },
+        },
+      ),
+      type: DioExceptionType.badResponse,
+    );
+
+    final table = <String, (String path, int status, String Function(AppLocalizations) expected)>{
+      '/auth/login 404 -> invalid credentials': (
+        '/auth/login',
+        404,
+        (l10n) => l10n.authInvalidCredentials,
+      ),
+      '/auth/login 401 -> invalid credentials': (
+        '/auth/login',
+        401,
+        (l10n) => l10n.authInvalidCredentials,
+      ),
+      '/auth/register 409 -> email already registered': (
+        '/auth/register',
+        409,
+        (l10n) => l10n.authEmailAlreadyRegistered,
+      ),
+      '/auth/entra 409 -> account exists another way': (
+        '/auth/entra',
+        409,
+        (l10n) => l10n.authEntraAccountExists,
+      ),
+      '/auth/entra 403 -> could not verify': (
+        '/auth/entra',
+        403,
+        (l10n) => l10n.authEntraVerificationFailed,
+      ),
+      '/auth/entra 404 -> sign-in unavailable': (
+        '/auth/entra',
+        404,
+        (l10n) => l10n.authEntraUnavailable,
+      ),
+    };
+
+    for (final entry in table.entries) {
+      final (path, status, expected) = entry.value;
+      test(entry.key, () {
+        final error = byPathAndStatus(path, status);
+        expect(describeAuthError(error, en), expected(en));
+        expect(describeAuthError(error, cs), expected(cs));
+      });
+    }
+
+    test('429 on any auth endpoint -> too many attempts, regardless of path', () {
+      for (final path in ['/auth/login', '/auth/register', '/auth/entra']) {
+        expect(
+          describeAuthError(byPathAndStatus(path, 429), en),
+          en.authTooManyAttempts,
+        );
+      }
+    });
+
+    test('an unmapped status/path combination falls back to describeError', () {
+      final error = byPathAndStatus('/auth/login', 500);
+      expect(describeAuthError(error, en), describeError(error, en));
+    });
+
+    test('a non-DioException falls back to describeError', () {
+      final error = Exception('boom');
+      expect(describeAuthError(error, en), describeError(error, en));
+    });
+
+    test('never leaks the backend envelope message (may contain the email)', () {
+      final error = byPathAndStatus('/auth/register', 409);
+      expect(
+        describeAuthError(error, en),
+        isNot(contains('someone@example.com')),
+      );
+    });
+  });
 }

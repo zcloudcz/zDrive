@@ -746,6 +746,42 @@ abstract class AppLocalizations {
   /// **'The request could not be completed.'**
   String get errorRequestFailed;
 
+  /// No description provided for @authInvalidCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid email or password.'**
+  String get authInvalidCredentials;
+
+  /// No description provided for @authEmailAlreadyRegistered.
+  ///
+  /// In en, this message translates to:
+  /// **'An account with this email already exists.'**
+  String get authEmailAlreadyRegistered;
+
+  /// No description provided for @authEntraAccountExists.
+  ///
+  /// In en, this message translates to:
+  /// **'An account with this email already exists and is signed in another way. Use your password or that sign-in method instead.'**
+  String get authEntraAccountExists;
+
+  /// No description provided for @authEntraVerificationFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your ZCLOUD account could not be verified. Please try again or contact support.'**
+  String get authEntraVerificationFailed;
+
+  /// No description provided for @authEntraUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'ZCLOUD sign-in is not available right now.'**
+  String get authEntraUnavailable;
+
+  /// No description provided for @authTooManyAttempts.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many attempts. Please try again later.'**
+  String get authTooManyAttempts;
+
   /// No description provided for @syncConnecting.
   ///
   /// In en, this message translates to:

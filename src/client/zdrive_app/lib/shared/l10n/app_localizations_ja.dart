@@ -331,6 +331,26 @@ class AppLocalizationsJa extends AppLocalizations {
   String get errorRequestFailed => 'リクエストを完了できませんでした。';
 
   @override
+  String get authInvalidCredentials => 'メールアドレスまたはパスワードが正しくありません。';
+
+  @override
+  String get authEmailAlreadyRegistered => 'このメールアドレスのアカウントは既に存在します。';
+
+  @override
+  String get authEntraAccountExists =>
+      'このメールアドレスのアカウントは既に別の方法で登録されています。パスワードまたはその方法でサインインしてください。';
+
+  @override
+  String get authEntraVerificationFailed =>
+      'ZCLOUDアカウントを確認できませんでした。もう一度お試しいただくか、サポートにお問い合わせください。';
+
+  @override
+  String get authEntraUnavailable => 'ZCLOUDサインインは現在利用できません。';
+
+  @override
+  String get authTooManyAttempts => '試行回数が多すぎます。しばらくしてからもう一度お試しください。';
+
+  @override
   String get syncConnecting => '接続中…';
 
   @override

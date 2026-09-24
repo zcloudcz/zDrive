@@ -102,10 +102,12 @@ public sealed class ExceptionHandlingMiddleware
                 new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred."))
         };
 
+        // Method + path (never the query string, which can carry codes/tokens)
+        // so a 409 in the log can be traced back to the endpoint that raised it.
         if (statusCode == HttpStatusCode.InternalServerError)
-            _logger.LogError(exception, "Unhandled exception");
+            _logger.LogError(exception, "Unhandled exception: {Method} {Path}", context.Request.Method, context.Request.Path);
         else
-            _logger.LogWarning(exception, "Handled exception: {StatusCode}", statusCode);
+            _logger.LogWarning(exception, "Handled exception: {StatusCode} {Method} {Path}", statusCode, context.Request.Method, context.Request.Path);
 
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = (int)statusCode;

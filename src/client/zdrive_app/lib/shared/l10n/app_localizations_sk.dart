@@ -340,6 +340,28 @@ class AppLocalizationsSk extends AppLocalizations {
   String get errorRequestFailed => 'Požiadavku sa nepodarilo dokončiť.';
 
   @override
+  String get authInvalidCredentials => 'Neplatný e-mail alebo heslo.';
+
+  @override
+  String get authEmailAlreadyRegistered => 'Účet s týmto e-mailom už existuje.';
+
+  @override
+  String get authEntraAccountExists =>
+      'Účet s týmto e-mailom už existuje a je prihlásený iným spôsobom. Použite heslo alebo ten druhý spôsob prihlásenia.';
+
+  @override
+  String get authEntraVerificationFailed =>
+      'Účet ZCLOUD sa nepodarilo overiť. Skúste to prosím znova alebo kontaktujte podporu.';
+
+  @override
+  String get authEntraUnavailable =>
+      'Prihlásenie cez ZCLOUD teraz nie je k dispozícii.';
+
+  @override
+  String get authTooManyAttempts =>
+      'Príliš veľa pokusov. Skúste to prosím neskôr.';
+
+  @override
   String get syncConnecting => 'Pripája sa…';
 
   @override
