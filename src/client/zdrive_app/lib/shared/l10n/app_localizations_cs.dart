@@ -344,7 +344,7 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get authEntraAccountExists =>
-      'Účet s tímto e-mailem už existuje a je přihlášený jiným způsobem. Použijte heslo nebo ten druhý způsob přihlášení.';
+      'Účet s tímto e-mailem už existuje s jiným způsobem přihlášení. Přihlaste se heslem nebo způsobem, který jste použili dřív.';
 
   @override
   String get authEntraVerificationFailed =>

@@ -115,7 +115,7 @@
   "errorRequestFailed": "Požadavek se nepodařilo dokončit.",
   "authInvalidCredentials": "Neplatný e-mail nebo heslo.",
   "authEmailAlreadyRegistered": "Účet s tímto e-mailem už existuje.",
-  "authEntraAccountExists": "Účet s tímto e-mailem už existuje a je přihlášený jiným způsobem. Použijte heslo nebo ten druhý způsob přihlášení.",
+  "authEntraAccountExists": "Účet s tímto e-mailem už existuje s jiným způsobem přihlášení. Přihlaste se heslem nebo způsobem, který jste použili dřív.",
   "authEntraVerificationFailed": "Účet ZCLOUD se nepodařilo ověřit. Zkuste to prosím znovu nebo kontaktujte podporu.",
   "authEntraUnavailable": "Přihlášení přes ZCLOUD teď není k dispozici.",
   "authTooManyAttempts": "Příliš mnoho pokusů. Zkuste to prosím později.",
