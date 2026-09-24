@@ -16,6 +16,10 @@ require_command() { command -v "$1" >/dev/null 2>&1 || die "required command is 
 
 IOS_SIGNED="${IOS_SIGNED:-false}"
 API_BASE_URL="${API_BASE_URL:-${DEFAULT_API_BASE_URL}}"
+# Native Entra sign-in (ADR 0003) — empty (unset) keeps the button hidden,
+# same gate as the other client builds.
+ENTRA_CLIENT_ID="${ENTRA_CLIENT_ID:-}"
+ENTRA_API_SCOPE="${ENTRA_API_SCOPE:-}"
 case "${IOS_SIGNED}" in
   false|true) ;;
   *) die "IOS_SIGNED must be exactly true or false" ;;
@@ -39,10 +43,14 @@ else
   die "required command is missing: pod"
 fi
 
-readonly DART_DEFINE="API_BASE_URL=${API_BASE_URL}"
+readonly DART_DEFINES=(
+  "--dart-define=API_BASE_URL=${API_BASE_URL}"
+  "--dart-define=ENTRA_CLIENT_ID=${ENTRA_CLIENT_ID}"
+  "--dart-define=ENTRA_API_SCOPE=${ENTRA_API_SCOPE}"
+)
 
 if [[ "${IOS_SIGNED}" == "false" ]]; then
-  flutter build ios --release --no-codesign --dart-define="${DART_DEFINE}"
+  flutter build ios --release --no-codesign "${DART_DEFINES[@]}"
   [[ -d build/ios/iphoneos/Runner.app ]] || die "unsigned Runner.app was not produced"
   echo "Unsigned validation app: ${APP_DIR}/build/ios/iphoneos/Runner.app"
   exit 0
@@ -107,7 +115,7 @@ SIGNING_IDENTITY="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" 
 [[ "${SIGNING_IDENTITY}" =~ ^[A-Fa-f0-9]{40}$ ]] || die "no valid code-signing identity hash found in imported certificate"
 [[ -n "${SIGNING_IDENTITY}" ]] || die "no code-signing identity found in imported certificate"
 
-flutter build ios --release --no-codesign --config-only --dart-define="${DART_DEFINE}"
+flutter build ios --release --no-codesign --config-only "${DART_DEFINES[@]}"
 ARCHIVE_PATH="${APP_DIR}/build/ios/archive/Runner.xcarchive"
 EXPORT_DIR="${APP_DIR}/build/ios/ipa"
 EXPORT_OPTIONS="${TEMP_ROOT}/ExportOptions.plist"

@@ -34,6 +34,10 @@ concurrency:
 env:
   FLUTTER_VERSION: '3.41.2'
   API_BASE_URL: https://zdrive-gateway.azurewebsites.net/api/v1
+  # Native Entra sign-in (ADR 0003) — same repo vars deploy-web.yml already
+  # passes for the web build. Empty (unset) means the button stays hidden.
+  ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
+  ENTRA_API_SCOPE: ${{ vars.ENTRA_API_SCOPE }}
 
 jobs:
   validate:
@@ -92,7 +96,7 @@ jobs:
       - name: Build preview without production credentials
         if: needs.validate.outputs.publish != 'true'
         working-directory: src/client/zdrive_app
-        run: flutter build apk --debug --dart-define=API_BASE_URL="$API_BASE_URL"
+        run: flutter build apk --debug --dart-define=API_BASE_URL="$API_BASE_URL" --dart-define=ENTRA_CLIENT_ID="$ENTRA_CLIENT_ID" --dart-define=ENTRA_API_SCOPE="$ENTRA_API_SCOPE"
       - name: Prepare production signing
         if: needs.validate.outputs.publish == 'true' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
@@ -110,8 +114,8 @@ jobs:
           ZDRIVE_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ZDRIVE_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
-          flutter build appbundle --release --dart-define=API_BASE_URL="$API_BASE_URL"
+          flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL" --dart-define=ENTRA_CLIENT_ID="$ENTRA_CLIENT_ID" --dart-define=ENTRA_API_SCOPE="$ENTRA_API_SCOPE"
+          flutter build appbundle --release --dart-define=API_BASE_URL="$API_BASE_URL" --dart-define=ENTRA_CLIENT_ID="$ENTRA_CLIENT_ID" --dart-define=ENTRA_API_SCOPE="$ENTRA_API_SCOPE"
       - name: Collect Android packages
         env:
           VERSION: ${{ needs.validate.outputs.version }}
@@ -211,7 +215,7 @@ jobs:
         run: flutter test --concurrency=1 test/diagnostics_test.dart test/windows_update_launch_test.dart
       - name: Build Windows release
         working-directory: src/client/zdrive_app
-        run: flutter build windows --release --dart-define=API_BASE_URL=$env:API_BASE_URL
+        run: flutter build windows --release --dart-define=API_BASE_URL=$env:API_BASE_URL --dart-define=ENTRA_CLIENT_ID=$env:ENTRA_CLIENT_ID --dart-define=ENTRA_API_SCOPE=$env:ENTRA_API_SCOPE
       - name: Package Windows installer
         env:
           VERSION: ${{ needs.validate.outputs.version }}

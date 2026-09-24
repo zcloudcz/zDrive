@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zdrive_app/core/auth/entra_config.dart';
 
@@ -11,23 +12,79 @@ void main() {
   });
 
   group('computeEntraSignInVisible', () {
-    test('false when not web, even with both configured', () {
-      expect(computeEntraSignInVisible(isWeb: false, clientId: 'id', scope: 'scope'), isFalse);
-    });
-
     test('false with a client id but no scope — round-1 review of PR #70: '
         'redirecting through Entra with no scope fails far from the cause '
         '(missing access_token, or an audience the backend rejects)', () {
-      expect(computeEntraSignInVisible(isWeb: true, clientId: 'id', scope: ''), isFalse);
+      expect(
+        computeEntraSignInVisible(
+          isWeb: true,
+          platform: TargetPlatform.android,
+          clientId: 'id',
+          scope: '',
+        ),
+        isFalse,
+      );
     });
 
     test('false with a scope but no client id', () {
-      expect(computeEntraSignInVisible(isWeb: true, clientId: '', scope: 'scope'), isFalse);
+      expect(
+        computeEntraSignInVisible(
+          isWeb: true,
+          platform: TargetPlatform.android,
+          clientId: '',
+          scope: 'scope',
+        ),
+        isFalse,
+      );
     });
 
-    test('true only once web, client id and scope are all set', () {
-      expect(computeEntraSignInVisible(isWeb: true, clientId: 'id', scope: 'scope'), isTrue);
+    test('true on web regardless of platform, once configured', () {
+      expect(
+        computeEntraSignInVisible(
+          isWeb: true,
+          platform: TargetPlatform.linux,
+          clientId: 'id',
+          scope: 'scope',
+        ),
+        isTrue,
+      );
     });
+
+    // ADR 0003 — iOS, Android and Windows get a native redirect URI; macOS
+    // and Linux have no app registration entry for one and stay
+    // password-only, even fully configured.
+    for (final platform in [
+      TargetPlatform.iOS,
+      TargetPlatform.android,
+      TargetPlatform.windows,
+    ]) {
+      test('true on native $platform, once configured (ADR 0003)', () {
+        expect(
+          computeEntraSignInVisible(
+            isWeb: false,
+            platform: platform,
+            clientId: 'id',
+            scope: 'scope',
+          ),
+          isTrue,
+        );
+      });
+    }
+
+    for (final platform in [TargetPlatform.macOS, TargetPlatform.linux]) {
+      test('false on native $platform even when configured — no app '
+          'registration entry for it (ADR 0003 NOT list)', () {
+        expect(
+          computeEntraSignInVisible(
+            isWeb: false,
+            platform: platform,
+            clientId: 'id',
+            scope: 'scope',
+          ),
+          isFalse,
+        );
+      });
+    }
   });
 
   group('entraForwardTarget', () {

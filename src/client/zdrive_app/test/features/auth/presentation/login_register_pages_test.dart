@@ -1,11 +1,14 @@
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/core/auth/auth_bloc.dart';
+import 'package:zdrive_app/core/auth/entra_native_sign_in.dart';
+import 'package:zdrive_app/core/auth/entra_token_exchange.dart';
 import 'package:zdrive_app/features/auth/presentation/login_page.dart';
 import 'package:zdrive_app/features/auth/presentation/register_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
@@ -13,6 +16,20 @@ import 'package:zdrive_app/shared/theme/app_theme.dart';
 import 'package:zdrive_app/shared/widgets/brand_lockup.dart';
 
 class MockAuthBloc extends MockBloc<AuthEvent, AuthState> implements AuthBloc {}
+
+/// Stands in for a real Entra token exchange in the success-path test below
+/// — a real EntraTokenExchange would hit Entra's actual token endpoint.
+class _FakeEntraTokenExchange extends EntraTokenExchange {
+  @override
+  Future<EntraTokenResult> exchangeCodeForNativeTokens({
+    required String code,
+    required String codeVerifier,
+    required String redirectUri,
+  }) async => const EntraTokenResult(
+    accessToken: 'native-access-token',
+    refreshToken: 'native-refresh-token',
+  );
+}
 
 void main() {
   late MockAuthBloc authBloc;
@@ -236,11 +253,12 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    // Real gate is kEntraSignInVisible (kIsWeb && ENTRA_CLIENT_ID configured)
-    // — always false in a `flutter test` run since it never runs on web and
-    // no client id is passed. `entraSignInVisible` threads that same pure
+    // Real gate is kEntraSignInVisible (computeEntraSignInVisible — needs
+    // both a client id/scope AND an eligible platform, see
+    // entra_config.dart) — always false in a `flutter test` run since no
+    // client id is passed. `entraSignInVisible` threads that same pure
     // boolean through as a param instead, so both branches are exercisable
-    // here without any browser test infra.
+    // here without any browser/platform-channel test infra.
     testWidgets('Entra sign-in button is hidden by default (no client id '
         'configured — the default build)', (tester) async {
       await tester.pumpWidget(build(const LoginPage()));
@@ -258,6 +276,125 @@ void main() {
 
       final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
       expect(find.text(l10n.entraSignInButton), findsOneWidget);
+    });
+
+    // A real EntraNativeSignIn calls the actual flutter_web_auth_2 platform
+    // channel, which never replies in a plain `flutter_test` run (no native
+    // implementation registered) — the underlying Future would simply hang
+    // forever rather than throw, so these all fake the browser step via
+    // LoginPage.entraNativeSignInFactory (Opus review of PR #72, finding 2
+    // caught the previous version of this test asserting nothing, since it
+    // never actually exercised the catch branches below).
+    Future<void> tapEntraSignIn(
+      WidgetTester tester,
+      EntraNativeSignIn Function() factory,
+    ) async {
+      await tester.pumpWidget(
+        build(
+          LoginPage(entraSignInVisible: true, entraNativeSignInFactory: factory),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      await tester.tap(find.text(l10n.entraSignInButton));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('success: dispatches EntraLoginRequested with both tokens', (
+      tester,
+    ) async {
+      await tapEntraSignIn(
+        tester,
+        () => EntraNativeSignIn(
+          tokenExchange: _FakeEntraTokenExchange(),
+          authenticate: ({required url, required callbackUrlScheme, required options}) async {
+            final state = Uri.parse(url).queryParameters['state'];
+            return 'cz.zcloud.zdrive://auth?code=auth-code&state=$state';
+          },
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+      verify(
+        () => authBloc.add(
+          const EntraLoginRequested(
+            accessToken: 'native-access-token',
+            entraRefreshToken: 'native-refresh-token',
+          ),
+        ),
+      ).called(1);
+    });
+
+    testWidgets('Entra `error=` (denied consent) shows the denial message, '
+        'not the state-mismatch one — Opus review of PR #72, finding 5', (
+      tester,
+    ) async {
+      await tapEntraSignIn(
+        tester,
+        () => EntraNativeSignIn(
+          authenticate: ({required url, required callbackUrlScheme, required options}) async =>
+              'cz.zcloud.zdrive://auth?error=access_denied',
+        ),
+      );
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(tester.takeException(), isNull);
+      expect(find.text(l10n.entraSignInDenied), findsOneWidget);
+      verifyNever(() => authBloc.add(any(that: isA<EntraLoginRequested>())));
+    });
+
+    testWidgets('CSRF state mismatch shows the state-mismatch message', (
+      tester,
+    ) async {
+      await tapEntraSignIn(
+        tester,
+        () => EntraNativeSignIn(
+          authenticate: ({required url, required callbackUrlScheme, required options}) async =>
+              'cz.zcloud.zdrive://auth?code=auth-code&state=attacker',
+        ),
+      );
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(tester.takeException(), isNull);
+      expect(find.text(l10n.entraStateMismatch), findsOneWidget);
+      verifyNever(() => authBloc.add(any(that: isA<EntraLoginRequested>())));
+    });
+
+    testWidgets('user cancels the browser sheet (PlatformException code '
+        'CANCELED): no error shown, per ADR 0003\'s failure modes', (
+      tester,
+    ) async {
+      await tapEntraSignIn(
+        tester,
+        () => EntraNativeSignIn(
+          authenticate: ({required url, required callbackUrlScheme, required options}) async =>
+              throw PlatformException(code: 'CANCELED'),
+        ),
+      );
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(tester.takeException(), isNull);
+      expect(find.text(l10n.entraSignInDenied), findsNothing);
+      expect(find.text(l10n.entraStateMismatch), findsNothing);
+      expect(find.text(l10n.errorRequestFailed), findsNothing);
+      verifyNever(() => authBloc.add(any(that: isA<EntraLoginRequested>())));
+    });
+
+    testWidgets('any OTHER failure (e.g. Windows loopback port already in '
+        'use, a missing platform channel) shows a readable error instead of '
+        'swallowing it — Opus review of PR #72, finding 2', (tester) async {
+      await tapEntraSignIn(
+        tester,
+        () => EntraNativeSignIn(
+          authenticate: ({required url, required callbackUrlScheme, required options}) async =>
+              throw PlatformException(code: 'channel-error', message: 'port in use'),
+        ),
+      );
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(tester.takeException(), isNull);
+      expect(find.text(l10n.errorRequestFailed), findsOneWidget);
+      verifyNever(() => authBloc.add(any(that: isA<EntraLoginRequested>())));
     });
   });
 
