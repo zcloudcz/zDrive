@@ -339,6 +339,28 @@ class AppLocalizationsSv extends AppLocalizations {
   String get errorRequestFailed => 'Begäran kunde inte slutföras.';
 
   @override
+  String get authInvalidCredentials => 'Ogiltig e-postadress eller lösenord.';
+
+  @override
+  String get authEmailAlreadyRegistered =>
+      'Det finns redan ett konto med den här e-postadressen.';
+
+  @override
+  String get authEntraAccountExists =>
+      'Det finns redan ett konto med den här e-postadressen som loggar in på ett annat sätt. Använd ditt lösenord eller den metoden.';
+
+  @override
+  String get authEntraVerificationFailed =>
+      'Ditt ZCLOUD-konto kunde inte verifieras. Försök igen eller kontakta support.';
+
+  @override
+  String get authEntraUnavailable =>
+      'ZCLOUD-inloggning är inte tillgänglig just nu.';
+
+  @override
+  String get authTooManyAttempts => 'För många försök. Försök igen senare.';
+
+  @override
   String get syncConnecting => 'Ansluter…';
 
   @override

@@ -27,3 +27,36 @@ String describeError(Object error, AppLocalizations l10n) {
   }
   return l10n.errorRequestFailed;
 }
+
+/// Same contract as [describeError], but for the auth endpoints
+/// (`/auth/login`, `/auth/register`, `/auth/entra`) — their status codes
+/// mean something more specific than "request failed", and the backend's
+/// own message text (may contain emails or other internal detail; see
+/// `ExceptionHandlingMiddleware`) must never reach the user directly.
+/// Falls back to [describeError] for anything not covered below.
+String describeAuthError(Object error, AppLocalizations l10n) {
+  if (error is DioException) {
+    final statusCode = error.response?.statusCode;
+    if (statusCode == 429) {
+      return l10n.authTooManyAttempts;
+    }
+    final path = error.requestOptions.path;
+    if (path == '/auth/login' && (statusCode == 404 || statusCode == 401)) {
+      return l10n.authInvalidCredentials;
+    }
+    if (path == '/auth/register' && statusCode == 409) {
+      return l10n.authEmailAlreadyRegistered;
+    }
+    if (path == '/auth/entra') {
+      switch (statusCode) {
+        case 409:
+          return l10n.authEntraAccountExists;
+        case 403:
+          return l10n.authEntraVerificationFailed;
+        case 404:
+          return l10n.authEntraUnavailable;
+      }
+    }
+  }
+  return describeError(error, l10n);
+}

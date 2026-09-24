@@ -331,6 +331,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get errorRequestFailed => '无法完成请求。';
 
   @override
+  String get authInvalidCredentials => '邮箱或密码无效。';
+
+  @override
+  String get authEmailAlreadyRegistered => '该邮箱已存在账户。';
+
+  @override
+  String get authEntraAccountExists => '该邮箱已使用其他方式注册账户，请使用密码或该登录方式。';
+
+  @override
+  String get authEntraVerificationFailed => '无法验证您的 ZCLOUD 账户，请重试或联系支持。';
+
+  @override
+  String get authEntraUnavailable => 'ZCLOUD 登录目前不可用。';
+
+  @override
+  String get authTooManyAttempts => '尝试次数过多，请稍后重试。';
+
+  @override
   String get syncConnecting => '正在连接…';
 
   @override

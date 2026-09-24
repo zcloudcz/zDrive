@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/core/auth/auth_bloc.dart';
 import 'package:zdrive_app/core/auth/token_storage.dart';
+import 'package:zdrive_app/core/diagnostics/diagnostics_io.dart';
 import 'package:zdrive_app/features/auth/domain/auth_repository.dart';
 import 'package:zdrive_app/features/auth/domain/user.dart';
 
@@ -115,7 +118,9 @@ void main() {
     );
 
     blocTest<AuthBloc, AuthState>(
-      'emits [AuthLoading, AuthError] on failed login',
+      'emits [AuthLoading, AuthError] on failed login, carrying the caught '
+      'error object rather than a pre-rendered string — the page renders '
+      'it via describeAuthError, not the bloc',
       build: () {
         when(
           () => mockAuthRepository.login(
@@ -128,7 +133,14 @@ void main() {
       act: (bloc) => bloc.add(
         const LoginRequested(email: 'test@example.com', password: 'wrong'),
       ),
-      expect: () => [const AuthLoading(), isA<AuthError>()],
+      expect: () => [
+        const AuthLoading(),
+        isA<AuthError>().having(
+          (s) => s.error,
+          'error',
+          isA<Exception>(),
+        ),
+      ],
     );
   });
 
@@ -252,6 +264,91 @@ void main() {
       await bloc.stream.firstWhere((s) => s is Unauthenticated);
 
       verify(() => mockAuthRepository.logout()).called(1);
+    });
+  });
+
+  group('Diagnostics logging on auth failure', () {
+    // Diagnostics.initialize/shutdown are process-wide singletons (see
+    // diagnostics_test.dart), so this group owns its own temp directory
+    // and drives the real writer isolate rather than faking it — there is
+    // no lighter-weight interception point in Diagnostics' public API.
+    late Directory directory;
+
+    setUp(() async {
+      directory = await Directory.systemTemp.createTemp('auth-diagnostics-');
+      await Diagnostics.initialize(directory: directory.path);
+    });
+
+    tearDown(() async {
+      await Diagnostics.shutdown();
+      for (var i = 0; i < 20; i++) {
+        try {
+          await directory.delete(recursive: true);
+          break;
+        } on FileSystemException {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      }
+    });
+
+    Future<String> loggedEvents() async {
+      await Diagnostics.flush();
+      final file = File('${directory.path}/diagnostic-0.jsonl');
+      return file.existsSync() ? file.readAsString() : '';
+    }
+
+    test('a failed login is recorded as auth.login_failed', () async {
+      when(
+        () => mockAuthRepository.login(
+          email: any(named: 'email'),
+          password: any(named: 'password'),
+        ),
+      ).thenThrow(Exception('invalid credentials'));
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(
+        const LoginRequested(email: 'test@example.com', password: 'wrong'),
+      );
+      await bloc.stream.firstWhere((s) => s is AuthError);
+
+      expect(await loggedEvents(), contains('auth.login_failed'));
+    });
+
+    test('a failed registration is recorded as auth.register_failed', () async {
+      when(
+        () => mockAuthRepository.register(
+          email: any(named: 'email'),
+          password: any(named: 'password'),
+          displayName: any(named: 'displayName'),
+        ),
+      ).thenThrow(Exception('email already registered'));
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(
+        const RegisterRequested(
+          email: 'test@example.com',
+          password: 'password123',
+          displayName: 'Test User',
+        ),
+      );
+      await bloc.stream.firstWhere((s) => s is AuthError);
+
+      expect(await loggedEvents(), contains('auth.register_failed'));
+    });
+
+    test('a failed Entra exchange is recorded as auth.entra_login_failed', () async {
+      when(
+        () => mockAuthRepository.loginWithEntra(any()),
+      ).thenThrow(Exception('404'));
+      final bloc = buildBloc();
+      addTearDown(bloc.close);
+
+      bloc.add(const EntraLoginRequested(accessToken: 'entra-access-token'));
+      await bloc.stream.firstWhere((s) => s is AuthError);
+
+      expect(await loggedEvents(), contains('auth.entra_login_failed'));
     });
   });
 }

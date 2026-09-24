@@ -1,4 +1,5 @@
 import 'package:bloc_test/bloc_test.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -160,13 +161,23 @@ void main() {
       whenListen(
         authBloc,
         const Stream<AuthState>.empty(),
-        initialState: const AuthError('Invalid credentials'),
+        initialState: AuthError(
+          DioException(
+            requestOptions: RequestOptions(path: '/auth/login'),
+            response: Response(
+              requestOptions: RequestOptions(path: '/auth/login'),
+              statusCode: 401,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        ),
       );
 
       await tester.pumpWidget(build(const LoginPage()));
       await tester.pump();
 
-      expect(find.text('Invalid credentials'), findsOneWidget);
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(find.text(l10n.authInvalidCredentials), findsOneWidget);
     });
 
     testWidgets('Enter in the password field submits exactly once when idle', (
@@ -435,6 +446,33 @@ void main() {
         tester.element(find.byType(RegisterPage)),
       )!;
       expect(find.text(l10n.register), findsOneWidget);
+    });
+
+    testWidgets('error state renders the mapped message, not raw server text', (
+      tester,
+    ) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: AuthError(
+          DioException(
+            requestOptions: RequestOptions(path: '/auth/register'),
+            response: Response(
+              requestOptions: RequestOptions(path: '/auth/register'),
+              statusCode: 409,
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(build(const RegisterPage()));
+      await tester.pump();
+
+      final l10n = AppLocalizations.of(
+        tester.element(find.byType(RegisterPage)),
+      )!;
+      expect(find.text(l10n.authEmailAlreadyRegistered), findsOneWidget);
     });
 
     testWidgets('320px + 200% text scaling does not overflow', (tester) async {

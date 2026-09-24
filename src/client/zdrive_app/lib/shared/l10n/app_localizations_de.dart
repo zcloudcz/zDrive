@@ -346,6 +346,30 @@ class AppLocalizationsDe extends AppLocalizations {
       'Die Anfrage konnte nicht abgeschlossen werden.';
 
   @override
+  String get authInvalidCredentials =>
+      'Ungültige E-Mail-Adresse oder ungültiges Passwort.';
+
+  @override
+  String get authEmailAlreadyRegistered =>
+      'Für diese E-Mail-Adresse existiert bereits ein Konto.';
+
+  @override
+  String get authEntraAccountExists =>
+      'Für diese E-Mail-Adresse existiert bereits ein Konto mit einer anderen Anmeldemethode. Verwende dein Passwort oder diese Methode.';
+
+  @override
+  String get authEntraVerificationFailed =>
+      'Dein ZCLOUD-Konto konnte nicht verifiziert werden. Bitte versuche es erneut oder wende dich an den Support.';
+
+  @override
+  String get authEntraUnavailable =>
+      'Die ZCLOUD-Anmeldung ist gerade nicht verfügbar.';
+
+  @override
+  String get authTooManyAttempts =>
+      'Zu viele Versuche. Bitte versuche es später erneut.';
+
+  @override
   String get syncConnecting => 'Verbindung wird hergestellt…';
 
   @override

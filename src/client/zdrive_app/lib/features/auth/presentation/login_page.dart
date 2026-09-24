@@ -11,6 +11,7 @@ import '../../../core/auth/entra_config.dart';
 import '../../../core/auth/entra_native_sign_in.dart';
 import '../../../core/auth/entra_sign_in.dart';
 import '../../../core/auth/entra_token_exchange.dart';
+import '../../../core/diagnostics/diagnostics.dart';
 import '../../../core/network/error_message.dart';
 import '../../../shared/widgets/windows_download_button.dart';
 import 'widgets/auth_scaffold.dart';
@@ -85,23 +86,26 @@ class _LoginPageState extends State<LoginPage> {
           entraRefreshToken: result.refreshToken,
         ),
       );
-    } on EntraNativeSignInException catch (e) {
+    } on EntraNativeSignInException catch (e, st) {
+      Diagnostics.error('auth.entra_native_sign_in_failed', e, st);
       if (!mounted) return;
       setState(
         () => _entraFailure = e.kind == EntraNativeSignInFailureKind.denied
             ? _EntraNativeFailure.denied
             : _EntraNativeFailure.authFailed,
       );
-    } on DioException catch (e) {
+    } on DioException catch (e, st) {
+      Diagnostics.error('auth.entra_native_exchange_failed', e, st);
       if (!mounted) return;
       setState(() {
         _entraFailure = _EntraNativeFailure.exchangeFailed;
         _entraExchangeError = e;
       });
-    } on EntraTokenExchangeException {
+    } on EntraTokenExchangeException catch (e, st) {
+      Diagnostics.error('auth.entra_native_exchange_failed', e, st);
       if (!mounted) return;
       setState(() => _entraFailure = _EntraNativeFailure.exchangeFailed);
-    } on PlatformException catch (e) {
+    } on PlatformException catch (e, st) {
       // flutter_web_auth_2 throws PlatformException(code: 'CANCELED') when
       // the user dismisses the browser sheet — back to the login page with
       // no error, per ADR 0003's failure modes, same as web treats a user
@@ -109,11 +113,13 @@ class _LoginPageState extends State<LoginPage> {
       // (e.g. the Windows loopback port already in use) is a real failure
       // and must be visible (Opus review of PR #72, finding 2).
       if (e.code == 'CANCELED') return;
+      Diagnostics.error('auth.entra_native_sign_in_failed', e, st);
       if (!mounted) return;
       setState(() => _entraFailure = _EntraNativeFailure.unexpected);
-    } catch (_) {
+    } catch (e, st) {
       // Anything else (a missing platform channel, ...) is also a real
       // failure, not a silent cancel — finding 2.
+      Diagnostics.error('auth.entra_native_sign_in_failed', e, st);
       if (!mounted) return;
       setState(() => _entraFailure = _EntraNativeFailure.unexpected);
     }
@@ -148,7 +154,7 @@ class _LoginPageState extends State<LoginPage> {
         return l10n.entraStateMismatch;
       case _EntraNativeFailure.exchangeFailed:
         return _entraExchangeError != null
-            ? describeError(_entraExchangeError!, l10n)
+            ? describeAuthError(_entraExchangeError!, l10n)
             : l10n.errorRequestFailed;
       case _EntraNativeFailure.unexpected:
         return l10n.errorRequestFailed;
@@ -229,7 +235,9 @@ class _LoginPageState extends State<LoginPage> {
                 // entra_callback_page.dart's web equivalent of this merge.
                 final message =
                     _entraErrorMessage(l10n) ??
-                    (state is AuthError ? state.message : null);
+                    (state is AuthError
+                        ? describeAuthError(state.error, l10n)
+                        : null);
                 return ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 20),
                   child: message == null

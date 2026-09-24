@@ -4,6 +4,7 @@ import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/auth_bloc.dart';
+import '../../../core/network/error_message.dart';
 import 'widgets/auth_scaffold.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -147,7 +148,9 @@ class _RegisterPageState extends State<RegisterPage> {
             // the only error surface now, a SnackBar would just repeat it.
             BlocBuilder<AuthBloc, AuthState>(
               builder: (context, state) {
-                final message = state is AuthError ? state.message : null;
+                final message = state is AuthError
+                    ? describeAuthError(state.error, l10n)
+                    : null;
                 return ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 20),
                   child: message == null
