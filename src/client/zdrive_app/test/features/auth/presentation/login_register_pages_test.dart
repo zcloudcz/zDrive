@@ -236,11 +236,12 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    // Real gate is kEntraSignInVisible (kIsWeb && ENTRA_CLIENT_ID configured)
-    // — always false in a `flutter test` run since it never runs on web and
-    // no client id is passed. `entraSignInVisible` threads that same pure
+    // Real gate is kEntraSignInVisible (computeEntraSignInVisible — needs
+    // both a client id/scope AND an eligible platform, see
+    // entra_config.dart) — always false in a `flutter test` run since no
+    // client id is passed. `entraSignInVisible` threads that same pure
     // boolean through as a param instead, so both branches are exercisable
-    // here without any browser test infra.
+    // here without any browser/platform-channel test infra.
     testWidgets('Entra sign-in button is hidden by default (no client id '
         'configured — the default build)', (tester) async {
       await tester.pumpWidget(build(const LoginPage()));
@@ -258,6 +259,23 @@ void main() {
 
       final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
       expect(find.text(l10n.entraSignInButton), findsOneWidget);
+    });
+
+    testWidgets('tapping Entra sign-in on native (ADR 0003) does not crash '
+        'the page — `flutter test` has no FlutterWebAuth2 platform channel, '
+        'so the call fails like a real user cancel, and LoginPage\'s catch-all '
+        'swallows it with no error dialog, same as the ADR\'s cancel case', (
+      tester,
+    ) async {
+      await tester.pumpWidget(build(const LoginPage(entraSignInVisible: true)));
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      await tester.tap(find.text(l10n.entraSignInButton));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      verifyNever(() => authBloc.add(any(that: isA<EntraLoginRequested>())));
     });
   });
 

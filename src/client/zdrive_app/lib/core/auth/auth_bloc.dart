@@ -49,17 +49,22 @@ final class LogoutRequested extends AuthEvent {
   const LogoutRequested();
 }
 
-/// Dispatched once the web client already holds an Entra access token (after
-/// the browser-side PKCE code exchange — see EntraCallbackPage). Mirrors
-/// [LoginRequested]: exchanges it with our own backend and reuses the same
-/// post-login states.
+/// Dispatched once the client already holds an Entra access token (after
+/// the browser-side PKCE code exchange — see EntraCallbackPage for web,
+/// EntraNativeSignIn for iOS/Android/Windows). Mirrors [LoginRequested]:
+/// exchanges it with our own backend and reuses the same post-login states.
 final class EntraLoginRequested extends AuthEvent {
   final String accessToken;
 
-  const EntraLoginRequested({required this.accessToken});
+  /// Native only (ADR 0003) — web never requests `offline_access`, so it
+  /// never has one to pass here. Stored for silent renewal; see
+  /// `auth_interceptor.dart`.
+  final String? entraRefreshToken;
+
+  const EntraLoginRequested({required this.accessToken, this.entraRefreshToken});
 
   @override
-  List<Object?> get props => [accessToken];
+  List<Object?> get props => [accessToken, entraRefreshToken];
 }
 
 // --- States ---
@@ -172,7 +177,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     emit(const AuthLoading());
     try {
-      final user = await _authRepository.loginWithEntra(event.accessToken);
+      final user = await _authRepository.loginWithEntra(
+        event.accessToken,
+        entraRefreshToken: event.entraRefreshToken,
+      );
       emit(Authenticated(user));
     } catch (e) {
       emit(AuthError(e.toString()));

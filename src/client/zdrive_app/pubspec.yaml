@@ -28,6 +28,7 @@ dependencies:
   share_plus: ^10.0.0
   timeago: ^3.6.0
   web: ^1.1.0
+  flutter_web_auth_2: ^5.1.0
   sqflite: ^2.4.2
   sqflite_common_ffi: ^2.3.4+4
   path: ^1.9.1
@@ -37,6 +38,10 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Only for auth_interceptor_test.dart's in-memory FlutterSecureStorage
+  # backend — TokenStorage has no seam of its own, so this is the smallest
+  # way to give it a real, working store without a platform channel.
+  flutter_secure_storage_platform_interface: ^1.1.2
   flutter_lints: ^6.0.0
   build_runner: ^2.4.15
   injectable_generator: ^2.7.0

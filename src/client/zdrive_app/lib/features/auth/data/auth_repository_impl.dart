@@ -46,7 +46,10 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<User> loginWithEntra(String accessToken) async {
+  Future<User> loginWithEntra(
+    String accessToken, {
+    String? entraRefreshToken,
+  }) async {
     final response = await _remoteDataSource.entraExchange(
       accessToken: accessToken,
     );
@@ -54,6 +57,11 @@ class AuthRepositoryImpl implements AuthRepository {
       accessToken: response.accessToken,
       refreshToken: response.refreshToken,
     );
+    // Native only (ADR 0003): stash the Entra refresh token for silent
+    // renewal — see auth_interceptor.dart. Web never passes one.
+    if (entraRefreshToken != null) {
+      await _tokenStorage.saveEntraRefreshToken(entraRefreshToken);
+    }
     // Backend returns tokens only; load the profile with the new token.
     return getCurrentUser();
   }

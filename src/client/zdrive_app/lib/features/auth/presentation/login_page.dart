@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
@@ -5,19 +7,31 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/auth/auth_bloc.dart';
 import '../../../core/auth/entra_config.dart';
+import '../../../core/auth/entra_native_sign_in.dart';
 import '../../../core/auth/entra_sign_in.dart';
+import '../../../core/auth/entra_token_exchange.dart';
+import '../../../core/network/error_message.dart';
 import '../../../shared/widgets/windows_download_button.dart';
 import 'widgets/auth_scaffold.dart';
 
-class LoginPage extends StatefulWidget {
-  // Defaults to the real, compile-time gate (web + a configured client id).
-  // Threaded in as a param rather than read from kEntraSignInVisible inside
-  // build(): a widget test runs on the Dart VM, never web, so kIsWeb is
-  // always false there — without this seam the button's visibility could
-  // only ever be exercised in an actual browser.
-  const LoginPage({super.key, this.entraSignInVisible = kEntraSignInVisible});
+/// What went wrong in the native (ADR 0003) sign-in step, before AuthBloc
+/// ever got involved — mirrors `_CallbackFailure` in EntraCallbackPage
+/// (web's equivalent). `authFailed` covers both Entra's `error=` (denied
+/// consent) and the CSRF state-mismatch check: either way sign-in did not
+/// complete, and one message is enough for both (per ADR 0003: "same
+/// handling as web").
+enum _EntraNativeFailure { authFailed, exchangeFailed }
 
-  final bool entraSignInVisible;
+class LoginPage extends StatefulWidget {
+  // Left null by default so the real gate (kEntraSignInVisible, resolved at
+  // runtime — see entra_config.dart) applies; threaded in as a param so a
+  // widget test can force either branch without depending on the current
+  // platform. `bool?` rather than a `bool` default: kEntraSignInVisible is
+  // no longer `const` (ADR 0003 needs a runtime platform check), and a
+  // default parameter value must be a compile-time constant.
+  const LoginPage({super.key, this.entraSignInVisible});
+
+  final bool? entraSignInVisible;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -28,11 +42,56 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  // Native (ADR 0003) sign-in errors happen entirely client-side, before
+  // AuthBloc is ever involved (Entra denial, CSRF state mismatch, the
+  // code<->token exchange) — same reasoning as EntraCallbackPage's
+  // _CallbackFailure, kept local rather than routed through AuthBloc.
+  _EntraNativeFailure? _entraFailure;
+  DioException? _entraExchangeError;
+
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _onEntraSignIn() async {
+    if (kIsWeb) {
+      const EntraSignIn().beginSignIn();
+      return;
+    }
+    setState(() {
+      _entraFailure = null;
+      _entraExchangeError = null;
+    });
+    try {
+      final result = await EntraNativeSignIn().signIn();
+      if (!mounted) return;
+      context.read<AuthBloc>().add(
+        EntraLoginRequested(
+          accessToken: result.accessToken,
+          entraRefreshToken: result.refreshToken,
+        ),
+      );
+    } on EntraNativeSignInException {
+      if (!mounted) return;
+      setState(() => _entraFailure = _EntraNativeFailure.authFailed);
+    } on DioException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _entraFailure = _EntraNativeFailure.exchangeFailed;
+        _entraExchangeError = e;
+      });
+    } on EntraTokenExchangeException {
+      if (!mounted) return;
+      setState(() => _entraFailure = _EntraNativeFailure.exchangeFailed);
+    } catch (_) {
+      // flutter_web_auth_2 throws a plain PlatformException(code: CANCELED)
+      // when the user dismisses the browser sheet — back to the login page
+      // with no error, per ADR 0003's failure modes, same as web treats a
+      // user simply not completing the redirect.
+    }
   }
 
   void _onSubmit() {
@@ -54,9 +113,23 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  String? _entraErrorMessage(AppLocalizations l10n) {
+    switch (_entraFailure) {
+      case null:
+        return null;
+      case _EntraNativeFailure.authFailed:
+        return l10n.entraStateMismatch;
+      case _EntraNativeFailure.exchangeFailed:
+        return _entraExchangeError != null
+            ? describeError(_entraExchangeError!, l10n)
+            : l10n.errorRequestFailed;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final entraSignInVisible = widget.entraSignInVisible ?? kEntraSignInVisible;
 
     return AuthScaffold(
       child: Form(
@@ -121,7 +194,13 @@ class _LoginPageState extends State<LoginPage> {
             // surface now — a SnackBar here would just repeat it.
             BlocBuilder<AuthBloc, AuthState>(
               builder: (context, state) {
-                final message = state is AuthError ? state.message : null;
+                // Merge AuthBloc's error (email/password, or the backend
+                // leg of native Entra sign-in) with a native-flow error
+                // that never reaches AuthBloc (cancelled/denied/CSRF) — see
+                // entra_callback_page.dart's web equivalent of this merge.
+                final message =
+                    _entraErrorMessage(l10n) ??
+                    (state is AuthError ? state.message : null);
                 return ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 20),
                   child: message == null
@@ -160,12 +239,12 @@ class _LoginPageState extends State<LoginPage> {
               onPressed: () => context.go('/register'),
               child: Text(l10n.createAccount),
             ),
-            if (widget.entraSignInVisible) ...[
+            if (entraSignInVisible) ...[
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: () => const EntraSignIn().beginSignIn(),
+                  onPressed: _onEntraSignIn,
                   child: Text(l10n.entraSignInButton),
                 ),
               ),

@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 
 /// Build-time client id of Drive's own Entra SPA app registration (ADR
 /// 0002 — each app registers itself with Entra directly, no token broker).
@@ -25,21 +26,59 @@ const String entraAuthorizeUrl =
 const String entraTokenUrl =
     'https://$_entraHost/$_entraTenantId/oauth2/v2.0/token';
 
-/// Whether the "Sign in with your ZCLOUD account" button should be shown.
-/// Direct browser PKCE against Entra is web-only, and gated behind both a
-/// configured client id AND scope — a build with a client id but no scope
-/// would still redirect the user through the whole Entra flow only to fail
-/// far from the cause (no `access_token` in the response, or a token whose
-/// `aud` the backend rejects). Neither exists until a production Entra app
-/// registration is done.
-const bool kEntraSignInVisible = kIsWeb && kEntraClientId != '' && kEntraApiScope != '';
+/// Redirect URI for the native PKCE flow on iOS and Android (ADR 0003):
+/// a custom scheme opened via ASWebAuthenticationSession / Chrome Custom
+/// Tabs and received back in-process by `flutter_web_auth_2` — no server,
+/// no callback page. Registered on the same 'ZCLOUD Drive Web' app
+/// registration as the web origin, under its "Mobile and desktop
+/// applications" platform.
+const String kEntraMobileRedirectUri = 'cz.zcloud.zdrive://auth';
 
-/// Pure form of the [kEntraSignInVisible] gate, so the "needs both, not
-/// just one" rule is unit-testable without juggling `--dart-define` per
-/// test case (those three consts are fixed for the whole `flutter test`
-/// process).
-bool computeEntraSignInVisible({required bool isWeb, required String clientId, required String scope}) =>
-    isWeb && clientId != '' && scope != '';
+/// Redirect URI for the native PKCE flow on Windows (ADR 0003). Windows has
+/// no registered custom-scheme handler, so this uses the loopback pattern
+/// instead (RFC 8252 §7.3): `flutter_web_auth_2` opens the system browser
+/// and a local HTTP listener on this fixed port catches the redirect. Entra
+/// ignores the port for `http://localhost` redirect URIs, but a fixed port
+/// keeps the listener deterministic.
+const String kEntraWindowsRedirectUri = 'http://localhost:43823/';
+
+/// `callbackUrlScheme` flutter_web_auth_2's Windows loopback listener
+/// expects — the same host/port as [kEntraWindowsRedirectUri], without the
+/// trailing slash (the plugin parses this as a URI, not a plain string
+/// prefix).
+const String kEntraWindowsCallbackScheme = 'http://localhost:43823';
+
+/// Whether the "Sign in with your ZCLOUD account" button should be shown.
+/// Gated behind both a configured client id AND scope — a build with a
+/// client id but no scope would still redirect the user through the whole
+/// Entra flow only to fail far from the cause (no `access_token` in the
+/// response, or a token whose `aud` the backend rejects). Web is always
+/// eligible once configured; native is additionally restricted to the
+/// three released targets with an Entra redirect URI (ADR 0003) —
+/// macOS/Linux have no app registration entry and stay password-only.
+bool computeEntraSignInVisible({
+  required bool isWeb,
+  required TargetPlatform platform,
+  required String clientId,
+  required String scope,
+}) {
+  if (clientId.isEmpty || scope.isEmpty) return false;
+  if (isWeb) return true;
+  return platform == TargetPlatform.iOS ||
+      platform == TargetPlatform.android ||
+      platform == TargetPlatform.windows;
+}
+
+/// Real gate evaluated at runtime — not `const`, unlike before: telling
+/// iOS/Android/Windows apart from macOS/Linux needs [defaultTargetPlatform],
+/// which is a runtime getter, not a compile-time constant. [LoginPage]
+/// falls back to this when its own `entraSignInVisible` param is left null.
+final bool kEntraSignInVisible = computeEntraSignInVisible(
+  isWeb: kIsWeb,
+  platform: defaultTargetPlatform,
+  clientId: kEntraClientId,
+  scope: kEntraApiScope,
+);
 
 /// The `redirect_uri` sent to Entra: this app's plain origin, no path.
 ///
