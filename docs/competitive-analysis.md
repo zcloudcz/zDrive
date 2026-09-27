@@ -12,6 +12,10 @@ Nextcloud (self-hosted, suverenita dat) a Box (čisté B2B).
 > agregátorů (viz Zdroje). V EUR/CZK a podle regionu se liší, často běží
 > slevy na první rok. Microsoft ohlásil zdražení od července 2026. Před
 > rozhodnutím o vlastní cenotvorbě je ověřte přímo na stránkách poskytovatelů.
+>
+> **Navazuje:** [`docs/gaps/`](gaps/README.md) obsahuje rozbor nedostatků podle kódu
+> a zadání k jejich implementaci. Tvrzení o fotkách a přímém sdílení byla
+> 2026-09-27 opravena podle průzkumu kódu.
 
 ---
 
@@ -20,7 +24,7 @@ Nextcloud (self-hosted, suverenita dat) a Box (čisté B2B).
 - **Kde zDrive dnes je:** funkční MVP úložiště se synchronizací. Má
   blokovou delta synchronizaci, obsahově adresované verze, koš, sdílení
   odkazem včetně zápisu a MCP endpoint pro AI agenty. Běží na webu, Windows,
-  Androidu a iOS. Fotky a AI zatím nejsou nasazené, chybí E2E šifrování,
+  Androidu a iOS. Fotky jsou jen DB model bez zpracování a nejsou nasazené, AI chybí. Chybí také E2E šifrování,
   náhledy a editace dokumentů, klient pro Linux a také integrace do OS na
   úrovni systémových placeholderů (Files On-Demand).
 - **Proti velkým hráčům (Google, Microsoft, Apple)** zDrive neobstojí šíří
@@ -49,11 +53,11 @@ Nextcloud (self-hosted, suverenita dat) a Box (čisté B2B).
 | Verze souborů | ✅ | výchozí limit 10 verzí/soubor, obnova verze |
 | Koš | ✅ | 30 dní, stránkování, obnova |
 | Sdílení odkazem | ✅ | expirace, heslo, **zápis přes odkaz** (upload, nová složka, mazání, nová verze), brandovaná veřejná stránka |
-| Přímé sdílení uživateli | ⚠️ | API (`SharedWith`) existuje, UX „sdíleno se mnou" není ověřené |
+| Přímé sdílení uživateli | ❌ | `SharedWith` se uloží, ale nic ho nečte: chybí přístup příjemce i „sdíleno se mnou" (viz `docs/gaps/`) |
 | Vyhledávání | ✅ | názvy a metadata (PostgreSQL tsvector), bez fulltextu obsahu |
 | MCP endpoint (AI agenti) | ✅ | přes sdílené odkazy, přímo v gateway. **Unikát v tomto srovnání** |
 | Kvóty | ✅ | per-user, výchozí 50 GB |
-| Fotky (timeline, alba) | ⚠️ nenasazeno | backend i UI existují, v buildech je vypne `PHOTOS_ENABLED=false` |
+| Fotky (timeline, alba) | ⚠️ kostra | DB model, CRUD alb a UI existují. Ingest nikdo nevolá, chybí EXIF i miniatury (thumbnail URL míří na neexistující CDN). Nenasazeno, v buildech je vypne `PHOTOS_ENABLED=false` |
 | AI fotky (tagy, tváře, vzpomínky) | ❌ | navrženo (fáze 5), neimplementováno |
 | Náhledy dokumentů / přehrávání videa | ❌ | klient nemá viewer |
 | Online editace (Office/Docs) | ❌ | — |
@@ -98,7 +102,7 @@ Legenda: ✅ ano · ⚠️ částečně/omezeně · ❌ ne · 🗓️ plánován
 | Nahrávání přes odkaz (file request) | ✅ + mazání/verze | ⚠️ Forms | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
 | Náhled dokumentů/videa v prohlížeči | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Online kancelář | ❌ | ✅ Docs | ✅ Office | ✅ Docs, Sheets (E2E) | ⚠️ Paper/Office | ✅ iWork | ❌ | ❌ | ✅ Office |
-| Fotky — timeline, auto-backup | 🗓️ (hotovo, nenasazeno) | ✅ | ✅ | ✅ + alba | ⚠️ | ✅ | ✅ | ❌ | ✅ |
+| Fotky — timeline, auto-backup | 🗓️ (kostra, nenasazeno) | ✅ | ✅ | ✅ + alba | ⚠️ | ✅ | ✅ | ❌ | ✅ |
 | AI fotky (lidé, objekty, vzpomínky) | 🗓️ | ✅ špička trhu | ✅ | ❌ (E2E) | ❌ | ✅ on-device | ❌ | ❌ | ⚠️ Recognize |
 | AI asistent nad soubory | ⚠️ MCP pro externí agenty | ✅ Gemini | ✅ Copilot | ⚠️ Lumo | ✅ Dash | ⚠️ | ❌ | ❌ | ⚠️ Assistant |
 | E2E / zero-knowledge | ❌ | ❌ | ❌ (Vault ≠ E2E) | ✅ | ❌ | ⚠️ ADP | ⚠️ placené | ✅ | ⚠️ |
@@ -187,7 +191,7 @@ jen v B2B fázi 7+. Malé a střední firmy v ČR ho používají zřídka.
 | 2 | **Náhled souborů** (obrázky, PDF, video, Office) v prohlížeči i v aplikaci | Uživatel musí stahovat každý soubor, aby viděl obsah | mají všichni |
 | 3 | **Files On-Demand na úrovni OS** (Windows Cloud Files API, macOS File Provider) | Současný cloud-only režim soubor z disku úplně skryje, takže uživatel v Průzkumníku nevidí celý drive. Laťku tu nastavuje OneDrive | mají všichni desktopoví |
 | 4 | **Dokončit macOS** | Polovina cílové skupiny SMB/kreativců | — |
-| 5 | **Nasadit fotky** (timeline, mobilní auto-backup) | Hlavní slib produktu („Google Photos-level"). Kód existuje, jen není nasazený | Google, OneDrive, iCloud, Proton |
+| 5 | **Nasadit fotky** (timeline, mobilní auto-backup) | Hlavní slib produktu („Google Photos-level"). Existuje jen kostra: chybí ingest, EXIF, miniatury a nasazení | Google, OneDrive, iCloud, Proton |
 | 6 | **Ceník a free tarif** | Bez něj nelze pozicovat | viz kap. 3 |
 
 ### 6.3 Strategická rozhodnutí k diskusi
@@ -221,7 +225,7 @@ nejsou to hotová rozhodnutí:
 ```
 1. 2FA (TOTP) + dotažení Entra SSO        → základ bezpečnosti, odblokuje B2B
 2. Náhledy (obrázky, PDF, video)           → nejviditelnější UX mezera
-3. Nasazení PhotoService + mobilní backup  → hlavní slib produktu, kód existuje
+3. Fotky: ingest, EXIF, miniatury, nasazení → hlavní slib produktu, dnes jen kostra
 4. Ceník + free tarif                      → nutné pro go-to-market
 5. Windows Cloud Files API placeholdery    → parita s OneDrive na hlavní platformě
 6. macOS dokončení (+ File Provider)       → druhá desktopová platforma
