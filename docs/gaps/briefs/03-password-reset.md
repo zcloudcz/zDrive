@@ -33,8 +33,9 @@ nebude mít vlastní SMTP.
   v MailNotify nepřidávej, to je jiné repo.
 - **Odesílatel:** `Senders:{clientId}` v konfiguraci MailNotify určuje
   povolené `From`. Bez `From` se použije výchozí adresa pro zDrive.
-- **Lokálně:** MailNotify jde spustit s `Auth:AllowAnonymous=true`
-  (`dotnet run --project src/MailNotify.Api`, port 5092). Pro zDrive dev to
+- **Lokálně:** MailNotify jde spustit bez přihlašování (v sekci `Auth`
+  zapnout volbu `AllowAnonymous`, viz README MailNotify) přes
+  `dotnet run --project src/MailNotify.Api`, port 5092. Pro zDrive dev to
   ale není nutné (viz bod 1).
 
 ## Současný stav zDrive
