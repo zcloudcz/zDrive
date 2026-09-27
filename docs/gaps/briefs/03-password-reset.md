@@ -1,4 +1,4 @@
-# Zadání 03: Obnova hesla e-mailem
+# Zadání 03: Obnova hesla e-mailem (přes MailNotify)
 
 > Pracuješ v repozitáři zDrive (.NET 8 backend + Flutter klient). Nejdřív si
 > přečti `CLAUDE.md` a dodržuj ho: minimální změny, testy
@@ -7,64 +7,103 @@
 > `--startup-project src/services/Api`, komunikace česky, kód anglicky.
 > Pokud je něco v zadání nejasné nebo neodpovídá kódu, zastav se a zeptej se.
 
-> **Předpoklad:** vlastník produktu rozhodl o poskytovateli e-mailu
-> (`docs/gaps/README.md`, rozhodnutí 3.1). Pokud v zadání není doplněné,
-> implementuj jen abstrakci + SMTP a provider nech jako konfiguraci.
-
 ## Cíl
 
-„Zapomněl jsem heslo" → e-mail s odkazem → nastavení nového hesla.
+„Zapomněl jsem heslo" → e-mail s odkazem → nastavení nového hesla. E-maily
+odesílá **MailNotify**, centrální notifikační služba ZCLOUD
+(repo `zcloudcz/MailNotify`, rozhodnuto vlastníkem 2026-09-27). zDrive
+nebude mít vlastní SMTP.
 
-## Současný stav
+## MailNotify: co potřebuješ vědět
 
-- V repozitáři **není žádné odesílání e-mailů** (ani MailKit, SendGrid, ACS).
-  Jediná zmínka je enum `NotificationChannel.Email` v NotificationService.
+- `POST {BaseUrl}/api/email`, tělo `SendEmailRequest` (`To[]`, `Subject`,
+  `Html` | `Text` | `TemplateId` + `Model`, volitelně `From`, `ReplyTo`).
+  Kontrakt je v `src/MailNotify.Shared/SendContracts.cs` repa MailNotify.
+  Odpověď 200 bez těla, chyba validace 400. Odesílá synchronně přes SMTP
+  profil.
+- **Auth:** Entra **app token** (client credentials) z tenantu
+  `zcloudcz.ciamlogin.com`. Volající app registrace musí mít app roli
+  `Notify.Send`. Scope je `api://<mailnotify-api-client-id>/.default`.
+  Hotový klient `clients/MailNotifyClient.cs` z repa MailNotify stačí
+  zkopírovat. Je to jeden soubor s `Azure.Identity` `ClientSecretCredential`
+  a komentář nahoře popisuje registraci.
+- **Šablony:** `TemplateId` = soubor `Templates/{id}.scriban` **v repu
+  MailNotify**. Existuje `generic` (proměnné `title`, `body`, `action_url`,
+  `action_text`, `footer`). Pro reset hesla použij `generic`. Nové šablony
+  v MailNotify nepřidávej, to je jiné repo.
+- **Odesílatel:** `Senders:{clientId}` v konfiguraci MailNotify určuje
+  povolené `From`. Bez `From` se použije výchozí adresa pro zDrive.
+- **Lokálně:** MailNotify jde spustit s `Auth:AllowAnonymous=true`
+  (`dotnet run --project src/MailNotify.Api`, port 5092). Pro zDrive dev to
+  ale není nutné (viz bod 1).
+
+## Současný stav zDrive
+
+- V repozitáři **není žádné odesílání e-mailů**.
 - Design spec uvádí `POST /api/v1/auth/forgot-password`
   (`docs/superpowers/specs/2026-06-04-zdrive-platform-design.md`), ale
   implementovaný není.
-- Hesla hashuje `Argon2PasswordHasher` (Isopoh.Cryptography.Argon2).
-  Účet s `PasswordHash == null` je jen přes Entra.
+- Hesla hashuje `Argon2PasswordHasher`. Účet s `PasswordHash == null` je jen
+  přes Entra (nemá heslo, reset pro něj nedává smysl).
+- Refresh tokeny: `auth.RefreshTokens` (`RefreshToken.cs`).
 - Klient: `features/auth/presentation/login_page.dart`, routy v
   `lib/shared/router/app_router.dart` (`isAuthRoute`). Web běží na GitHub
-  Pages s hash/path routingem. Ověř, jak vypadá URL, aby odkaz z e-mailu
-  otevřel správnou stránku.
+  Pages. Ověř tvar URL, aby odkaz z e-mailu otevřel správnou stránku.
 
 ## Rozsah
 
-1. `IEmailSender` v `ZDrive.Shared` (nebo v AuthService.Application, pokud
-   ho zatím nikdo jiný nepotřebuje). Implementace přes MailKit, konfigurace
-   `Email:Smtp:{Host,Port,User,Password,From}`. Bez konfigurace se v
-   Development jen loguje obsah e-mailu, mimo Development je to chyba při
-   startu. Stejný vzor jako JWT klíče.
-2. `docker-compose.yml`: přidat Mailpit (`axllent/mailpit`, UI na portu 8025)
-   a nastavit na něj Api.
-3. `POST /api/v1/auth/forgot-password {email}`: vždy 202, i pro neexistující
-   e-mail. Token je náhodný (32 B), v DB se ukládá jen jeho hash, TTL 30 min,
-   jednorázový. Nový požadavek zneplatní starší tokeny. Pro Entra-only účet
-   se e-mail nepošle (nebo pošle informaci, že se přihlašuje přes ZCLOUD
-   účet; vyber a zdůvodni).
-4. `POST /api/v1/auth/reset-password {token, newPassword}`: nastaví heslo,
-   revokuje všechny refresh tokeny uživatele. Validace hesla stejná jako
-   při registraci.
-5. E-mail: prostý HTML + text, česky a anglicky podle jazyka. Pokud jazyk
-   uživatele v DB není, použij `Accept-Language` z požadavku. Base URL
-   klienta z konfigurace (`Email:ResetLinkBaseUrl`).
-6. Klient: odkaz „Zapomenuté heslo" na login stránce, stránka pro zadání
+1. **`IEmailSender`** v AuthService.Application (jinde zatím není potřeba,
+   do `ZDrive.Shared` ho nedávej). Dvě implementace v Infrastructure:
+   - `MailNotifyEmailSender`: podle `clients/MailNotifyClient.cs`, přes
+     `IHttpClientFactory` a `TokenCredential`. Konfigurace
+     `MailNotify:{BaseUrl,TenantId,ClientId,ClientSecret,Scope}`. Secret
+     patří do App Settings / Key Vault, **nikdy do repa**.
+   - `LoggingEmailSender`: jen zaloguje příjemce, předmět a odkaz. Použije se
+     v Development, když chybí `MailNotify:BaseUrl`. Mimo Development je
+     chybějící konfigurace chyba při startu (stejný vzor jako JWT klíče).
+   - Výpadek MailNotify nesmí shodit request `forgot-password`. Zaloguj
+     chybu (s CorrelationId) a vrať stejnou odpověď, protože uživatel stejně
+     dostane generické 202.
+2. `POST /api/v1/auth/forgot-password {email}`: **vždy 202**, i pro
+   neexistující e-mail nebo Entra-only účet (bez e-mailu). Token je náhodný
+   (32 B, base64url), v DB je jen jeho SHA-256, TTL 30 min, jednorázový.
+   Nový požadavek zneplatní starší tokeny. EF migrace `AddPasswordResetTokens`
+   ve schématu `auth`.
+3. `POST /api/v1/auth/reset-password {token, newPassword}`: nastaví heslo a
+   revokuje všechny refresh tokeny uživatele. Validace hesla stejná jako při
+   registraci.
+4. E-mail přes `TemplateId = "generic"`: `title`, `body`, `action_url`
+   (`{ResetLinkBaseUrl}?token=...`), `action_text`, `footer`, česky nebo
+   anglicky podle `Accept-Language` požadavku (jazyk uživatele v DB není).
+   `Email:ResetLinkBaseUrl` je v konfiguraci.
+5. Klient: odkaz „Zapomenuté heslo" na login stránce, stránka pro zadání
    e-mailu a stránka pro nové heslo (čte token z URL). Obě jsou v
    `isAuthRoute`. Lokalizace do `.arb`.
-7. Rate limit: endpointy spadají pod politiku `auth` v gateway. Ověř to.
+6. Rate limit: endpointy spadají pod politiku `auth` v gateway. Ověř to.
+   Pokud je hotové zadání 02, platí i lockout.
 
 ## Akceptační kritéria
 
 - [ ] Integrační testy: forgot → token v DB (hash) → reset → login novým
-      heslem; starým heslem ne; starý refresh token 401.
-- [ ] Neexistující e-mail = stejná odpověď, žádný e-mail.
+      heslem; starým heslem ne; starý refresh token 401. `IEmailSender`
+      nahrazený fake implementací, která zachytí odkaz.
+- [ ] Neexistující e-mail i Entra-only účet = stejná odpověď, žádný e-mail.
 - [ ] Použitý nebo expirovaný token odmítnut.
-- [ ] Test `IEmailSender` přes fake. SMTP implementace ověřená proti
-      Mailpitu z Testcontainers, nebo aspoň lokálně (popsat v PR).
+- [ ] Unit test `MailNotifyEmailSender` přes fake `HttpMessageHandler`:
+      správná URL, Bearer token, tělo podle `SendEmailRequest`. Při chybě
+      MailNotify se forgot-password nerozbije.
 - [ ] Flutter testy obou stránek.
+
+## Kroky pro člověka (uveď je v popisu PR)
+
+1. V tenantu `zcloudcz.ciamlogin.com` app registrace „zDrive → MailNotify"
+   (nebo použít existující backendovou registraci zDrive), client secret,
+   API permission `MailNotify API / Notify.Send` (Application) + admin
+   consent. Postup: README repa MailNotify, sekce Nasazení, krok 1.3.
+2. V MailNotify: `Senders__<clientId>=noreply@<doména zDrive>` a SMTP
+   profil s touto adresou.
+3. V App Service `zdrive-auth`: `MailNotify__*` a `Email__ResetLinkBaseUrl`.
 
 ## Výstup
 
-Jeden PR. V popisu uveď, co je potřeba nastavit v produkci (SMTP secrets do
-App Service / Key Vault).
+Jeden PR.

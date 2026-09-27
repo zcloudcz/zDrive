@@ -56,7 +56,10 @@ vyžaduje i šestimístný kód. Součástí jsou jednorázové záložní kódy
 4. TOTP podle RFC 6238 (SHA-1, 6 číslic, 30 s, tolerance ±1 krok). Doporučená
    knihovna je `Otp.NET` (MIT). Stejný kód nesmí projít dvakrát (ulož
    poslední použitý time-step).
-5. Entra přihlášení 2FA neřeší, MFA tam zajišťuje Entra.
+5. Entra přihlášení 2FA neřeší. MFA pro Entra účty se zapíná v Entra
+   (Conditional Access + e-mail OTP nebo passkey, viz
+   `docs/gaps/entra-external-id.md`). Stránka nastavení 2FA se Entra-only
+   účtům (bez hesla) nezobrazuje.
 
 **Klient**
 1. Nový stav `AuthTwoFactorRequired(challengeToken)` a event

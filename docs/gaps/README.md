@@ -54,7 +54,7 @@ nadsazená. V tomto PR jsou opravená i tam.
 
 Závěr: obrázky, text a PDF lze zobrazovat čistě na klientovi přes existující
 stahování do paměti (s limitem velikosti). Video potřebuje nový
-streamovací endpoint s Range, a to vyžaduje rozhodnutí (viz 3.2).
+streamovací endpoint s Range (token v query schválen, viz 3.2).
 
 ### 2.3 Desktop (Windows a macOS)
 
@@ -103,21 +103,20 @@ jeho Split License vyžaduje komerční licenci od určitého obratu.
 
 ---
 
-## 3. Rozhodnutí, která musí udělat člověk
+## 3. Rozhodnutí
 
-Bez nich nelze příslušné zadání dokončit. Doporučení je uvedené, rozhodnutí
-ne.
+Stav k 2026-09-27 po odpovědích vlastníka.
 
-| # | Rozhodnutí | Blokuje | Doporučení |
+| # | Rozhodnutí | Stav | Dopad |
 |---|---|---|---|
-| 3.1 | Poskytovatel e-mailu (Azure Communication Services / SMTP / SendGrid) | [03](briefs/03-password-reset.md) | Abstrakce `IEmailSender` + SMTP (MailKit). Lokálně Mailpit, produkčně SMTP relay Azure Communication Services. Zadání počítá s tím, že provider je jen konfigurace |
-| 3.2 | Smí stahovací token jít v query stringu (kvůli `<video src>`)? `SharedStorageController.cs:26-28` to dnes záměrně zakazuje | [05](briefs/05-video-streaming.md) | Ano, ale jen jednorázový token s TTL ≤ 5 min, vázaný na konkrétní soubor a verzi, a nelogovat query |
-| 3.3 | Windows placeholdery: investovat do Cloud Files API, nebo zůstat u app-level cloud-only? | implementace po [08](briefs/08-windows-placeholders-spike.md) | Nejdřív spike, rozhodnout podle jeho ADR |
-| 3.4 | Apple Developer ID certifikát + notarizační credentials do GitHub secrets | [07](briefs/07-macos-release-ci.md) | — |
-| 3.5 | Entra: vytvořit produkční app registraci a platformu „Mobile and desktop" | zapnutí SSO | Kroky jsou v ADR 0002 (Migration order, krok 1) a ADR 0003 |
-| 3.6 | B2B model: sdílené týmové soubory v rámci tenanta, nebo jen per-user s adminem nad účty? | celé B2B (bez zadání) | Rozhodnout před fází 7, mění datový model FileService |
-| 3.7 | Ceník a free tarif | go-to-market | Mimo kód |
-| 3.8 | Retence verzí podle stáří: jaké limity pro jaký tarif? | jen hodnoty v [12](briefs/12-version-retention-by-age.md) | Implementovat konfigurovatelně, hodnoty doplnit později |
+| 3.1 | Poskytovatel e-mailu | ✅ **MailNotify** (centrální služba ZCLOUD, `zcloudcz/MailNotify`) | [03](briefs/03-password-reset.md) přepsané na MailNotify (`POST /api/email`, Entra app token, role `Notify.Send`). Člověk musí připravit app registraci a `Senders` |
+| 3.2 | Smí stahovací token jít v query stringu? | ✅ **ano** (TTL ≤ 5 min, vazba na soubor, verzi a uživatele, nelogovat) | [05](briefs/05-video-streaming.md) odblokované |
+| 3.3 | Windows placeholdery: Cloud Files API, nebo app-level cloud-only? | ⏳ po spiku | Nejdřív [08](briefs/08-windows-placeholders-spike.md), rozhodnout podle ADR |
+| 3.4 | Apple Developer ID certifikát + notarizace | ✅ **dodá vlastník** | [07](briefs/07-macos-release-ci.md): Sonnet navrhne názvy secrets a počká na jejich vložení |
+| 3.5 | Produkční Entra | ✅ **zdarma** (do 50 000 MAU), ale **bez TOTP a záložních kódů** | Doporučeno držet obojí: vlastní přihlášení + TOTP a Entra jako SSO. Rozbor a lidské kroky v [`entra-external-id.md`](entra-external-id.md) |
+| 3.6 | B2B model | ⏸️ **zatím neřešit**, témata rozvíjet | Katalog témat a otázek v [`b2b.md`](b2b.md) |
+| 3.7 | Ceník a free tarif | ⏳ otevřené | Mimo kód |
+| 3.8 | Retence verzí podle stáří: hodnoty per tarif | ⏳ otevřené | [12](briefs/12-version-retention-by-age.md) jde implementovat bez nich |
 
 ---
 
@@ -127,11 +126,11 @@ ne.
 |---|---|---|---|---|
 | 01 | [TOTP 2FA](briefs/01-totp-2fa.md) | M | — | vše |
 | 02 | [Zpevnění přihlášení (rate limit, lockout, reuse refresh tokenu)](briefs/02-auth-hardening.md) | S–M | ideálně po 01 (stejné soubory) | 04, 06, 09, 12, 13 |
-| 03 | [Obnova hesla e-mailem](briefs/03-password-reset.md) | M | rozhodnutí 3.1, po 02 | 04, 06, 09 |
+| 03 | [Obnova hesla e-mailem (MailNotify)](briefs/03-password-reset.md) | M | po 02; app registrace pro MailNotify | 04, 06, 09 |
 | 04 | [Náhledy obrázků, textu a PDF](briefs/04-file-preview.md) | M | — | vše |
-| 05 | [Streamování s Range + náhled videa](briefs/05-video-streaming.md) | M | 04, rozhodnutí 3.2 | — |
+| 05 | [Streamování s Range + náhled videa](briefs/05-video-streaming.md) | M | 04 | — |
 | 06 | [macOS desktop: entitlements, bookmarky, menu bar](briefs/06-macos-desktop.md) | M | — | vše |
-| 07 | [macOS release v CI (podpis, notarizace)](briefs/07-macos-release-ci.md) | S | 06, rozhodnutí 3.4 | — |
+| 07 | [macOS release v CI (podpis, notarizace)](briefs/07-macos-release-ci.md) | S | 06, vložené secrets | — |
 | 08 | [Spike: Windows Cloud Files API placeholdery](briefs/08-windows-placeholders-spike.md) | M (spike) | — | vše |
 | 09 | [Fotky backend: modul v Api, ingest z change feedu, EXIF, miniatury](briefs/09-photos-backend.md) | L | — | vše |
 | 10 | [Fotky klient: timeline s miniaturami, zapnutí v buildech](briefs/10-photos-client.md) | M | 09 nasazené | — |
@@ -139,7 +138,7 @@ ne.
 | 12 | [Retence verzí podle stáří](briefs/12-version-retention-by-age.md) | S | — | vše |
 | 13 | [Přímé sdílení a „Sdíleno se mnou"](briefs/13-shared-with-me.md) | L | — | vše kromě 09 (oba mění FileService queries) |
 
-**Bez zadání:** B2B/admin (čeká na 3.6), Linux klient (nízká priorita, po 06,
+**Bez zadání:** B2B/admin (zatím neřešit, témata v [`b2b.md`](b2b.md)), Linux klient (nízká priorita, po 06,
 protože sdílí desktop sync kód), E2E šifrování (analýza konkurence doporučuje
 ho nedělat plošně), ceník (3.7).
 
@@ -148,7 +147,7 @@ ho nedělat plošně), ceník (3.7).
 ```
 Vlna 1 (paralelně):  01 TOTP · 04 náhledy · 06 macOS · 09 fotky backend · 12 retence
 Vlna 2:              02 zpevnění auth · 08 spike Windows · 13 sdílení · 10 fotky klient (po nasazení 09)
-Vlna 3:              03 obnova hesla (po 3.1) · 05 video (po 3.2) · 07 macOS CI (po 3.4) · 11 auto-backup
+Vlna 3:              03 obnova hesla · 05 video · 07 macOS CI (po vložení secrets) · 11 auto-backup
 ```
 
 ### Jak zadání použít

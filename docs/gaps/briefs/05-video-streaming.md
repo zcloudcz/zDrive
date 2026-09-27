@@ -7,9 +7,10 @@
 > česky, kód anglicky. Pokud je něco v zadání nejasné nebo neodpovídá kódu,
 > zastav se a zeptej se.
 
-> **Předpoklady:** hotové zadání 04 (náhledy) a rozhodnutí 3.2 v
-> `docs/gaps/README.md`, zda smí jít stahovací token v query stringu.
-> Pokud rozhodnutí chybí, **nezačínej**. Zeptej se.
+> **Předpoklady:** hotové zadání 04 (náhledy). **Rozhodnuto vlastníkem
+> (2026-09-27):** krátkodobý stahovací token **smí** jít v query stringu.
+> Podmínky jsou v bodech 1 a 3: TTL ≤ 5 min, vazba na soubor, verzi a
+> uživatele, žádné logování query.
 
 ## Cíl
 

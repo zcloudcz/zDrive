@@ -4,11 +4,13 @@
 > minimální změny, komunikace česky, kód anglicky. Pokud je něco v zadání
 > nejasné nebo neodpovídá kódu, zastav se a zeptej se.
 
-> **Předpoklady:** hotové zadání 06. Vlastník repa vložil do GitHub secrets
-> Developer ID Application certifikát (p12 + heslo) a notarizační
-> credentials (App Store Connect API key, nebo Apple ID + app-specific
-> password + team id). **Názvy secrets si nevymýšlej.** Zeptej se na ně,
-> nebo navrhni názvy a nech je potvrdit.
+> **Předpoklady:** hotové zadání 06. **Rozhodnuto vlastníkem (2026-09-27):**
+> Apple Developer ID certifikát a notarizační credentials budou k
+> dispozici. **Názvy GitHub secrets si nevymýšlej.** Na začátku navrhni
+> jejich seznam (p12 certifikát base64, heslo, App Store Connect API key
+> nebo Apple ID + app-specific password, team id), nech ho potvrdit a
+> počkej, až je vlastník vloží. Mezitím můžeš připravit workflow, který
+> bez secrets podpis přeskočí.
 
 ## Cíl
 
