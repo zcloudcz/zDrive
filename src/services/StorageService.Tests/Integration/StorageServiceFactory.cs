@@ -74,6 +74,9 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
             ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
             ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
             ["ConnectionStrings:PhotoDb"] = _postgres.GetConnectionString() + ";Search Path=photos",
+            // The photo ingest worker takes its own SHARE locks on files.file_changes;
+            // only PhotoService.Tests exercises it (and drives it manually).
+            ["Photos:Ingest:Enabled"] = "false",
         }));
 
         builder.ConfigureServices(services =>
