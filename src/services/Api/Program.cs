@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Serilog;
 using ZDrive.Api.Middleware;
+using ZDrive.Api.Photos;
 using ZDrive.AuthService.Infrastructure.Persistence;
 using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.StorageService.Infrastructure.Persistence;
@@ -36,6 +37,8 @@ ZDrive.SyncService.Application.DependencyInjection.AddApplication(builder.Servic
 ZDrive.SyncService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
 ZDrive.PhotoService.Application.DependencyInjection.AddApplication(builder.Services);
 ZDrive.PhotoService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
+
+builder.Services.AddPhotoIngest();
 
 // One validation behavior for all five MediatR assemblies.
 builder.Services.AddTransient(typeof(MediatR.IPipelineBehavior<,>), typeof(ZDrive.Shared.Behaviors.ValidationBehavior<,>));

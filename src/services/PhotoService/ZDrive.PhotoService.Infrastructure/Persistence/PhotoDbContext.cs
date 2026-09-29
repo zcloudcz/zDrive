@@ -13,6 +13,7 @@ public sealed class PhotoDbContext : DbContext, IPhotoDbContext
     public DbSet<Album> Albums => Set<Album>();
     public DbSet<AlbumPhoto> AlbumPhotos => Set<AlbumPhoto>();
     public DbSet<Memory> Memories => Set<Memory>();
+    public DbSet<IngestCursor> IngestCursors => Set<IngestCursor>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

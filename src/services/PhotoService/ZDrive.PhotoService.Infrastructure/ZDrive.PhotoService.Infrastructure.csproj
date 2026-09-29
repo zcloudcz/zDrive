@@ -14,7 +14,13 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="MetadataExtractor" Version="2.9.3" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
+    <!-- SkiaSharp is MIT (ImageSharp's split license is deliberately avoided). The
+         NoDependencies native assets carry linux-x64 AND linux-musl-x64 (alpine
+         Docker image) without needing fontconfig on the App Service host. -->
+    <PackageReference Include="SkiaSharp" Version="4.153.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.0" />
   </ItemGroup>
 
   <ItemGroup>

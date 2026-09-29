@@ -93,4 +93,13 @@ public interface IBlobStorageService
     /// blob CORS configured). Null when the chunk does not exist.
     /// </summary>
     Task<Stream?> DownloadChunkAsync(Guid tenantId, Guid userId, Guid fileId, string chunkHash, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores a generated photo thumbnail at
+    /// <c>{tenantId}/{userId}/thumbnails/{photoId}/{size}.webp</c>. Overwrites.
+    /// </summary>
+    Task UploadThumbnailAsync(Guid tenantId, Guid userId, Guid photoId, int size, byte[] content, CancellationToken ct = default);
+
+    /// <summary>Opens a thumbnail for reading; null when it does not exist.</summary>
+    Task<Stream?> DownloadThumbnailAsync(Guid tenantId, Guid userId, Guid photoId, int size, CancellationToken ct = default);
 }

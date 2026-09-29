@@ -83,6 +83,33 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
     }
 
     [Fact]
+    public void ThumbnailRoute_HasItsOwnRateLimitPolicy_AndOnlyMatchesThumbnailPaths()
+    {
+        var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();
+
+        var route = config.Routes.Should().ContainSingle(r => r.RouteId == "photos-thumbnail-route").Subject;
+
+        route.Match.Path.Should().Be("/api/v1/photos/{id}/thumbnail/{size}");
+        route.ClusterId.Should().Be("apiCluster");
+        route.RateLimiterPolicy.Should().Be("thumbnail");
+        route.AuthorizationPolicy.Should().Be("default");
+
+        // Every other photo route keeps the shared budget.
+        config.Routes.Where(r => r.RouteId is "photos-route" or "albums-route" or "memories-route")
+            .Should().OnlyContain(r => r.RateLimiterPolicy == "fixed");
+    }
+
+    [Fact]
+    public async Task ThumbnailPath_WithoutToken_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/v1/photos/{Guid.NewGuid()}/thumbnail/256");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public void SyncHubRoute_IsRoutedWithoutAuthorizationPolicy()
     {
         var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();

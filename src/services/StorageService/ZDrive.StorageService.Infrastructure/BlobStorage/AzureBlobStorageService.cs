@@ -226,6 +226,30 @@ public sealed class AzureBlobStorageService : IBlobStorageService
         return await blobClient.OpenReadAsync(cancellationToken: ct);
     }
 
+    public async Task UploadThumbnailAsync(
+        Guid tenantId, Guid userId, Guid photoId, int size, byte[] content, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);
+        await containerClient.CreateIfNotExistsAsync(cancellationToken: ct);
+
+        var blobClient = containerClient.GetBlobClient(GetThumbnailPath(tenantId, userId, photoId, size));
+        using var stream = new MemoryStream(content, writable: false);
+        await blobClient.UploadAsync(
+            stream, new BlobUploadOptions { HttpHeaders = new BlobHttpHeaders { ContentType = "image/webp" } }, ct);
+    }
+
+    public async Task<Stream?> DownloadThumbnailAsync(
+        Guid tenantId, Guid userId, Guid photoId, int size, CancellationToken ct = default)
+    {
+        var containerClient = _blobServiceClient.GetBlobContainerClient(StorageContainer);
+        var blobClient = containerClient.GetBlobClient(GetThumbnailPath(tenantId, userId, photoId, size));
+
+        if (!await blobClient.ExistsAsync(ct))
+            return null;
+
+        return await blobClient.OpenReadAsync(cancellationToken: ct);
+    }
+
     private string GenerateSasUrl(string containerName, string blobPath, BlobSasPermissions permissions)
     {
         if (_sharedKeyCredential is null)
@@ -255,6 +279,9 @@ public sealed class AzureBlobStorageService : IBlobStorageService
 
     private static string GetFinalChunkPath(Guid tenantId, Guid userId, Guid fileId, string chunkHash) =>
         $"{tenantId}/{userId}/files/{fileId}/chunks/{chunkHash}.blk";
+
+    private static string GetThumbnailPath(Guid tenantId, Guid userId, Guid photoId, int size) =>
+        $"{tenantId}/{userId}/thumbnails/{photoId}/{size}.webp";
 
     private static string GetManifestPath(Guid tenantId, Guid userId, Guid fileId) =>
         $"{tenantId}/{userId}/files/{fileId}/manifest.json";

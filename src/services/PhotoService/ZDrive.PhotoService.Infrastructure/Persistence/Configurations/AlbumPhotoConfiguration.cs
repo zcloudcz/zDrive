@@ -16,6 +16,9 @@ public sealed class AlbumPhotoConfiguration : IEntityTypeConfiguration<AlbumPhot
         builder.Property(ap => ap.AddedAt)
             .HasDefaultValueSql("now() at time zone 'utc'");
 
+        // Matches the Photo query filter (hidden photos vanish from albums and counts).
+        builder.HasQueryFilter(ap => !ap.Photo!.IsHidden);
+
         builder.HasOne(ap => ap.Album)
             .WithMany(a => a.AlbumPhotos)
             .HasForeignKey(ap => ap.AlbumId)
