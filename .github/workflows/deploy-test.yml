@@ -29,11 +29,11 @@
 #        ACR_LOGIN_SERVER      <- terraform output -raw acr_login_server
 #        GATEWAY_FQDN          <- terraform output -raw gateway_fqdn
 #        CONTAINERAPP_NAMES_JSON <- terraform output -json container_app_names
-#                                   (map: gateway/auth/file/storage/sync/photo/notification -> Container App name)
+#                                   (map: gateway/auth/file/storage/sync/notification -> Container App name)
 #
 # NOTE: Auth+File+Storage+Sync+Photo were merged into one host, src/services/Api,
 # deployed under the matrix key "api" below. CONTAINERAPP_NAMES_JSON and
-# infra/terraform/container-apps/ still define 7 apps (one per old service, photo included) —
+# infra/terraform/container-apps/ still define 6 apps (gateway + one per pre-merge service; photo now lives in the api host) —
 # this workflow was intentionally left pointing only its own matrix at the
 # merge; reconciling Terraform/the Container Apps names map is a separate,
 # deliberately out-of-scope follow-up (Container Apps is not zDrive's

@@ -15,7 +15,7 @@ public sealed class AddPhotosToAlbumCommandHandler : IRequestHandler<AddPhotosTo
     public async Task<int> Handle(AddPhotosToAlbumCommand request, CancellationToken cancellationToken)
     {
         var album = await _db.Albums
-            .FirstOrDefaultAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId, cancellationToken)
+            .FirstOrDefaultAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId && a.TenantId == request.TenantId, cancellationToken)
             ?? throw new NotFoundException("Album", request.AlbumId);
 
         var existingPhotoIds = await _db.AlbumPhotos
@@ -35,10 +35,10 @@ public sealed class AddPhotosToAlbumCommandHandler : IRequestHandler<AddPhotosTo
             if (existingPhotoIds.Contains(photoId))
                 continue;
 
-            // Same owner filter as the album lookup above: a photo belonging to
+            // Same owner + tenant filter as the album lookup above: a photo belonging to
             // another user is treated as not found and silently skipped, not added.
             var photoExists = await _db.Photos
-                .AnyAsync(p => p.Id == photoId && p.UserId == request.UserId, cancellationToken);
+                .AnyAsync(p => p.Id == photoId && p.UserId == request.UserId && p.TenantId == request.TenantId, cancellationToken);
             if (!photoExists)
                 continue;
 

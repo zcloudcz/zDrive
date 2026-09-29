@@ -9,7 +9,7 @@ output "acr_login_server" {
 }
 
 output "container_app_names" {
-  description = "Map of service key (gateway, auth, file, storage, sync, photo, notification) -> Container App name, for `az containerapp update`."
+  description = "Map of service key (gateway, auth, file, storage, sync, notification) -> Container App name, for `az containerapp update`."
   value       = module.container_apps.container_app_names
 }
 

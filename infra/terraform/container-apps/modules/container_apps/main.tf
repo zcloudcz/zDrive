@@ -59,7 +59,11 @@ resource "time_sleep" "kv_role_propagation" {
   }
 }
 
-# The 6 non-gateway services. Shape is identical (public JWT key + own DB
+# The 5 non-gateway apps. PhotoService no longer has an app of its own: it is a
+# module of ZDrive.Api (Auth/File/Storage/Sync/Photo). This Terraform still
+# models the pre-merge auth/file/storage/sync apps, so there is no merged "api"
+# app to hand the photo DB secret to yet (secret_ids.photo_db stays available for
+# it); see docs/plans/2026-09-22-merge-backend-services.md section 10. Shape is identical (public JWT key + own DB
 # connection string); AuthService additionally needs the private key,
 # StorageService additionally needs the blob connection string.
 locals {
@@ -85,12 +89,6 @@ locals {
     sync = {
       db_secret_id      = var.secret_ids.sync_db
       db_env_name       = "SyncDb"
-      needs_private_key = false
-      needs_blob        = false
-    }
-    photo = {
-      db_secret_id      = var.secret_ids.photo_db
-      db_env_name       = "PhotoDb"
       needs_private_key = false
       needs_blob        = false
     }
@@ -230,7 +228,6 @@ locals {
     file    = { cluster_id = "fileCluster", destination_id = "fileService" }
     storage = { cluster_id = "storageCluster", destination_id = "storageService" }
     sync    = { cluster_id = "syncCluster", destination_id = "syncService" }
-    photo   = { cluster_id = "photoCluster", destination_id = "photoService" }
     # Carries both /api/v1/notifications and the SignalR hub at /hubs/sync/**.
     notification = { cluster_id = "notificationCluster", destination_id = "notificationService" }
   }

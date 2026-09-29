@@ -14,7 +14,7 @@ public sealed class DeleteAlbumCommandHandler : IRequestHandler<DeleteAlbumComma
     public async Task<bool> Handle(DeleteAlbumCommand request, CancellationToken cancellationToken)
     {
         var album = await _db.Albums
-            .FirstOrDefaultAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId, cancellationToken)
+            .FirstOrDefaultAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId && a.TenantId == request.TenantId, cancellationToken)
             ?? throw new NotFoundException("Album", request.AlbumId);
 
         // Remove all album-photo associations first

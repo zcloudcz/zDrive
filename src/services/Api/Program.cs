@@ -36,7 +36,7 @@ ZDrive.StorageService.Infrastructure.DependencyInjection.AddInfrastructure(build
 ZDrive.SyncService.Application.DependencyInjection.AddApplication(builder.Services);
 ZDrive.SyncService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
 ZDrive.PhotoService.Application.DependencyInjection.AddApplication(builder.Services);
-ZDrive.PhotoService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
+ZDrive.PhotoService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration);
 
 builder.Services.AddPhotoIngest();
 
