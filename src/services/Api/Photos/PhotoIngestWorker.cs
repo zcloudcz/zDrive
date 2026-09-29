@@ -20,10 +20,17 @@ public static class PhotoIngestServiceCollectionExtensions
 }
 
 /// <summary>
-/// Drives <see cref="PhotoIngestPump"/> forever. Starts at cursor 0 on a fresh
-/// database, so it also backfills photos that existed before it shipped —
-/// bounded by <c>Photos:Ingest:BatchSize</c> per feed page and
-/// <c>MaxConcurrentProcessing</c> images at a time.
+/// Drives <see cref="PhotoIngestPump"/> forever with two independent loops, each
+/// with its own failure handling so one stage failing never stops the other:
+///  - reconcile: bootstraps a fresh cursor from current file state (files
+///    uploaded before the change log existed are not in it), then follows the
+///    change log. Runs again immediately only while the previous round reported
+///    more work; otherwise it waits <c>PollIntervalSeconds</c> — the global feed
+///    read takes a table-level SHARE lock, so it must not run per claimed photo.
+///  - processing: <c>MaxConcurrentProcessing</c> workers, each claiming one photo
+///    at a time, so a slow image never holds back the others.
+/// Backfill is therefore bounded by BatchSize per feed/bootstrap page and
+/// MaxConcurrentProcessing images in flight.
 /// </summary>
 public sealed class PhotoIngestWorker : BackgroundService
 {
@@ -47,29 +54,39 @@ public sealed class PhotoIngestWorker : BackgroundService
         }
 
         var poll = TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds));
+        var claimPoll = TimeSpan.FromSeconds(Math.Min(2, poll.TotalSeconds));
+
+        var loops = new List<Task> { RunAsync("reconcile", poll, () => _pump.ReconcileOnceAsync(stoppingToken), stoppingToken) };
+        for (var i = 0; i < Math.Max(1, _options.MaxConcurrentProcessing); i++)
+            loops.Add(RunAsync("processing", claimPoll, () => _pump.ProcessNextAsync(stoppingToken), stoppingToken));
+
+        await Task.WhenAll(loops);
+    }
+
+    /// <param name="round">Returns true when there is more work and the next round should start immediately.</param>
+    private async Task RunAsync(string name, TimeSpan idleDelay, Func<Task<bool>> round, CancellationToken stoppingToken)
+    {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var idle = true;
+            var moreWork = false;
             try
             {
-                var moreFeed = await _pump.ReconcileOnceAsync(stoppingToken);
-                var processed = await _pump.ProcessPendingAsync(stoppingToken);
-                idle = !moreFeed && processed == 0;
+                moreWork = await round();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                break;
+                return;
             }
             catch (Exception ex)
             {
-                // Never let the loop die: log and back off until the next poll.
-                _logger.LogError(ex, "Photo ingest round failed");
+                // Never let a loop die: log and back off until the next poll.
+                _logger.LogError(ex, "Photo ingest {Loop} round failed", name);
             }
 
-            if (idle)
+            if (!moreWork)
             {
-                try { await Task.Delay(poll, stoppingToken); }
-                catch (OperationCanceledException) { break; }
+                try { await Task.Delay(idleDelay, stoppingToken); }
+                catch (OperationCanceledException) { return; }
             }
         }
     }

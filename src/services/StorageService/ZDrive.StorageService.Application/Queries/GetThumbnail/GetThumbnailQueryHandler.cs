@@ -13,7 +13,7 @@ public sealed class GetThumbnailQueryHandler : IRequestHandler<GetThumbnailQuery
     public async Task<Stream> Handle(GetThumbnailQuery request, CancellationToken cancellationToken)
     {
         var stream = await _blobStorage.DownloadThumbnailAsync(
-            request.TenantId, request.UserId, request.PhotoId, request.Size, cancellationToken);
+            request.TenantId, request.UserId, request.PhotoId, request.Version, request.Size, cancellationToken);
 
         return stream ?? throw new NotFoundException("Thumbnail", request.PhotoId);
     }

@@ -25,7 +25,8 @@ public static class DependencyInjection
 
         services.Configure<PhotoIngestOptions>(configuration.GetSection(PhotoIngestOptions.SectionName));
         services.Configure<PhotoThumbnailOptions>(configuration.GetSection(PhotoThumbnailOptions.SectionName));
-        services.AddSingleton<IPhotoImageProcessor, SkiaPhotoImageProcessor>();
+        services.AddSingleton<IPhotoImageProcessor>(sp =>
+            new SkiaPhotoImageProcessor(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<PhotoIngestOptions>>().Value.MaxDecodedPixels));
         services.AddSingleton<PhotoIngestPump>();
 
         // Authentication (JWT bearer scheme) is registered once by

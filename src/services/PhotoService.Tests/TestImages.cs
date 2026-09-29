@@ -43,6 +43,32 @@ public static class TestImages
         return image.Encode(SKEncodedImageFormat.Png, 100).ToArray();
     }
 
+    /// <summary>
+    /// A tiny (~70 byte) PNG whose IHDR declares <paramref name="width"/> x
+    /// <paramref name="height"/>: what a decompression bomb looks like. Header
+    /// and chunk CRCs are valid so Skia's codec accepts it up to the pixel data.
+    /// </summary>
+    public static byte[] PngDeclaring(int width, int height)
+    {
+        static byte[] Be(int v) => [(byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v];
+        static byte[] Chunk(string type, byte[] data)
+        {
+            var typed = Encoding.ASCII.GetBytes(type).Concat(data).ToArray();
+            var crc = 0xFFFFFFFFu;
+            foreach (var b in typed)
+            {
+                crc ^= b;
+                for (var i = 0; i < 8; i++) crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320u : crc >> 1;
+            }
+            return [.. Be(data.Length), .. typed, .. Be((int)~crc)];
+        }
+
+        byte[] ihdr = [.. Be(width), .. Be(height), 8, 2, 0, 0, 0]; // 8-bit RGB
+        byte[] zlibEmpty = [0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01];
+        return [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A,
+                .. Chunk("IHDR", ihdr), .. Chunk("IDAT", zlibEmpty), .. Chunk("IEND", [])];
+    }
+
     /// <summary>Just an ISO-BMFF "ftyp heic" header: recognised as HEIC, undecodable by Skia on Linux.</summary>
     public static byte[] HeicHeaderOnly() =>
         [0, 0, 0, 24, (byte)'f', (byte)'t', (byte)'y', (byte)'p', (byte)'h', (byte)'e', (byte)'i', (byte)'c',

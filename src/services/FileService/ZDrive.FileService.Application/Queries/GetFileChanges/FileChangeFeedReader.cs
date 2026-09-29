@@ -68,4 +68,24 @@ internal static class FileChangeFeedReader
 
         return new Page(prefix, nextCursor, hasMore);
     }
+
+    /// <summary>
+    /// Highest id such that EVERY row up to and including it is committed and
+    /// past the hold-back — the position a consumer may safely start reading
+    /// from after it has looked at the current state of all nodes. Same read
+    /// scope and prefix rule as <see cref="ReadAsync"/>: it is the id just
+    /// before the first row that is still too young. 0 when the log is empty.
+    /// </summary>
+    internal static async Task<long> ReadSafeHeadAsync(IFileDbContext db, CancellationToken cancellationToken)
+    {
+        await using var readScope = await db.BeginFileChangeReadAsync(cancellationToken);
+
+        var firstTooYoung = await db.FileChanges.AsNoTracking()
+            .Where(c => c.OccurredAt > DateTime.UtcNow.AddSeconds(-CommitOrderHoldBack.TotalSeconds))
+            .MinAsync(c => (long?)c.Id, cancellationToken);
+
+        var below = db.FileChanges.AsNoTracking()
+            .Where(c => firstTooYoung == null || c.Id < firstTooYoung);
+        return await below.MaxAsync(c => (long?)c.Id, cancellationToken) ?? 0;
+    }
 }

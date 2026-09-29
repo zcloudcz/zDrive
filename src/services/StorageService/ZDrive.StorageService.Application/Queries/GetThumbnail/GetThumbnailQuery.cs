@@ -2,4 +2,4 @@ using MediatR;
 
 namespace ZDrive.StorageService.Application.Queries.GetThumbnail;
 
-public sealed record GetThumbnailQuery(Guid TenantId, Guid UserId, Guid PhotoId, int Size) : IRequest<Stream>;
+public sealed record GetThumbnailQuery(Guid TenantId, Guid UserId, Guid PhotoId, string Version, int Size) : IRequest<Stream>;

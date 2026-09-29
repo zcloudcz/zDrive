@@ -13,3 +13,6 @@ public sealed record FileSnapshotDto(
     string Name, string? MimeType, bool IsFolder, bool IsDeleted, string? ManifestHash, DateTime CreatedAt);
 
 public sealed record FileChangeBatchDto(List<ChangedFileDto> Files, long NextCursor, bool HasMore);
+
+/// <param name="LastId">Id to pass as AfterId for the next page (the request's own AfterId when the page is empty).</param>
+public sealed record FileNodeBatchDto(List<ChangedFileDto> Files, Guid? LastId, bool HasMore);

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using MediatR;
 using ZDrive.PhotoService.Application.Interfaces.Ingest;
 using ZDrive.Shared.Exceptions;
+using ZDrive.StorageService.Application.Commands.DeleteThumbnails;
 using ZDrive.StorageService.Application.Commands.PutThumbnail;
 using ZDrive.StorageService.Application.Queries.DownloadChunk;
 using ZDrive.StorageService.Application.Queries.GetManifest;
@@ -54,7 +55,12 @@ public sealed class StorageServicePhotoAccess : IPhotoSourceReader, IThumbnailSt
             if (result.Length != manifest.TotalSize)
                 throw new PermanentPhotoException("Assembled size does not match the manifest.");
 
-            return result.ToArray();
+            // The stream was allocated with exactly TotalSize capacity and we just
+            // verified Length == TotalSize, so its buffer IS the file: hand it out
+            // without another copy.
+            return result.TryGetBuffer(out var whole) && whole.Array is { } array && array.Length == whole.Count
+                ? array
+                : result.ToArray();
         }
         catch (NotFoundException ex)
         {
@@ -62,14 +68,17 @@ public sealed class StorageServicePhotoAccess : IPhotoSourceReader, IThumbnailSt
         }
     }
 
-    public Task PutAsync(Guid tenantId, Guid userId, Guid photoId, int size, byte[] webp, CancellationToken cancellationToken) =>
-        _mediator.Send(new PutThumbnailCommand(tenantId, userId, photoId, size, webp), cancellationToken);
+    public Task PutAsync(Guid tenantId, Guid userId, Guid photoId, string version, int size, byte[] webp, CancellationToken cancellationToken) =>
+        _mediator.Send(new PutThumbnailCommand(tenantId, userId, photoId, version, size, webp), cancellationToken);
 
-    public async Task<Stream?> OpenAsync(Guid tenantId, Guid userId, Guid photoId, int size, CancellationToken cancellationToken)
+    public Task DeleteAllAsync(Guid tenantId, Guid userId, Guid photoId, CancellationToken cancellationToken) =>
+        _mediator.Send(new DeleteThumbnailsCommand(tenantId, userId, photoId), cancellationToken);
+
+    public async Task<Stream?> OpenAsync(Guid tenantId, Guid userId, Guid photoId, string version, int size, CancellationToken cancellationToken)
     {
         try
         {
-            return await _mediator.Send(new GetThumbnailQuery(tenantId, userId, photoId, size), cancellationToken);
+            return await _mediator.Send(new GetThumbnailQuery(tenantId, userId, photoId, version, size), cancellationToken);
         }
         catch (NotFoundException)
         {

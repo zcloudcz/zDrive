@@ -13,6 +13,9 @@ public sealed class PhotoIngestOptions
     public long MaxSourceBytes { get; set; } = 100 * 1024 * 1024;
     public int LeaseMinutes { get; set; } = 10;
     public int MaxAttempts { get; set; } = 3;
+
+    /// <summary>Originals declaring more pixels than this are rejected before any decode buffer is allocated (decompression-bomb guard).</summary>
+    public long MaxDecodedPixels { get; set; } = 100_000_000;
 }
 
 /// <summary>Bound from <c>Photos:Thumbnails</c>.</summary>

@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using ZDrive.PhotoService.Application.Common;
 using ZDrive.PhotoService.Application.Interfaces;
 using ZDrive.PhotoService.Application.Interfaces.Ingest;
 using ZDrive.PhotoService.Domain.Enums;
@@ -33,15 +34,15 @@ public sealed class GetPhotoThumbnailQueryHandler : IRequestHandler<GetPhotoThum
 
         // Derived from the row, so a 304 never has to touch blob storage; a new
         // version changes the manifest hash and therefore the tag.
-        var hash = photo.ProcessedManifestHash ?? "";
-        var etag = $"\"{request.PhotoId:N}-{request.Size}-{hash[..Math.Min(16, hash.Length)]}\"";
+        var version = ThumbnailVersion.Of(photo.ProcessedManifestHash ?? "");
+        var etag = $"\"{request.PhotoId:N}-{request.Size}-{version}\"";
 
         if (request.IfNoneMatch is { Length: > 0 } header
             && header.Split(',').Any(t => t.Trim() == etag || t.Trim() == "*"))
             return new PhotoThumbnailDto(etag, true, null);
 
         var stream = await _store.OpenAsync(
-            request.TenantId, request.UserId, request.PhotoId, request.Size, cancellationToken)
+            request.TenantId, request.UserId, request.PhotoId, version, request.Size, cancellationToken)
             ?? throw new NotFoundException("Thumbnail", request.PhotoId);
 
         return new PhotoThumbnailDto(etag, false, stream);

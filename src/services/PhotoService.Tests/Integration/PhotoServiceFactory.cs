@@ -59,6 +59,9 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
     /// <summary>While set, thumbnail writes throw — simulates a transient blob failure.</summary>
     public bool FailThumbnailWrites { get; set; }
 
+    /// <summary>Awaited (with the thumbnail version) before every thumbnail write; lets a test pause one worker.</summary>
+    public Func<string, Task>? BeforeThumbnailWrite { get; set; }
+
     public Guid TestUserId { get; } = Guid.NewGuid();
     public Guid TestTenantId { get; } = Guid.NewGuid();
 
@@ -85,7 +88,7 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
 
             // Same port, but thumbnail writes can be made to fail on demand.
             services.AddScoped<IThumbnailStore>(sp => new FlakyThumbnailStore(
-                sp.GetRequiredService<StorageServicePhotoAccess>(), () => FailThumbnailWrites));
+                sp.GetRequiredService<StorageServicePhotoAccess>(), () => FailThumbnailWrites, () => BeforeThumbnailWrite));
         });
 
         // The merged host migrates all five contexts on startup, so every

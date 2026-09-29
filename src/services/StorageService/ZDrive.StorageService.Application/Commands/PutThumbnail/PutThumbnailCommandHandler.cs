@@ -12,7 +12,7 @@ public sealed class PutThumbnailCommandHandler : IRequestHandler<PutThumbnailCom
     public async Task<bool> Handle(PutThumbnailCommand request, CancellationToken cancellationToken)
     {
         await _blobStorage.UploadThumbnailAsync(
-            request.TenantId, request.UserId, request.PhotoId, request.Size, request.Content, cancellationToken);
+            request.TenantId, request.UserId, request.PhotoId, request.Version, request.Size, request.Content, cancellationToken);
         return true;
     }
 }

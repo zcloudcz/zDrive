@@ -7,6 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Application.Queries.GetFileChangeBatch;
+using ZDrive.FileService.Application.Queries.GetFileChangeHead;
+using ZDrive.FileService.Application.Queries.GetFileNodeBatch;
 using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.Shared.DTOs;
 
@@ -123,7 +125,67 @@ public sealed class FileChangeBatchTests : IClassFixture<FileServiceFactory>
         await act.Should().ThrowAsync<FluentValidation.ValidationException>();
     }
 
+    [Fact]
+    public async Task GetFileChangeHead_RowsStillInsideHoldBack_AreExcludedUntilAged()
+    {
+        var client = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
+        await CreateAsync(client, "head-anchor.jpg");
+        await AgeAllAsync();
+        var settled = await ReadHeadAsync();
+        settled.Should().BeGreaterThan(0);
+
+        await CreateAsync(client, "head-young.jpg"); // not aged
+
+        (await ReadHeadAsync()).Should().Be(settled, "a consumer must not start reading after a row that may still be racing");
+        await AgeAllAsync();
+        (await ReadHeadAsync()).Should().BeGreaterThan(settled);
+    }
+
+    [Fact]
+    public async Task GetFileNodeBatch_ReturnsLiveFilesOfAllUsersWithoutNeedingChangeRows()
+    {
+        var (aliceId, aliceTenant) = (Guid.NewGuid(), Guid.NewGuid());
+        var alice = _factory.CreateAuthenticatedClient(aliceId, aliceTenant);
+        var bob = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
+        var live = await CreateAsync(alice, "node-live.jpg");
+        var otherUser = await CreateAsync(bob, "node-bob.jpg");
+        var trashed = await CreateAsync(alice, "node-trashed.jpg");
+        await alice.DeleteAsync($"/api/v1/files/{trashed.Id}");
+        var folder = await (await alice.PostAsJsonAsync("/api/v1/files", new { name = "node-folder", isFolder = true }))
+            .Content.ReadFromJsonAsync<ApiResponse<FileDto>>();
+        await AgeAllAsync();
+        using (var scope = _factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<FileDbContext>().Database.ExecuteSqlRawAsync(
+                $"DELETE FROM files.file_changes WHERE file_id = '{live.Id}'");
+
+        var seen = new List<ChangedFileDto>();
+        Guid? after = null;
+        FileNodeBatchDto page;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+            do
+            {
+                page = await mediator.Send(new GetFileNodeBatchQuery(after, 2));
+                seen.AddRange(page.Files);
+                after = page.LastId;
+            } while (page.HasMore);
+        }
+
+        seen.Should().Contain(f => f.FileId == live.Id && f.UserId == aliceId && f.TenantId == aliceTenant);
+        seen.Should().Contain(f => f.FileId == otherUser.Id);
+        seen.Should().NotContain(f => f.FileId == trashed.Id, "trashed nodes are not live");
+        seen.Should().NotContain(f => f.FileId == folder!.Data!.Id, "folders are not files");
+        seen.Select(f => f.FileId).Should().OnlyHaveUniqueItems("keyset paging must not repeat or skip");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private async Task<long> ReadHeadAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IMediator>().Send(new GetFileChangeHeadQuery());
+    }
 
     private sealed record PageResult(List<ChangedFileDto> Files, long NextCursor, bool HasMore);
 

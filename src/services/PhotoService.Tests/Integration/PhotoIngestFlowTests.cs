@@ -7,8 +7,11 @@ using SkiaSharp;
 using Xunit;
 using ZDrive.FileService.Application.DTOs;
 using ZDrive.FileService.Domain.Entities;
+using ZDrive.PhotoService.Application.Common;
+using ZDrive.PhotoService.Application.Interfaces.Ingest;
 using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.PhotoService.Application.DTOs;
+using ZDrive.PhotoService.Domain.Entities;
 using ZDrive.PhotoService.Domain.Enums;
 using ZDrive.PhotoService.Infrastructure.Ingest;
 using ZDrive.PhotoService.Infrastructure.Persistence;
@@ -381,6 +384,204 @@ public sealed class PhotoIngestFlowTests : IClassFixture<PhotoServiceFactory>
         (await anonymous.GetAsync($"/api/v1/photos/{Guid.NewGuid()}/thumbnail/256")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    [Fact]
+    public async Task IngestFlow_DecompressionBombPng_FailsPermanentlyAndWorkerContinues()
+    {
+        var (client, _, _) = NewUser();
+        var bomb = await UploadImageAsync(client, "bomb.png", TestImages.PngDeclaring(20_000, 20_000), "image/png");
+        var good = await UploadImageAsync(client, "after-bomb.jpg", TestImages.Jpeg(80, 60));
+
+        await _factory.DrainIngestAsync();
+
+        var failed = (await _factory.FindPhotoByFileAsync(bomb.Id))!;
+        failed.ProcessingStatus.Should().Be(ProcessingStatus.Failed);
+        failed.FailureReason.Should().StartWith("TooManyPixels");
+        failed.Attempts.Should().Be(1, "a declared size cannot get smaller on retry");
+        (await FindInTimelineAsync(client, good.Id)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task IngestFlow_LateWorkerForOlderVersion_DoesNotOverwriteNewerThumbnails()
+    {
+        var (client, _, _) = NewUser();
+        var file = await UploadImageAsync(client, "race.jpg", TestImages.Jpeg(400, 200));
+        await _factory.AgeChangesAsync();
+        var pump = _factory.Services.GetRequiredService<PhotoIngestPump>();
+        await pump.ReconcileOnceAsync(CancellationToken.None);
+        var hashA = (await _factory.FindPhotoByFileAsync(file.Id))!.SourceManifestHash!;
+
+        // Worker A claims version A and stalls right before writing its thumbnails.
+        var reachedA = new TaskCompletionSource();
+        var releaseA = new TaskCompletionSource();
+        var stalled = false;
+        _factory.BeforeThumbnailWrite = async version =>
+        {
+            if (version != ThumbnailVersion.Of(hashA) || stalled) return;
+            stalled = true;
+            reachedA.SetResult();
+            await releaseA.Task;
+        };
+
+        try
+        {
+            var workerA = pump.ProcessPendingAsync(CancellationToken.None);
+            await reachedA.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Meanwhile version B arrives and is fully processed.
+            await UploadVersionAsync(client, file.Id, TestImages.Jpeg(200, 300));
+            await _factory.AgeChangesAsync();
+            await pump.ReconcileOnceAsync(CancellationToken.None);
+            await pump.ProcessPendingAsync(CancellationToken.None);
+            var afterB = (await _factory.FindPhotoByFileAsync(file.Id))!;
+            afterB.ProcessedManifestHash.Should().NotBe(hashA).And.NotBeNull();
+
+            // Now the stale worker finishes.
+            releaseA.SetResult();
+            await workerA;
+
+            var final = (await _factory.FindPhotoByFileAsync(file.Id))!;
+            final.ProcessedManifestHash.Should().Be(afterB.ProcessedManifestHash, "the conditional update of the stale worker must be a no-op");
+            (final.Width, final.Height).Should().Be((200, 300));
+            var thumb = await client.GetAsync($"/api/v1/photos/{final.Id}/thumbnail/256");
+            thumb.StatusCode.Should().Be(HttpStatusCode.OK);
+            DecodedSize(await thumb.Content.ReadAsByteArrayAsync()).Should().Be((171, 256), "still version B's bytes");
+        }
+        finally
+        {
+            _factory.BeforeThumbnailWrite = null;
+            releaseA.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task IngestFlow_FileWithNoChangeRow_IsPickedUpByBootstrapAndLaterChangesAreFollowed()
+    {
+        var (client, _, _) = NewUser();
+        await UploadImageAsync(client, "anchor.jpg", TestImages.Jpeg(20, 20)); // keeps a row in the log, so the head is > 0
+        var preexisting = await UploadImageAsync(client, "from-before-the-log.jpg", TestImages.Jpeg(90, 60));
+        await _factory.AgeChangesAsync();
+        // ADR 0001: the log started empty, so files that predate it have no rows at all.
+        await ExecuteFileSqlAsync($"""DELETE FROM files.file_changes WHERE file_id = '{preexisting.Id}'""");
+        await ResetCursorAsync(); // fresh cursor row => bootstrap
+
+        await _factory.DrainIngestAsync();
+
+        (await FindInTimelineAsync(client, preexisting.Id)).Should().NotBeNull("bootstrap scans current node state");
+        var cursor = await ReadCursorRowAsync();
+        cursor.BootstrapCompletedAt.Should().NotBeNull();
+        cursor.LastChangeId.Should().BeGreaterThan(0, "the cursor moved to the feed head captured before the scan");
+
+        var later = await UploadImageAsync(client, "after-bootstrap.jpg", TestImages.Jpeg(50, 50));
+        await _factory.DrainIngestAsync();
+        (await FindInTimelineAsync(client, later.Id)).Should().NotBeNull("after the bootstrap the change feed takes over");
+    }
+
+    [Fact]
+    public async Task IngestFlow_BootstrapInterrupted_ResumesFromPersistedPosition()
+    {
+        var (client, _, _) = NewUser();
+        var file = await UploadImageAsync(client, "resume.jpg", TestImages.Jpeg(40, 40));
+        await _factory.AgeChangesAsync();
+        await ExecuteFileSqlAsync($"""DELETE FROM files.file_changes WHERE file_id = '{file.Id}'""");
+        await ResetCursorAsync();
+
+        // Simulate a crash after the head was captured but before the scan finished.
+        await ExecutePhotoSqlAsync(
+            """INSERT INTO photos.ingest_cursors ("Name","LastChangeId","UpdatedAt","BootstrapHead") VALUES ('file-changes',0,now(),0)""");
+
+        await _factory.DrainIngestAsync();
+
+        (await FindInTimelineAsync(client, file.Id)).Should().NotBeNull();
+        (await ReadCursorRowAsync()).BootstrapCompletedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task IngestFlow_NewVersionQueued_KeepsShowingLastGoodVersionUntilProcessed()
+    {
+        var (client, _, _) = NewUser();
+        var file = await UploadImageAsync(client, "keep-visible.jpg", TestImages.Jpeg(400, 200));
+        await _factory.DrainIngestAsync();
+        var first = (await FindInTimelineAsync(client, file.Id))!;
+
+        await UploadVersionAsync(client, file.Id, TestImages.Jpeg(200, 300));
+        await _factory.AgeChangesAsync();
+        var pump = _factory.Services.GetRequiredService<PhotoIngestPump>();
+        await pump.ReconcileOnceAsync(CancellationToken.None); // queued, NOT processed
+
+        var queued = (await _factory.FindPhotoByFileAsync(file.Id))!;
+        queued.SourceManifestHash.Should().NotBe(queued.ProcessedManifestHash, "the new version waits");
+        queued.ProcessingStatus.Should().Be(ProcessingStatus.Processed, "an already-processed photo is not demoted while reprocessing");
+        var stillThere = await FindInTimelineAsync(client, file.Id);
+        stillThere.Should().NotBeNull("it must not vanish from the timeline");
+        (stillThere!.Width, stillThere.Height).Should().Be((first.Width, first.Height));
+        var oldThumb = await client.GetAsync($"/api/v1/photos/{first.Id}/thumbnail/256");
+        DecodedSize(await oldThumb.Content.ReadAsByteArrayAsync()).Should().Be((256, 128), "the previous version's thumbnails are still served");
+
+        await pump.ProcessPendingAsync(CancellationToken.None);
+
+        var done = (await FindInTimelineAsync(client, file.Id))!;
+        (done.Width, done.Height).Should().Be((200, 300));
+    }
+
+    [Fact]
+    public async Task IngestFlow_NewVersionCorrupt_KeepsLastGoodVersionAndRecordsTheFailure()
+    {
+        var (client, _, _) = NewUser();
+        var file = await UploadImageAsync(client, "good-then-bad.jpg", TestImages.Jpeg(400, 200));
+        await _factory.DrainIngestAsync();
+        var good = (await _factory.FindPhotoByFileAsync(file.Id))!;
+
+        await UploadVersionAsync(client, file.Id, [.. "not an image any more"u8.ToArray(), .. new byte[40]]);
+        await _factory.DrainIngestAsync();
+
+        var after = (await _factory.FindPhotoByFileAsync(file.Id))!;
+        after.ProcessingStatus.Should().Be(ProcessingStatus.Processed, "a good version exists, so the photo is not flipped to Failed");
+        after.ProcessedManifestHash.Should().Be(good.ProcessedManifestHash);
+        after.FailureReason.Should().NotBeNullOrWhiteSpace();
+        (await FindInTimelineAsync(client, file.Id))!.Width.Should().Be(400);
+        DecodedSize(await (await client.GetAsync($"/api/v1/photos/{good.Id}/thumbnail/256")).Content.ReadAsByteArrayAsync())
+            .Should().Be((256, 128));
+
+        var attempts = after.Attempts;
+        await _factory.DrainIngestAsync();
+        (await _factory.FindPhotoByFileAsync(file.Id))!.Attempts.Should().Be(attempts, "a version that gave up is not claimed again");
+    }
+
+    [Fact]
+    public async Task IngestFlow_FilePurgedFromTrash_DeletesPhotoRowAndItsThumbnails()
+    {
+        var (client, userId, tenantId) = NewUser();
+        var file = await UploadImageAsync(client, "purge-me.jpg", TestImages.Jpeg(100, 80));
+        await _factory.DrainIngestAsync();
+        var photo = (await _factory.FindPhotoByFileAsync(file.Id))!;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IThumbnailStore>();
+            (await store.OpenAsync(tenantId, userId, photo.Id, ThumbnailVersion.Of(photo.ProcessedManifestHash!), 256, default))
+                .Should().NotBeNull();
+        }
+
+        await client.DeleteAsync($"/api/v1/files/{file.Id}");
+        (await client.DeleteAsync("/api/v1/files/trash")).StatusCode.Should().Be(HttpStatusCode.OK); // hard delete: node gone
+        await _factory.DrainIngestAsync();
+
+        (await _factory.FindPhotoByFileAsync(file.Id)).Should().BeNull("a purged file can never come back, so the row goes too");
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IThumbnailStore>();
+            (await store.OpenAsync(tenantId, userId, photo.Id, ThumbnailVersion.Of(photo.ProcessedManifestHash!), 256, default))
+                .Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task IngestPump_NothingQueued_ProcessNextReportsIdle()
+    {
+        await _factory.DrainIngestAsync();
+
+        (await _factory.Services.GetRequiredService<PhotoIngestPump>().ProcessNextAsync(CancellationToken.None)).Should().BeFalse();
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static (int Width, int Height) DecodedSize(byte[] webp)
@@ -458,6 +659,25 @@ public sealed class PhotoIngestFlowTests : IClassFixture<PhotoServiceFactory>
         var db = scope.ServiceProvider.GetRequiredService<PhotoDbContext>();
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"""UPDATE photos.photos SET "NextAttemptAt" = now() - interval '1 second' WHERE "FileId" = {fileId} AND "NextAttemptAt" IS NOT NULL""");
+    }
+
+    private Task ExecuteFileSqlAsync(string sql) => ExecuteSqlAsync<FileDbContext>(sql);
+
+    private Task ExecutePhotoSqlAsync(string sql) => ExecuteSqlAsync<PhotoDbContext>(sql);
+
+    private async Task ExecuteSqlAsync<TContext>(string sql) where TContext : DbContext
+    {
+        using var scope = _factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<TContext>().Database.ExecuteSqlRawAsync(sql);
+    }
+
+    private Task ResetCursorAsync() => ExecutePhotoSqlAsync("DELETE FROM photos.ingest_cursors");
+
+    private async Task<IngestCursor> ReadCursorRowAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PhotoDbContext>();
+        return await db.IngestCursors.AsNoTracking().SingleAsync();
     }
 
     private async Task<long> ReadCursorAsync()

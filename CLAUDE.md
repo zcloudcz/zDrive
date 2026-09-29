@@ -205,25 +205,44 @@ alternatives rejected, and the known 5-second commit-order hold-back.
 ### Photo processing pipeline
 
 **Ingest is implemented in-process, without a broker.** `PhotoIngestWorker`
-(a `BackgroundService` in `ZDrive.Api`) reads FileService's *global* change
-log through the MediatR query `GetFileChangeBatchQuery` (same SHARE-lock +
-5 s hold-back semantics as the per-user feed, one shared implementation:
-`FileChangeFeedReader`) and keeps a durable cursor in `photos.ingest_cursors`.
-It is state-based: for every file a page names it looks at the file's
-*current* state and creates/queues (image, new `ManifestHash`), hides
-(trashed, purged, renamed to a non-image) or un-hides the `Photo` row. The
-`photos` table doubles as the work queue (lease + `FOR UPDATE SKIP LOCKED`);
-idempotency key is `(FileId, SourceManifestHash)`. Processing reads the
-original through Storage's manifest/chunk queries (chunk hashes verified),
-extracts EXIF with MetadataExtractor and writes 256/1024 WebP thumbnails with
-SkiaSharp to `{tenant}/{user}/thumbnails/{photoId}/{size}.webp` (not counted
-against the quota, which sums `file_versions`). HEIC/HEIF/AVIF cannot be
-decoded by Skia on Linux: those photos get metadata but no thumbnails
-(`ThumbnailsReady = false`). Undecodable data fails at once (`Failed`);
-transient errors retry with backoff, max 3 attempts. The worker starts at
-cursor 0, so it also backfills. Settings: `Photos:Ingest:*`
-(`Enabled`, `PollIntervalSeconds`, `BatchSize`, `MaxConcurrentProcessing`,
-`MaxSourceBytes`, `LeaseMinutes`, `MaxAttempts`) and
+(a `BackgroundService` in `ZDrive.Api`) has two independent loops. *Reconcile*
+reads FileService's *global* change log through the MediatR query
+`GetFileChangeBatchQuery` (same SHARE-lock + 5 s hold-back semantics as the
+per-user feed, one shared implementation: `FileChangeFeedReader`) and keeps a
+durable cursor in `photos.ingest_cursors`; it runs every
+`Photos:Ingest:PollIntervalSeconds`, or again at once while it reports more
+work, never per processed photo (the read takes a table-level lock).
+*Processing* runs `MaxConcurrentProcessing` workers that each claim one photo
+at a time.
+
+The change log starts empty (ADR 0001), so files uploaded before it existed
+never appear in it. On a fresh cursor the worker therefore **bootstraps**
+first: it captures the safe feed head, scans all live file nodes
+(`GetFileNodeBatchQuery`, keyset-paged by id, resumable through
+`BootstrapLastNodeId`), applies them exactly like feed changes, then moves the
+cursor to the captured head and follows the feed. Everything is state-based:
+for each file it looks at the file's *current* state and creates/queues
+(image, new `ManifestHash`), hides (trashed, renamed to a non-image; both
+restorable), un-hides, or deletes the `Photo` row and its thumbnails (node no
+longer exists; note `EmptyTrash` writes no change row, so full garbage
+collection of purged files and superseded thumbnail versions is future work).
+The `photos` table doubles as the work queue (lease + `FOR UPDATE SKIP
+LOCKED`); a photo needs work while `SourceManifestHash != ProcessedManifestHash`,
+and one that already has a processed version stays `Processed` and visible
+(current thumbnails included) while a newer version is queued or failing.
+Processing reads the original through Storage's manifest/chunk queries (chunk
+hashes verified), extracts EXIF with MetadataExtractor and writes 256/1024
+WebP thumbnails with SkiaSharp to
+`{tenant}/{user}/thumbnails/{photoId}/{manifestHash[..16]}/{size}.webp` (the
+version in the key means a slow worker for an old version can never overwrite
+a newer one; not counted against the quota, which sums `file_versions`).
+Originals declaring more than `MaxDecodedPixels` are rejected before any
+decode buffer exists. HEIC/HEIF/AVIF cannot be decoded by Skia on Linux: those
+photos get metadata but no thumbnails (`ThumbnailsReady = false`).
+Undecodable data fails at once (`Failed`); transient errors retry with
+backoff, max 3 attempts. Settings: `Photos:Ingest:*` (`Enabled`,
+`PollIntervalSeconds`, `BatchSize`, `MaxConcurrentProcessing`,
+`MaxSourceBytes`, `LeaseMinutes`, `MaxAttempts`, `MaxDecodedPixels`) and
 `Photos:Thumbnails:CacheMaxAgeSeconds`. Thumbnails are served by
 `GET /api/v1/photos/{id}/thumbnail/{256|1024}` (private cache + ETag); the
 gateway gives that one route its own `thumbnail` rate-limit budget.

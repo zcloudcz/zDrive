@@ -61,6 +61,51 @@ public sealed class PhotoImageProcessorTests
     }
 
     [Fact]
+    public void Process_PngDeclaringHugeDimensions_IsRejectedAsTooManyPixelsBeforeDecoding()
+    {
+        var bomb = TestImages.PngDeclaring(20_000, 20_000); // 400 MP = 1.6 GB as RGBA, in ~70 bytes
+        bomb.Length.Should().BeLessThan(200);
+
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+        var act = () => _processor.Process(bomb);
+
+        act.Should().Throw<PermanentPhotoException>().WithMessage("TooManyPixels*");
+        (GC.GetTotalAllocatedBytes(precise: true) - before).Should().BeLessThan(50_000_000, "no decode buffer may be allocated");
+    }
+
+    [Fact]
+    public void Process_ConfiguredPixelLimit_IsHonoured()
+    {
+        var strict = new SkiaPhotoImageProcessor(maxDecodedPixels: 1_000);
+
+        var act = () => strict.Process(TestImages.Jpeg(100, 100));
+
+        act.Should().Throw<PermanentPhotoException>().WithMessage("TooManyPixels*");
+    }
+
+    [Fact]
+    public void Process_ExifWithOutOfRangeOffset_StillProcessesAndFallsBackToWallClock()
+    {
+        var jpeg = TestImages.Jpeg(64, 48, new(DateTimeOriginal: "2021:07:04 12:00:00", OffsetTimeOriginal: "+15:00", Make: "Acme"));
+
+        var result = _processor.Process(jpeg);
+
+        result.TakenAtUtc.Should().Be(new DateTime(2021, 7, 4, 12, 0, 0, DateTimeKind.Utc), "an offset beyond +-14:00 is ignored");
+        result.CameraMake.Should().Be("Acme", "the rest of the metadata survives a bad timestamp");
+        result.Thumbnails.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void ToUtc_DateWhoseUtcEquivalentLeavesTheDateTimeRange_DoesNotThrow()
+    {
+        var act = () => SkiaPhotoImageProcessor.ToUtc(new DateTime(1, 1, 1, 0, 0, 0), "+02:00");
+
+        act.Should().NotThrow();
+        SkiaPhotoImageProcessor.ToUtc(new DateTime(1, 1, 1, 0, 0, 0), "+02:00").Year.Should().Be(1);
+        SkiaPhotoImageProcessor.ToUtc(new DateTime(9999, 12, 31, 23, 0, 0), "-05:00").Year.Should().Be(9999);
+    }
+
+    [Fact]
     public void Process_HeicHeader_ReturnsMetadataOnlyWithoutThumbnails()
     {
         var result = _processor.Process(TestImages.HeicHeaderOnly());
@@ -73,6 +118,8 @@ public sealed class PhotoImageProcessorTests
     [InlineData("-05:30", 17, 30)]
     [InlineData(null, 12, 0)]
     [InlineData("garbage", 12, 0)]
+    [InlineData("+15:00", 12, 0)]
+    [InlineData("-14:30", 12, 0)]
     public void ToUtc_AppliesOffsetTagWhenPresentAndValid(string? offset, int expectedHour, int expectedMinute)
     {
         var utc = SkiaPhotoImageProcessor.ToUtc(new DateTime(2021, 7, 4, 12, 0, 0), offset);
@@ -101,7 +148,8 @@ public sealed class PhotoImageProcessorTests
         source.Erase(SKColors.Blue);
         source.SetPixel(0, 0, SKColors.Red);
 
-        using var result = SkiaPhotoImageProcessor.ApplyOrigin(source, origin);
+        var result = SkiaPhotoImageProcessor.ApplyOrigin(source, origin);
+        using var owned = ReferenceEquals(result, source) ? null : result; // TopLeft hands back the input untouched
 
         (result.Width, result.Height).Should().Be((width, height));
         result.GetPixel(redX, redY).Should().Be(SKColors.Red);
