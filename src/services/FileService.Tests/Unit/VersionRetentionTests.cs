@@ -32,7 +32,7 @@ public sealed class VersionRetentionTests
     {
         var options = new VersioningOptions { MaxVersionsPerFile = 3, MinRetentionDays = 0 };
 
-        var result = VersionRetention.SelectPrunable(Versions(5), options, Now);
+        var result = VersionRetention.SelectPrunable(Versions(5).AsQueryable(), options, Now);
 
         // The new version takes one of the 3 slots, so 2 existing rows stay.
         result.Select(v => v.VersionNumber).Should().BeEquivalentTo([3, 2, 1]);
@@ -44,7 +44,7 @@ public sealed class VersionRetentionTests
         var options = new VersioningOptions { MaxVersionsPerFile = 3, MinRetentionDays = 30 };
 
         // ages 5,4,3,2,1 days
-        VersionRetention.SelectPrunable(Versions(5, daysApart: 1), options, Now).Should().BeEmpty();
+        VersionRetention.SelectPrunable(Versions(5, daysApart: 1).AsQueryable(), options, Now).Should().BeEmpty();
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public sealed class VersionRetentionTests
         var options = new VersioningOptions { MaxVersionsPerFile = 3, MinRetentionDays = 35 };
 
         // ages 50,40,30,20,10 days; beyond the limit are v3 (30d), v2 (40d), v1 (50d).
-        VersionRetention.SelectPrunable(Versions(5, daysApart: 10), options, Now)
+        VersionRetention.SelectPrunable(Versions(5, daysApart: 10).AsQueryable(), options, Now)
             .Select(v => v.VersionNumber).Should().BeEquivalentTo([2, 1]);
     }
 
@@ -62,7 +62,7 @@ public sealed class VersionRetentionTests
     {
         var options = new VersioningOptions { MaxVersionsPerFile = 5, MinRetentionDays = 30 };
 
-        VersionRetention.SelectPrunable(Versions(2, daysApart: 400), options, Now).Should().BeEmpty();
+        VersionRetention.SelectPrunable(Versions(2, daysApart: 400).AsQueryable(), options, Now).Should().BeEmpty();
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public sealed class VersionRetentionTests
         var options = new VersioningOptions { MaxVersionsPerFile = 2, MinRetentionDays = 35 };
 
         // Beyond the limit: v3 (20d) and v2 (30d) too young, v1 (40d) old enough.
-        VersionRetention.SelectPrunable(existing, options, Now)
+        VersionRetention.SelectPrunable(existing.AsQueryable(), options, Now)
             .Select(v => v.VersionNumber).Should().BeEquivalentTo([1]);
     }
 
@@ -81,7 +81,7 @@ public sealed class VersionRetentionTests
     {
         var options = new VersioningOptions { MaxVersionsPerFile = 0, MinRetentionDays = 30 };
 
-        VersionRetention.SelectPrunable(Versions(5), options, Now).Should().BeEmpty();
+        VersionRetention.SelectPrunable(Versions(5).AsQueryable(), options, Now).Should().BeEmpty();
     }
 
     [Fact]

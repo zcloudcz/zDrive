@@ -98,9 +98,8 @@ public sealed class RestoreFileVersionCommandHandler : IRequestHandler<RestoreFi
 
         // The restored version is still only tracked; reserve one slot for it,
         // just as CreateFileVersion does for a new upload.
-        var existing = await _db.FileVersions
-            .Where(v => v.FileId == fileId)
+        return await VersionRetention
+            .SelectPrunable(_db.FileVersions.Where(v => v.FileId == fileId), _options, _time.GetUtcNow().UtcDateTime)
             .ToListAsync(cancellationToken);
-        return VersionRetention.SelectPrunable(existing, _options, _time.GetUtcNow().UtcDateTime);
     }
 }
