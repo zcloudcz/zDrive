@@ -560,4 +560,96 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Behåller allt på den här enheten…';
+
+  @override
+  String get twoFactorTitle => 'Tvåstegsverifiering';
+
+  @override
+  String get twoFactorPrompt =>
+      'Ange den sexsiffriga koden från din autentiseringsapp.';
+
+  @override
+  String get twoFactorRecoveryPrompt => 'Ange en av dina återställningskoder.';
+
+  @override
+  String get twoFactorCodeLabel => 'Sexsiffrig kod';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Återställningskod';
+
+  @override
+  String get twoFactorVerifyButton => 'Verifiera';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Använd en återställningskod';
+
+  @override
+  String get twoFactorUseAuthenticator =>
+      'Använd en kod från autentiseringsappen';
+
+  @override
+  String get twoFactorBackToSignIn => 'Tillbaka till inloggningen';
+
+  @override
+  String get authTwoFactorInvalidCode => 'Koden är inte giltig. Försök igen.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'Den här inloggningen har gått ut. Gå tillbaka och logga in igen.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'Tvåstegsverifiering är av. Slå på den för att kräva en kod från din autentiseringsapp vid inloggning.';
+
+  @override
+  String get twoFactorStatusOn => 'Tvåstegsverifiering är på.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'Tvåstegsverifiering är inte tillgänglig för det här kontot. Inloggningssäkerheten hanteras via ditt ZCLOUD-konto.';
+
+  @override
+  String get twoFactorEnable => 'Slå på';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Skanna QR-koden med din autentiseringsapp eller ange installationsnyckeln manuellt. Skriv sedan in den sexsiffriga koden som appen visar.';
+
+  @override
+  String get twoFactorSetupKey => 'Installationsnyckel';
+
+  @override
+  String get twoFactorCopy => 'Kopiera';
+
+  @override
+  String get twoFactorCopied => 'Kopierad';
+
+  @override
+  String get twoFactorConfirmButton => 'Bekräfta och slå på';
+
+  @override
+  String get twoFactorRecoveryCodesTitle => 'Spara dina återställningskoder';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Varje kod fungerar en gång om du förlorar åtkomsten till din autentiseringsapp. De visas bara nu.';
+
+  @override
+  String get twoFactorCopyCodes => 'Kopiera alla koder';
+
+  @override
+  String get twoFactorDone => 'Klar';
+
+  @override
+  String get twoFactorDisable => 'Slå av';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Ange ditt lösenord och en aktuell kod (eller en återställningskod) för att slå av tvåstegsverifiering.';
+
+  @override
+  String get twoFactorDisableConfirm => 'Slå av tvåstegsverifiering';
+
+  @override
+  String get twoFactorPasswordInvalid => 'Lösenordet är inte korrekt.';
 }

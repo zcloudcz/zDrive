@@ -11,8 +11,13 @@ class AppSettingsMenu extends StatefulWidget {
   const AppSettingsMenu({
     super.key,
     this.exportDiagnostics = exportDiagnosticFile,
+    this.onTwoFactorSettings,
   });
   final Future<bool> Function() exportDiagnostics;
+
+  /// Opens the 2FA settings page. Null hides the item (accounts without a
+  /// local password have no 2FA setup).
+  final VoidCallback? onTwoFactorSettings;
 
   @override
   State<AppSettingsMenu> createState() => _AppSettingsMenuState();
@@ -28,7 +33,9 @@ class _AppSettingsMenuState extends State<AppSettingsMenu> {
       icon: const Icon(Icons.settings_outlined),
       tooltip: l10n.settings,
       onSelected: (action) async {
-        if (action == 'about') {
+        if (action == 'two_factor') {
+          widget.onTwoFactorSettings?.call();
+        } else if (action == 'about') {
           showDialog<void>(
             context: context,
             builder: (_) => const _AppAboutDialog(),
@@ -76,6 +83,8 @@ class _AppSettingsMenuState extends State<AppSettingsMenu> {
         }
       },
       itemBuilder: (_) => [
+        if (widget.onTwoFactorSettings != null)
+          PopupMenuItem(value: 'two_factor', child: Text(l10n.twoFactorTitle)),
         PopupMenuItem(value: 'about', child: Text(l10n.aboutApp)),
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
           PopupMenuItem(

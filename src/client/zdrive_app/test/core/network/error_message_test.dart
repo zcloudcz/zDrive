@@ -178,4 +178,56 @@ void main() {
       );
     });
   });
+
+  group('describeAuthError for 2FA', () {
+    DioException validation(String path, String field) => DioException(
+      requestOptions: RequestOptions(path: path),
+      response: Response(
+        requestOptions: RequestOptions(path: path),
+        statusCode: 400,
+        data: {
+          'success': false,
+          'error': {
+            'code': 'VALIDATION_ERROR',
+            'message': 'One or more validation errors occurred.',
+            'validationErrors': {
+              field: ['x'],
+            },
+          },
+        },
+      ),
+    );
+
+    test('wrong code at login -> invalid code', () {
+      expect(
+        describeAuthError(validation('/auth/login/2fa', 'code'), en),
+        en.authTwoFactorInvalidCode,
+      );
+    });
+
+    test('spent or expired challenge at login -> start over', () {
+      expect(
+        describeAuthError(validation('/auth/login/2fa', 'challengeToken'), en),
+        en.authTwoFactorChallengeExpired,
+      );
+    });
+
+    test('wrong code when confirming enrollment -> invalid code', () {
+      expect(
+        describeAuthError(validation('/users/me/2fa/confirm', 'code'), cs),
+        cs.authTwoFactorInvalidCode,
+      );
+    });
+
+    test('disable: wrong password vs wrong code are told apart', () {
+      expect(
+        describeAuthError(validation('/users/me/2fa/disable', 'password'), en),
+        en.twoFactorPasswordInvalid,
+      );
+      expect(
+        describeAuthError(validation('/users/me/2fa/disable', 'code'), en),
+        en.authTwoFactorInvalidCode,
+      );
+    });
+  });
 }

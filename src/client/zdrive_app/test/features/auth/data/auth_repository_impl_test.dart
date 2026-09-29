@@ -4,6 +4,7 @@ import 'package:zdrive_app/core/auth/token_storage.dart';
 import 'package:zdrive_app/features/auth/data/auth_dtos.dart';
 import 'package:zdrive_app/features/auth/data/auth_remote_data_source.dart';
 import 'package:zdrive_app/features/auth/data/auth_repository_impl.dart';
+import 'package:zdrive_app/features/auth/domain/auth_repository.dart';
 
 class MockAuthRemoteDataSource extends Mock implements AuthRemoteDataSource {}
 
@@ -42,6 +43,68 @@ void main() {
           password: any(named: 'password'),
         ),
       ).thenAnswer(
+        (_) async => LoginResponseDto(
+          accessToken: 'zdrive-access',
+          refreshToken: 'zdrive-refresh',
+          expiresAt: DateTime.utc(2030),
+        ),
+      );
+
+      final result = await repository.login(
+        email: 'a@b.com',
+        password: 'password123',
+      );
+
+      expect(result, isA<LoginSucceeded>());
+      verify(() => tokenStorage.clearEntraRefreshToken()).called(1);
+    });
+  });
+
+  group('two-factor login', () {
+    test('login returns the challenge and stores no tokens when the account '
+        'has 2FA', () async {
+      when(
+        () => remoteDataSource.login(
+          email: any(named: 'email'),
+          password: any(named: 'password'),
+        ),
+      ).thenAnswer(
+        (_) async => const LoginResponseDto(
+          twoFactorRequired: true,
+          challengeToken: 'challenge-1',
+        ),
+      );
+
+      final result = await repository.login(
+        email: 'a@b.com',
+        password: 'password123',
+      );
+
+      expect(
+        result,
+        isA<LoginTwoFactorRequired>().having(
+          (r) => r.challengeToken,
+          'challengeToken',
+          'challenge-1',
+        ),
+      );
+      verifyNever(
+        () => tokenStorage.saveTokens(
+          accessToken: any(named: 'accessToken'),
+          refreshToken: any(named: 'refreshToken'),
+        ),
+      );
+    });
+
+    test('completeTwoFactorLogin stores the tokens, clears any stale Entra '
+        'refresh token and loads the profile', () async {
+      when(
+        () => remoteDataSource.loginTwoFactor(
+          challengeToken: 'challenge-1',
+          code: '123456',
+          recoveryCode: null,
+        ),
+      ).thenAnswer(
         (_) async => AuthResponseDto(
           accessToken: 'zdrive-access',
           refreshToken: 'zdrive-refresh',
@@ -49,8 +112,18 @@ void main() {
         ),
       );
 
-      await repository.login(email: 'a@b.com', password: 'password123');
+      final user = await repository.completeTwoFactorLogin(
+        challengeToken: 'challenge-1',
+        code: '123456',
+      );
 
+      expect(user.id, 'u1');
+      verify(
+        () => tokenStorage.saveTokens(
+          accessToken: 'zdrive-access',
+          refreshToken: 'zdrive-refresh',
+        ),
+      ).called(1);
       verify(() => tokenStorage.clearEntraRefreshToken()).called(1);
     });
   });

@@ -18,9 +18,13 @@ class ApiConstants {
   // Auth (auth-service)
   static const String authRegister = '/auth/register';
   static const String authLogin = '/auth/login';
+  static const String authLoginTwoFactor = '/auth/login/2fa';
   static const String authRefresh = '/auth/refresh';
   static const String authEntraExchange = '/auth/entra';
   static const String usersMe = '/users/me';
+  static const String twoFactorSetup = '/users/me/2fa/setup';
+  static const String twoFactorConfirm = '/users/me/2fa/confirm';
+  static const String twoFactorDisable = '/users/me/2fa/disable';
 
   // Files (file-service)
   static const String files = '/files';

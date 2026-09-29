@@ -11,7 +11,7 @@ class AuthRemoteDataSource {
 
   AuthRemoteDataSource(this._dio);
 
-  Future<AuthResponseDto> login({
+  Future<LoginResponseDto> login({
     required String email,
     required String password,
   }) async {
@@ -19,7 +19,46 @@ class AuthRemoteDataSource {
       ApiConstants.authLogin,
       data: {'email': email, 'password': password},
     );
+    return LoginResponseDto.fromJson(unwrapMap(response));
+  }
+
+  Future<AuthResponseDto> loginTwoFactor({
+    required String challengeToken,
+    String? code,
+    String? recoveryCode,
+  }) async {
+    final response = await _dio.post(
+      ApiConstants.authLoginTwoFactor,
+      data: {
+        'challengeToken': challengeToken,
+        'code': code,
+        'recoveryCode': recoveryCode,
+      },
+    );
     return AuthResponseDto.fromJson(unwrapMap(response));
+  }
+
+  Future<TwoFactorSetupDto> setupTwoFactor() async {
+    final response = await _dio.post(ApiConstants.twoFactorSetup);
+    return TwoFactorSetupDto.fromJson(unwrapMap(response));
+  }
+
+  Future<List<String>> confirmTwoFactor(String code) async {
+    final response = await _dio.post(
+      ApiConstants.twoFactorConfirm,
+      data: {'code': code},
+    );
+    return (unwrapMap(response)['recoveryCodes'] as List).cast<String>();
+  }
+
+  Future<void> disableTwoFactor({
+    required String password,
+    required String code,
+  }) async {
+    await _dio.post(
+      ApiConstants.twoFactorDisable,
+      data: {'password': password, 'code': code},
+    );
   }
 
   Future<AuthResponseDto> register({

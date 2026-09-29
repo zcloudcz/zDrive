@@ -31,6 +31,24 @@ final class LoginRequested extends AuthEvent {
   List<Object?> get props => [email, password];
 }
 
+/// Second step of a 2FA login: exactly one of [code] (authenticator app) and
+/// [recoveryCode]. The challenge comes from the current
+/// [AuthTwoFactorRequired] state, so it is not part of the event.
+final class TwoFactorCodeSubmitted extends AuthEvent {
+  final String? code;
+  final String? recoveryCode;
+
+  const TwoFactorCodeSubmitted({this.code, this.recoveryCode});
+
+  @override
+  List<Object?> get props => [code, recoveryCode];
+}
+
+/// Abandons a pending 2FA challenge and returns to the password form.
+final class TwoFactorCancelled extends AuthEvent {
+  const TwoFactorCancelled();
+}
+
 final class RegisterRequested extends AuthEvent {
   final String email;
   final String password;
@@ -94,6 +112,25 @@ final class Authenticated extends AuthState {
   List<Object?> get props => [user];
 }
 
+/// The password was accepted but the account has 2FA: no session yet, only a
+/// short-lived [challengeToken] to complete with a code. [submitting] and
+/// [error] live on this state (rather than AuthLoading/AuthError) so the code
+/// step stays on screen while a code is checked and after a wrong one.
+final class AuthTwoFactorRequired extends AuthState {
+  final String challengeToken;
+  final bool submitting;
+  final Object? error;
+
+  const AuthTwoFactorRequired(
+    this.challengeToken, {
+    this.submitting = false,
+    this.error,
+  });
+
+  @override
+  List<Object?> get props => [challengeToken, submitting, error];
+}
+
 final class Unauthenticated extends AuthState {
   const Unauthenticated();
 }
@@ -133,6 +170,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
        super(const AuthInitial()) {
     on<CheckAuthStatus>(_onCheckAuthStatus);
     on<LoginRequested>(_onLoginRequested);
+    on<TwoFactorCodeSubmitted>(_onTwoFactorCodeSubmitted);
+    on<TwoFactorCancelled>(
+      (event, emit) => emit(const Unauthenticated()),
+    );
     on<EntraLoginRequested>(_onEntraLoginRequested);
     on<RegisterRequested>(_onRegisterRequested);
     on<LogoutRequested>(_onLogoutRequested);
@@ -166,14 +207,40 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     emit(const AuthLoading());
     try {
-      final user = await _authRepository.login(
+      final result = await _authRepository.login(
         email: event.email,
         password: event.password,
       );
-      emit(Authenticated(user));
+      switch (result) {
+        case LoginSucceeded(:final user):
+          emit(Authenticated(user));
+        case LoginTwoFactorRequired(:final challengeToken):
+          emit(AuthTwoFactorRequired(challengeToken));
+      }
     } catch (e, st) {
       Diagnostics.error('auth.login_failed', e, st);
       emit(AuthError(e));
+    }
+  }
+
+  Future<void> _onTwoFactorCodeSubmitted(
+    TwoFactorCodeSubmitted event,
+    Emitter<AuthState> emit,
+  ) async {
+    final current = state;
+    if (current is! AuthTwoFactorRequired || current.submitting) return;
+    final challengeToken = current.challengeToken;
+    emit(AuthTwoFactorRequired(challengeToken, submitting: true));
+    try {
+      final user = await _authRepository.completeTwoFactorLogin(
+        challengeToken: challengeToken,
+        code: event.code,
+        recoveryCode: event.recoveryCode,
+      );
+      emit(Authenticated(user));
+    } catch (e, st) {
+      Diagnostics.error('auth.two_factor_failed', e, st);
+      emit(AuthTwoFactorRequired(challengeToken, error: e));
     }
   }
 

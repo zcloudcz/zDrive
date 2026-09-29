@@ -569,4 +569,101 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Conservation de tout sur cet appareil…';
+
+  @override
+  String get twoFactorTitle => 'Authentification à deux facteurs';
+
+  @override
+  String get twoFactorPrompt =>
+      'Saisissez le code à 6 chiffres de votre application d\'authentification.';
+
+  @override
+  String get twoFactorRecoveryPrompt =>
+      'Saisissez l\'un de vos codes de récupération.';
+
+  @override
+  String get twoFactorCodeLabel => 'Code à 6 chiffres';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Code de récupération';
+
+  @override
+  String get twoFactorVerifyButton => 'Vérifier';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Utiliser un code de récupération';
+
+  @override
+  String get twoFactorUseAuthenticator =>
+      'Utiliser un code de l\'application d\'authentification';
+
+  @override
+  String get twoFactorBackToSignIn => 'Retour à la connexion';
+
+  @override
+  String get authTwoFactorInvalidCode =>
+      'Ce code n\'est pas valide. Veuillez réessayer.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'Cette connexion a expiré. Revenez en arrière et connectez-vous à nouveau.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'L\'authentification à deux facteurs est désactivée. Activez-la pour exiger un code de votre application d\'authentification à chaque connexion.';
+
+  @override
+  String get twoFactorStatusOn =>
+      'L\'authentification à deux facteurs est activée.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'L\'authentification à deux facteurs n\'est pas disponible pour ce compte. La sécurité de la connexion est gérée par votre compte ZCLOUD.';
+
+  @override
+  String get twoFactorEnable => 'Activer';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Scannez ce code QR avec votre application d\'authentification ou saisissez la clé de configuration manuellement. Saisissez ensuite le code à 6 chiffres affiché par l\'application.';
+
+  @override
+  String get twoFactorSetupKey => 'Clé de configuration';
+
+  @override
+  String get twoFactorCopy => 'Copier';
+
+  @override
+  String get twoFactorCopied => 'Copié';
+
+  @override
+  String get twoFactorConfirmButton => 'Confirmer et activer';
+
+  @override
+  String get twoFactorRecoveryCodesTitle =>
+      'Enregistrez vos codes de récupération';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Chaque code ne fonctionne qu\'une seule fois si vous perdez l\'accès à votre application d\'authentification. Ils ne sont affichés que maintenant.';
+
+  @override
+  String get twoFactorCopyCodes => 'Copier tous les codes';
+
+  @override
+  String get twoFactorDone => 'Terminé';
+
+  @override
+  String get twoFactorDisable => 'Désactiver';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Saisissez votre mot de passe et un code actuel (ou un code de récupération) pour désactiver l\'authentification à deux facteurs.';
+
+  @override
+  String get twoFactorDisableConfirm =>
+      'Désactiver l\'authentification à deux facteurs';
+
+  @override
+  String get twoFactorPasswordInvalid => 'Le mot de passe n\'est pas correct.';
 }

@@ -1115,6 +1115,174 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Keeping everything on this device…'**
   String get cloudMigrationKeeping;
+
+  /// No description provided for @twoFactorTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Two-factor authentication'**
+  String get twoFactorTitle;
+
+  /// No description provided for @twoFactorPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the 6-digit code from your authenticator app.'**
+  String get twoFactorPrompt;
+
+  /// No description provided for @twoFactorRecoveryPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter one of your recovery codes.'**
+  String get twoFactorRecoveryPrompt;
+
+  /// No description provided for @twoFactorCodeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'6-digit code'**
+  String get twoFactorCodeLabel;
+
+  /// No description provided for @twoFactorRecoveryCodeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovery code'**
+  String get twoFactorRecoveryCodeLabel;
+
+  /// No description provided for @twoFactorVerifyButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify'**
+  String get twoFactorVerifyButton;
+
+  /// No description provided for @twoFactorUseRecoveryCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a recovery code'**
+  String get twoFactorUseRecoveryCode;
+
+  /// No description provided for @twoFactorUseAuthenticator.
+  ///
+  /// In en, this message translates to:
+  /// **'Use an authenticator code'**
+  String get twoFactorUseAuthenticator;
+
+  /// No description provided for @twoFactorBackToSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to sign in'**
+  String get twoFactorBackToSignIn;
+
+  /// No description provided for @authTwoFactorInvalidCode.
+  ///
+  /// In en, this message translates to:
+  /// **'That code is not valid. Please try again.'**
+  String get authTwoFactorInvalidCode;
+
+  /// No description provided for @authTwoFactorChallengeExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'This sign-in has expired. Go back and sign in again.'**
+  String get authTwoFactorChallengeExpired;
+
+  /// No description provided for @twoFactorStatusOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Two-factor authentication is off. Turn it on to require a code from your authenticator app when you sign in.'**
+  String get twoFactorStatusOff;
+
+  /// No description provided for @twoFactorStatusOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Two-factor authentication is on.'**
+  String get twoFactorStatusOn;
+
+  /// No description provided for @twoFactorUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Two-factor authentication is not available for this account. Sign-in security is managed by your ZCLOUD account.'**
+  String get twoFactorUnavailable;
+
+  /// No description provided for @twoFactorEnable.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get twoFactorEnable;
+
+  /// No description provided for @twoFactorSetupInstructions.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan this QR code with your authenticator app, or enter the setup key manually. Then type the 6-digit code the app shows.'**
+  String get twoFactorSetupInstructions;
+
+  /// No description provided for @twoFactorSetupKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Setup key'**
+  String get twoFactorSetupKey;
+
+  /// No description provided for @twoFactorCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get twoFactorCopy;
+
+  /// No description provided for @twoFactorCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get twoFactorCopied;
+
+  /// No description provided for @twoFactorConfirmButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm and turn on'**
+  String get twoFactorConfirmButton;
+
+  /// No description provided for @twoFactorRecoveryCodesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Save your recovery codes'**
+  String get twoFactorRecoveryCodesTitle;
+
+  /// No description provided for @twoFactorRecoveryCodesInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Each code works once if you lose access to your authenticator app. They are shown only now.'**
+  String get twoFactorRecoveryCodesInfo;
+
+  /// No description provided for @twoFactorCopyCodes.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy all codes'**
+  String get twoFactorCopyCodes;
+
+  /// No description provided for @twoFactorDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get twoFactorDone;
+
+  /// No description provided for @twoFactorDisable.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off'**
+  String get twoFactorDisable;
+
+  /// No description provided for @twoFactorDisableInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your password and a current code (or a recovery code) to turn off two-factor authentication.'**
+  String get twoFactorDisableInfo;
+
+  /// No description provided for @twoFactorDisableConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off two-factor authentication'**
+  String get twoFactorDisableConfirm;
+
+  /// No description provided for @twoFactorPasswordInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'The password is not correct.'**
+  String get twoFactorPasswordInvalid;
 }
 
 class _AppLocalizationsDelegate

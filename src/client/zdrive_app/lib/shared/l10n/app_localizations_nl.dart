@@ -565,4 +565,97 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Alles op dit apparaat bewaren…';
+
+  @override
+  String get twoFactorTitle => 'Verificatie in twee stappen';
+
+  @override
+  String get twoFactorPrompt =>
+      'Voer de 6-cijferige code uit je authenticator-app in.';
+
+  @override
+  String get twoFactorRecoveryPrompt => 'Voer een van je herstelcodes in.';
+
+  @override
+  String get twoFactorCodeLabel => '6-cijferige code';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Herstelcode';
+
+  @override
+  String get twoFactorVerifyButton => 'Verifiëren';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Een herstelcode gebruiken';
+
+  @override
+  String get twoFactorUseAuthenticator =>
+      'Een code uit de authenticator-app gebruiken';
+
+  @override
+  String get twoFactorBackToSignIn => 'Terug naar inloggen';
+
+  @override
+  String get authTwoFactorInvalidCode =>
+      'Die code is niet geldig. Probeer het opnieuw.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'Deze inlogpoging is verlopen. Ga terug en log opnieuw in.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'Verificatie in twee stappen staat uit. Zet het aan om bij het inloggen een code uit je authenticator-app te vragen.';
+
+  @override
+  String get twoFactorStatusOn => 'Verificatie in twee stappen staat aan.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'Verificatie in twee stappen is niet beschikbaar voor dit account. De inlogbeveiliging wordt beheerd via je ZCLOUD-account.';
+
+  @override
+  String get twoFactorEnable => 'Aanzetten';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Scan deze QR-code met je authenticator-app of voer de installatiesleutel handmatig in. Typ daarna de 6-cijferige code die de app toont.';
+
+  @override
+  String get twoFactorSetupKey => 'Installatiesleutel';
+
+  @override
+  String get twoFactorCopy => 'Kopiëren';
+
+  @override
+  String get twoFactorCopied => 'Gekopieerd';
+
+  @override
+  String get twoFactorConfirmButton => 'Bevestigen en aanzetten';
+
+  @override
+  String get twoFactorRecoveryCodesTitle => 'Bewaar je herstelcodes';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Elke code werkt één keer als je geen toegang meer hebt tot je authenticator-app. Ze worden alleen nu getoond.';
+
+  @override
+  String get twoFactorCopyCodes => 'Alle codes kopiëren';
+
+  @override
+  String get twoFactorDone => 'Klaar';
+
+  @override
+  String get twoFactorDisable => 'Uitzetten';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Voer je wachtwoord en een actuele code (of een herstelcode) in om verificatie in twee stappen uit te zetten.';
+
+  @override
+  String get twoFactorDisableConfirm => 'Verificatie in twee stappen uitzetten';
+
+  @override
+  String get twoFactorPasswordInvalid => 'Het wachtwoord is onjuist.';
 }

@@ -561,4 +561,96 @@ class AppLocalizationsSk extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Ponecháva sa všetko v tomto zariadení…';
+
+  @override
+  String get twoFactorTitle => 'Dvojfázové overenie';
+
+  @override
+  String get twoFactorPrompt =>
+      'Zadajte šesťmiestny kód z overovacej aplikácie.';
+
+  @override
+  String get twoFactorRecoveryPrompt => 'Zadajte jeden zo záložných kódov.';
+
+  @override
+  String get twoFactorCodeLabel => 'Šesťmiestny kód';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Záložný kód';
+
+  @override
+  String get twoFactorVerifyButton => 'Overiť';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Použiť záložný kód';
+
+  @override
+  String get twoFactorUseAuthenticator => 'Použiť kód z overovacej aplikácie';
+
+  @override
+  String get twoFactorBackToSignIn => 'Späť na prihlásenie';
+
+  @override
+  String get authTwoFactorInvalidCode =>
+      'Kód nie je platný. Skúste to prosím znova.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'Platnosť prihlásenia vypršala. Vráťte sa a prihláste sa znova.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'Dvojfázové overenie je vypnuté. Po zapnutí bude prihlásenie vyžadovať kód z overovacej aplikácie.';
+
+  @override
+  String get twoFactorStatusOn => 'Dvojfázové overenie je zapnuté.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'Dvojfázové overenie nie je pre tento účet dostupné. Zabezpečenie prihlásenia rieši váš účet ZCLOUD.';
+
+  @override
+  String get twoFactorEnable => 'Zapnúť';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Naskenujte QR kód overovacou aplikáciou alebo zadajte kľúč ručne. Potom prepíšte šesťmiestny kód, ktorý aplikácia zobrazí.';
+
+  @override
+  String get twoFactorSetupKey => 'Kľúč na nastavenie';
+
+  @override
+  String get twoFactorCopy => 'Kopírovať';
+
+  @override
+  String get twoFactorCopied => 'Skopírované';
+
+  @override
+  String get twoFactorConfirmButton => 'Potvrdiť a zapnúť';
+
+  @override
+  String get twoFactorRecoveryCodesTitle => 'Uložte si záložné kódy';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Každý kód funguje raz, ak stratíte prístup k overovacej aplikácii. Zobrazia sa iba teraz.';
+
+  @override
+  String get twoFactorCopyCodes => 'Kopírovať všetky kódy';
+
+  @override
+  String get twoFactorDone => 'Hotovo';
+
+  @override
+  String get twoFactorDisable => 'Vypnúť';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Na vypnutie dvojfázového overenia zadajte heslo a aktuálny kód (alebo záložný kód).';
+
+  @override
+  String get twoFactorDisableConfirm => 'Vypnúť dvojfázové overenie';
+
+  @override
+  String get twoFactorPasswordInvalid => 'Heslo nie je správne.';
 }

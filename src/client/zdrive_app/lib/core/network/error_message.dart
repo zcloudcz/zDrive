@@ -44,6 +44,21 @@ String describeAuthError(Object error, AppLocalizations l10n) {
     if (path == '/auth/login' && (statusCode == 404 || statusCode == 401)) {
       return l10n.authInvalidCredentials;
     }
+    if (path == '/auth/login/2fa' && statusCode == 400) {
+      // The backend answers 400 for both a wrong code and a challenge that is
+      // unknown / expired / used up; the second cannot be fixed by retyping.
+      return _hasValidationError(error, 'challengeToken')
+          ? l10n.authTwoFactorChallengeExpired
+          : l10n.authTwoFactorInvalidCode;
+    }
+    if (path == '/users/me/2fa/confirm' && statusCode == 400) {
+      return l10n.authTwoFactorInvalidCode;
+    }
+    if (path == '/users/me/2fa/disable' && statusCode == 400) {
+      return _hasValidationError(error, 'password')
+          ? l10n.twoFactorPasswordInvalid
+          : l10n.authTwoFactorInvalidCode;
+    }
     if (path == '/auth/register' && statusCode == 409) {
       return l10n.authEmailAlreadyRegistered;
     }
@@ -59,4 +74,13 @@ String describeAuthError(Object error, AppLocalizations l10n) {
     }
   }
   return describeError(error, l10n);
+}
+
+/// True when a 400 from `ExceptionHandlingMiddleware` carries a validation
+/// error for [field] (`error.validationErrors` is keyed by property name).
+bool _hasValidationError(DioException error, String field) {
+  final body = error.response?.data;
+  if (body is! Map) return false;
+  final errors = (body['error'] as Map?)?['validationErrors'];
+  return errors is Map && errors.containsKey(field);
 }

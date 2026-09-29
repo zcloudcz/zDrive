@@ -541,4 +541,89 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => '正在将所有内容保留在此设备上…';
+
+  @override
+  String get twoFactorTitle => '两步验证';
+
+  @override
+  String get twoFactorPrompt => '请输入验证器应用中显示的6位验证码。';
+
+  @override
+  String get twoFactorRecoveryPrompt => '请输入其中一个恢复码。';
+
+  @override
+  String get twoFactorCodeLabel => '6位验证码';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => '恢复码';
+
+  @override
+  String get twoFactorVerifyButton => '验证';
+
+  @override
+  String get twoFactorUseRecoveryCode => '使用恢复码';
+
+  @override
+  String get twoFactorUseAuthenticator => '使用验证器验证码';
+
+  @override
+  String get twoFactorBackToSignIn => '返回登录';
+
+  @override
+  String get authTwoFactorInvalidCode => '验证码无效,请重试。';
+
+  @override
+  String get authTwoFactorChallengeExpired => '此次登录已过期。请返回并重新登录。';
+
+  @override
+  String get twoFactorStatusOff => '两步验证已关闭。开启后,登录时需要输入验证器应用中的验证码。';
+
+  @override
+  String get twoFactorStatusOn => '两步验证已开启。';
+
+  @override
+  String get twoFactorUnavailable => '此账户无法使用两步验证。登录安全由您的 ZCLOUD 账户管理。';
+
+  @override
+  String get twoFactorEnable => '开启';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      '使用验证器应用扫描此二维码,或手动输入设置密钥,然后输入应用显示的6位验证码。';
+
+  @override
+  String get twoFactorSetupKey => '设置密钥';
+
+  @override
+  String get twoFactorCopy => '复制';
+
+  @override
+  String get twoFactorCopied => '已复制';
+
+  @override
+  String get twoFactorConfirmButton => '确认并开启';
+
+  @override
+  String get twoFactorRecoveryCodesTitle => '请保存您的恢复码';
+
+  @override
+  String get twoFactorRecoveryCodesInfo => '如果您无法访问验证器应用,每个恢复码可使用一次。恢复码仅在此时显示。';
+
+  @override
+  String get twoFactorCopyCodes => '复制所有恢复码';
+
+  @override
+  String get twoFactorDone => '完成';
+
+  @override
+  String get twoFactorDisable => '关闭';
+
+  @override
+  String get twoFactorDisableInfo => '请输入密码和当前验证码(或恢复码)以关闭两步验证。';
+
+  @override
+  String get twoFactorDisableConfirm => '关闭两步验证';
+
+  @override
+  String get twoFactorPasswordInvalid => '密码不正确。';
 }
