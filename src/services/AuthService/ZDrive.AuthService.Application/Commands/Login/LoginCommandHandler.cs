@@ -65,9 +65,14 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, LoginRes
 
     private async Task<string> CreateChallengeAsync(Guid userId, CancellationToken cancellationToken)
     {
-        // One live challenge per user: drop earlier ones (expired, used or abandoned).
+        // Housekeeping: drop this user's dead challenges. Live ones stay, so a
+        // second login (another device, or someone who only knows the
+        // password) cannot invalidate a challenge that is being completed.
+        var now = DateTime.UtcNow;
         _db.TwoFactorChallenges.RemoveRange(
-            await _db.TwoFactorChallenges.Where(c => c.UserId == userId).ToListAsync(cancellationToken));
+            await _db.TwoFactorChallenges
+                .Where(c => c.UserId == userId && (c.UsedAt != null || c.ExpiresAt < now))
+                .ToListAsync(cancellationToken));
 
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         _db.TwoFactorChallenges.Add(new Entities.TwoFactorChallenge
