@@ -16,7 +16,7 @@ public sealed class GetAlbumPhotosQueryHandler : IRequestHandler<GetAlbumPhotosQ
     public async Task<PagedResult<PhotoDto>> Handle(GetAlbumPhotosQuery request, CancellationToken cancellationToken)
     {
         var albumExists = await _db.Albums.AsNoTracking()
-            .AnyAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId, cancellationToken);
+            .AnyAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId && a.TenantId == request.TenantId, cancellationToken);
         if (!albumExists)
             throw new NotFoundException("Album", request.AlbumId);
 

@@ -10,8 +10,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration,
-        bool isDevelopment)
+        IConfiguration configuration)
     {
         // EF Core + PostgreSQL
         services.AddDbContext<PhotoDbContext>(options =>

@@ -35,7 +35,7 @@ ZDrive.StorageService.Infrastructure.DependencyInjection.AddInfrastructure(build
 ZDrive.SyncService.Application.DependencyInjection.AddApplication(builder.Services);
 ZDrive.SyncService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
 ZDrive.PhotoService.Application.DependencyInjection.AddApplication(builder.Services);
-ZDrive.PhotoService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
+ZDrive.PhotoService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration);
 
 // One validation behavior for all five MediatR assemblies.
 builder.Services.AddTransient(typeof(MediatR.IPipelineBehavior<,>), typeof(ZDrive.Shared.Behaviors.ValidationBehavior<,>));

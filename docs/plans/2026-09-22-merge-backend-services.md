@@ -556,7 +556,12 @@ Předpoklad: PR z tohoto plánu je zmergovaný, `dotnet publish src/services/Api
    založit `zdrive-api` a `zdrive-auth` smazat s ostatními — víc kroků, stejný výsledek.
 2. **App settings na `zdrive-auth` doplnit** (hodnoty opsat z `zdrive-file`/`-storage`/`-sync`):
    `ConnectionStrings__FileDb`, `ConnectionStrings__StorageDb`, `ConnectionStrings__SyncDb`
-   (stejný server jako `AuthDb`, liší se jen `Search Path=files|storage|sync`),
+   a `ConnectionStrings__PhotoDb` (PhotoService je od PR #80 pátý modul Api; stejný
+   server jako `AuthDb`, liší se jen `Search Path=files|storage|sync|photos`).
+   **`PhotoDb` musí být nastaven PŘED nasazením ZIPu:** `appsettings.json` má localhost
+   fallback a `MigrateWithBaselineAsync` běží před `app.Run()`, takže chybějící/špatný
+   connection string shodí celý proces (auth/files/sync také) do crash-loopu,
+   pro žádnou z pěti DB není mimo Development guard,
    `AZURE_STORAGE_CONNECTION_STRING` (nebo `ConnectionStrings__AzureBlobStorage`),
    `Sharing__DownloadGrantKey` (stejná hodnota, jakou má dnes file i storage),
    `Versioning__MaxVersionsPerFile` / `Storage__DefaultUserQuotaBytes` pokud jsou

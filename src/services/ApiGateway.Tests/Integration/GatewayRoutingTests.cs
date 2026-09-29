@@ -55,6 +55,18 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    [Theory]
+    [InlineData("photos-route")]
+    [InlineData("albums-route")]
+    [InlineData("memories-route")]
+    public void PhotoRoutes_PointAtTheMergedApiCluster(string routeId)
+    {
+        var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();
+
+        config.Routes.Should().ContainSingle(r => r.RouteId == routeId).Which
+            .ClusterId.Should().Be("apiCluster");
+    }
+
     /// <summary>
     /// The SignalR hub route deliberately carries no AuthorizationPolicy.
     /// SignalR passes its token in the <c>access_token</c> query string
@@ -70,18 +82,6 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
     /// developer running NotificationService locally on :5106 would get a real
     /// 401 from the hub's [Authorize] and turn a status-code assertion red.
     /// </remarks>
-    [Theory]
-    [InlineData("photos-route")]
-    [InlineData("albums-route")]
-    [InlineData("memories-route")]
-    public void PhotoRoutes_PointAtTheMergedApiCluster(string routeId)
-    {
-        var config = _factory.Services.GetRequiredService<IProxyConfigProvider>().GetConfig();
-
-        config.Routes.Should().ContainSingle(r => r.RouteId == routeId).Which
-            .ClusterId.Should().Be("apiCluster");
-    }
-
     [Fact]
     public void SyncHubRoute_IsRoutedWithoutAuthorizationPolicy()
     {

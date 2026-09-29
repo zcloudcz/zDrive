@@ -118,12 +118,13 @@ docker-compose one:
 | Define | Default | Pass it when |
 |--------|---------|--------------|
 | `API_BASE_URL` | `http://localhost:5100/api/v1` | Building for a deployed gateway — CI does this for the Pages build (`.github/workflows/deploy-web.yml`) |
-| `PHOTOS_ENABLED` | `false` | Running PhotoService locally. PhotoService now runs inside the Api host but is **not deployed yet**, and NotificationService is **not deployed** (MVP scope), so a deployed build can answer 404/502 for their routes; the Photos tab and its route are therefore hidden by default |
+| `PHOTOS_ENABLED` | `false` | Running the photo backend locally or against a gateway whose Api host has the photo module deployed. PhotoService is part of the merged Api host, so once that build is deployed the photo routes are served by it (no separate photo service). NotificationService is still **not deployed** (MVP scope) and answers 502 through the gateway; the Photos tab and its route are hidden by default until the backend is rolled out |
 | `ENTRA_CLIENT_ID` | `` (empty) | Enabling Entra sign-in via Drive's own Entra app registration — web (ADR `docs/adr/0002-shared-zcloud-login-entra-sso.md`) and, on the same registration, iOS/Android/Windows (ADR `docs/adr/0003-native-entra-sign-in.md`; macOS/Linux stay password-only). Empty is the safety gate: with no client id the "Sign in with your ZCLOUD account" button on the login page does not render at all, on any platform. No production registration exists yet — see ADR 0002's Migration order step 1 for what a human needs to create in the Entra admin portal first |
 | `ENTRA_API_SCOPE` | `` (empty) | Same feature, same safety gate as `ENTRA_CLIENT_ID` — the sign-in button needs BOTH set to show, since a client id with no scope would still redirect through the whole Entra flow only to fail far from the cause. The scope requested alongside `openid`, e.g. `api://<drive-api-app-id>/access_as_user`; depends on how Drive's API app registration exposes its scope |
 
-`docker-compose up` **does** start PhotoService, so local work on photos needs
-the flag or the tab will not be there:
+`docker-compose up` only starts infrastructure; the photo backend runs inside
+the Api host (`dotnet run --project src/services/Api`), so local work on photos
+needs the Api running and the flag, or the tab will not be there:
 
 ```bash
 flutter run -d windows --dart-define=PHOTOS_ENABLED=true
