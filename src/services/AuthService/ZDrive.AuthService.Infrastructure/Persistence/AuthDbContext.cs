@@ -12,6 +12,8 @@ public sealed class AuthDbContext : DbContext, IAuthDbContext
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ExternalIdentity> ExternalIdentities => Set<ExternalIdentity>();
+    public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
+    public DbSet<TwoFactorChallenge> TwoFactorChallenges => Set<TwoFactorChallenge>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -12,6 +12,7 @@ public static class DependencyInjection
 
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(assembly));
         services.AddValidatorsFromAssembly(assembly);
+        services.AddScoped<Auth.TwoFactorVerifier>();
 
         return services;
     }

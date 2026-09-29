@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using ZDrive.AuthService.Application.Auth;
 using ZDrive.AuthService.Application.Commands.EntraExchange;
 using ZDrive.AuthService.Application.Commands.Login;
+using ZDrive.AuthService.Application.Commands.LoginTwoFactor;
 using ZDrive.AuthService.Application.Commands.RefreshToken;
 using ZDrive.AuthService.Application.Commands.Register;
 using ZDrive.AuthService.Application.DTOs;
@@ -35,10 +36,19 @@ public sealed class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
-    [ProducesResponseType(typeof(ApiResponse<AuthTokenDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<LoginResultDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Login([FromBody] LoginCommand command, CancellationToken ct)
+    {
+        var result = await _mediator.Send(command, ct);
+        return Ok(ApiResponse<LoginResultDto>.Ok(result));
+    }
+
+    [HttpPost("login/2fa")]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> LoginTwoFactor([FromBody] LoginTwoFactorCommand command, CancellationToken ct)
     {
         var result = await _mediator.Send(command, ct);
         return Ok(ApiResponse<AuthTokenDto>.Ok(result));

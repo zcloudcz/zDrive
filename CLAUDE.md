@@ -215,6 +215,13 @@ Custom JWT implementation. Access token (short-lived, 15min) + refresh token
 (long-lived, 30 days, rotated on use). Roles: owner, admin, member, viewer.
 Tenant-scoped for B2B.
 
+Optional TOTP 2FA for password accounts (RFC 6238, recovery codes). Login then
+returns `twoFactorRequired` + a single-use 5-minute `challengeToken` instead of
+tokens, completed by `POST /auth/login/2fa`. Secrets are encrypted with ASP.NET
+Core Data Protection, so the key ring must persist across deploys: set
+`DataProtection:KeysPath` where the default location is not persistent, or
+every enrolled user is locked out. Entra accounts get MFA from Entra instead.
+
 ### Multi-tenant isolation
 
 - Blob storage: `{tenantId}/{userId}/` path prefix.

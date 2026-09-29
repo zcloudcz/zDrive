@@ -7,4 +7,7 @@ public sealed record UserDto(
     string? AvatarUrl,
     string Role,
     Guid TenantId,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    bool TwoFactorEnabled,
+    // False for Entra-only accounts: no local password, so no 2FA setup.
+    bool HasPassword);

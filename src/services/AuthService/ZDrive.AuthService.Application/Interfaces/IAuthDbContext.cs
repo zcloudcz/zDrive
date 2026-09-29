@@ -9,5 +9,7 @@ public interface IAuthDbContext
     DbSet<Tenant> Tenants { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
     DbSet<ExternalIdentity> ExternalIdentities { get; }
+    DbSet<RecoveryCode> RecoveryCodes { get; }
+    DbSet<TwoFactorChallenge> TwoFactorChallenges { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

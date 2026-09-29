@@ -26,6 +26,8 @@ public sealed class GetCurrentUserQueryHandler : IRequestHandler<GetCurrentUserQ
             user.AvatarUrl,
             user.Role.ToString(),
             user.TenantId,
-            user.CreatedAt);
+            user.CreatedAt,
+            user.TwoFactorEnabled,
+            user.PasswordHash is not null);
     }
 }

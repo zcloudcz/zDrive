@@ -23,6 +23,15 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.PasswordHash)
             .HasMaxLength(512);
 
+        builder.Property(u => u.TwoFactorSecretProtected)
+            .HasMaxLength(512);
+
+        // Two concurrent uses of the same TOTP code: the second save fails.
+        builder.Property(u => u.TwoFactorLastUsedStep)
+            .IsConcurrencyToken();
+
+        builder.Ignore(u => u.TwoFactorEnabled);
+
         builder.Property(u => u.DisplayName)
             .IsRequired()
             .HasMaxLength(200);
