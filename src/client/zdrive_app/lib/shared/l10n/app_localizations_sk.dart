@@ -561,4 +561,22 @@ class AppLocalizationsSk extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Ponecháva sa všetko v tomto zariadení…';
+
+  @override
+  String get previewNotAvailable => 'Náhľad nie je k dispozícii';
+
+  @override
+  String get previewTooLarge =>
+      'Súbor je príliš veľký na náhľad. Stiahnite si ho a otvorte.';
+
+  @override
+  String get previewUnsupported =>
+      'Tento typ súboru nie je možné zobraziť v náhľade. Stiahnite si ho a otvorte.';
+
+  @override
+  String get previewImageFailed =>
+      'Tento obrázok sa na tomto zariadení nedá zobraziť. Stiahnite si ho a otvorte.';
+
+  @override
+  String get preview => 'Náhľad';
 }

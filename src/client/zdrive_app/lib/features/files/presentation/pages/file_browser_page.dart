@@ -29,6 +29,7 @@ import '../widgets/file_list_item.dart';
 import '../widgets/rename_dialog.dart';
 import '../widgets/share_dialog.dart';
 import '../widgets/version_history_dialog.dart';
+import 'file_preview_page.dart';
 
 class FileBrowserPage extends StatelessWidget {
   final String? folderId;
@@ -456,6 +457,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
           onKeepOnDevice: offline.keep,
           onFreeUp: offline.freeUp,
           onTap: () => _onFileTap(context, file),
+          onDownload: () => _downloadFile(context, file),
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
@@ -482,6 +484,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
           onKeepOnDevice: offline.keep,
           onFreeUp: offline.freeUp,
           onTap: () => _onFileTap(context, file),
+          onDownload: () => _downloadFile(context, file),
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
@@ -496,7 +499,15 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       context.go('/home/files/folder/${file.id}');
       return;
     }
-    _downloadFile(context, file);
+    FilePreviewPage.show(
+      context,
+      fileName: file.name,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      openContent: () => getIt<FileRepository>().downloadFileStream(file.id),
+      onDownload: (previewContext) => _downloadFile(previewContext, file),
+      onShare: (previewContext) => _showShareDialog(previewContext, file),
+    );
   }
 
   Future<void> _downloadFile(BuildContext context, FileItem file) async {

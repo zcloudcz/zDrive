@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "Speicherplatz wird freigegeben…",
   "cloudMigrationFreed": "{count} Dateien freigegeben, {size}",
   "freeUpKeptPinned": "{count} auf diesem Gerät behalten: immer behalten",
-  "cloudMigrationKeeping": "Alles wird auf diesem Gerät behalten…"
+  "cloudMigrationKeeping": "Alles wird auf diesem Gerät behalten…",
+  "preview": "Vorschau",
+  "previewNotAvailable": "Vorschau nicht verfügbar",
+  "previewTooLarge": "Diese Datei ist zu groß für die Vorschau. Lade sie herunter, um sie zu öffnen.",
+  "previewUnsupported": "Dieser Dateityp kann nicht in der Vorschau angezeigt werden. Lade die Datei herunter, um sie zu öffnen.",
+  "previewImageFailed": "Dieses Bild kann auf diesem Gerät nicht angezeigt werden. Lade es herunter, um es zu öffnen."
 }

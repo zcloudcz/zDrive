@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "正在释放空间…",
   "cloudMigrationFreed": "已释放 {count} 个文件，{size}",
   "freeUpKeptPinned": "{count} 项已保留在此设备上: 始终保留",
-  "cloudMigrationKeeping": "正在将所有内容保留在此设备上…"
+  "cloudMigrationKeeping": "正在将所有内容保留在此设备上…",
+  "preview": "预览",
+  "previewNotAvailable": "无法预览",
+  "previewTooLarge": "此文件太大，无法预览。请下载后打开。",
+  "previewUnsupported": "此类型的文件无法预览。请下载后打开。",
+  "previewImageFailed": "此设备无法显示这张图片。请下载后打开。"
 }

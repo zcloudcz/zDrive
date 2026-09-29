@@ -570,4 +570,22 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Alles wird auf diesem Gerät behalten…';
+
+  @override
+  String get previewNotAvailable => 'Vorschau nicht verfügbar';
+
+  @override
+  String get previewTooLarge =>
+      'Diese Datei ist zu groß für die Vorschau. Lade sie herunter, um sie zu öffnen.';
+
+  @override
+  String get previewUnsupported =>
+      'Dieser Dateityp kann nicht in der Vorschau angezeigt werden. Lade die Datei herunter, um sie zu öffnen.';
+
+  @override
+  String get previewImageFailed =>
+      'Dieses Bild kann auf diesem Gerät nicht angezeigt werden. Lade es herunter, um es zu öffnen.';
+
+  @override
+  String get preview => 'Vorschau';
 }

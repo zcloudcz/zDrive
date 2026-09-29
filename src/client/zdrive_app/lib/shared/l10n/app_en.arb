@@ -246,5 +246,10 @@
   "@cloudMigrationFreed": { "placeholders": { "count": { "type": "int" }, "size": { "type": "String" } } },
   "freeUpKeptPinned": "{count} kept on this device: always kept",
   "@freeUpKeptPinned": { "placeholders": { "count": { "type": "int" } } },
-  "cloudMigrationKeeping": "Keeping everything on this device…"
+  "cloudMigrationKeeping": "Keeping everything on this device…",
+  "previewNotAvailable": "Preview not available",
+  "previewTooLarge": "This file is too large to preview. Download it to open it.",
+  "previewUnsupported": "This type of file cannot be previewed. Download it to open it.",
+  "previewImageFailed": "This image cannot be displayed on this device. Download it to open it.",
+  "preview": "Preview"
 }

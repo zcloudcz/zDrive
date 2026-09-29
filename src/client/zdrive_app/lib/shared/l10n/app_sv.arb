@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "Frigör utrymme…",
   "cloudMigrationFreed": "{count} filer frigjorda, {size}",
   "freeUpKeptPinned": "{count} behölls på den här enheten: behåll alltid",
-  "cloudMigrationKeeping": "Behåller allt på den här enheten…"
+  "cloudMigrationKeeping": "Behåller allt på den här enheten…",
+  "preview": "Förhandsvisning",
+  "previewNotAvailable": "Förhandsvisning inte tillgänglig",
+  "previewTooLarge": "Filen är för stor för förhandsvisning. Ladda ner den för att öppna den.",
+  "previewUnsupported": "Den här filtypen kan inte förhandsvisas. Ladda ner den för att öppna den.",
+  "previewImageFailed": "Den här bilden kan inte visas på den här enheten. Ladda ner den för att öppna den."
 }

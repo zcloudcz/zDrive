@@ -14,6 +14,9 @@ class FileGridItem extends StatelessWidget {
   final VoidCallback onShare;
   final VoidCallback onVersions;
 
+  /// Null hides the "Download" menu entry.
+  final VoidCallback? onDownload;
+
   /// Desktop selective-sync extras. Null on platforms without the sync engine
   /// (web, mobile): then no marker and no menu entries are shown.
   final OfflineStatus? offlineStatus;
@@ -28,6 +31,7 @@ class FileGridItem extends StatelessWidget {
     required this.onDelete,
     required this.onShare,
     required this.onVersions,
+    this.onDownload,
     this.offlineStatus,
     this.onKeepOnDevice,
     this.onFreeUp,
@@ -85,6 +89,8 @@ class FileGridItem extends StatelessWidget {
                           onDelete();
                         case 'share':
                           onShare();
+                        case 'download':
+                        onDownload?.call();
                         case 'versions':
                           onVersions();
                         case 'keep':
@@ -94,6 +100,9 @@ class FileGridItem extends StatelessWidget {
                       }
                     },
                     itemBuilder: (_) => [
+                      if (!file.isFolder && onDownload != null)
+                        PopupMenuItem(
+                            value: 'download', child: Text(l10n.download)),
                       PopupMenuItem(
                           value: 'rename', child: Text(l10n.rename)),
                       PopupMenuItem(

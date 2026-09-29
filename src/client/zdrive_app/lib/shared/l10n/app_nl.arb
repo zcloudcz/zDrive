@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "Ruimte vrijmaken…",
   "cloudMigrationFreed": "{count} bestanden vrijgemaakt, {size}",
   "freeUpKeptPinned": "{count} bewaard op dit apparaat: altijd bewaren",
-  "cloudMigrationKeeping": "Alles op dit apparaat bewaren…"
+  "cloudMigrationKeeping": "Alles op dit apparaat bewaren…",
+  "preview": "Voorbeeld",
+  "previewNotAvailable": "Voorbeeld niet beschikbaar",
+  "previewTooLarge": "Dit bestand is te groot voor een voorbeeld. Download het om het te openen.",
+  "previewUnsupported": "Van dit bestandstype kan geen voorbeeld worden getoond. Download het om het te openen.",
+  "previewImageFailed": "Deze afbeelding kan op dit apparaat niet worden weergegeven. Download de afbeelding om deze te openen."
 }

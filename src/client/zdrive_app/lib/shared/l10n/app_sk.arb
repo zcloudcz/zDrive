@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "Uvoľňuje sa miesto…",
   "cloudMigrationFreed": "Uvoľnených súborov: {count}, {size}",
   "freeUpKeptPinned": "{count} ponechaných v tomto zariadení: vždy ponechať",
-  "cloudMigrationKeeping": "Ponecháva sa všetko v tomto zariadení…"
+  "cloudMigrationKeeping": "Ponecháva sa všetko v tomto zariadení…",
+  "preview": "Náhľad",
+  "previewNotAvailable": "Náhľad nie je k dispozícii",
+  "previewTooLarge": "Súbor je príliš veľký na náhľad. Stiahnite si ho a otvorte.",
+  "previewUnsupported": "Tento typ súboru nie je možné zobraziť v náhľade. Stiahnite si ho a otvorte.",
+  "previewImageFailed": "Tento obrázok sa na tomto zariadení nedá zobraziť. Stiahnite si ho a otvorte."
 }

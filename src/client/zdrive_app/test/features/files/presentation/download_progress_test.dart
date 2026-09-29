@@ -84,7 +84,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('report.pdf'));
+    // A tap on the row opens the preview; the menu's "Download" entry is the
+    // direct download.
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Stáhnout'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   }

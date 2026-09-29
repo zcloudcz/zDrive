@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:dio/dio.dart';
@@ -9,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:zdrive_app/features/files/data/file_dtos.dart';
+import 'package:zdrive_app/features/files/presentation/pages/file_preview_page.dart';
 import 'package:zdrive_app/features/share_link/presentation/pages/share_link_page.dart';
 import 'package:zdrive_app/features/share_link/presentation/share_link_cubit.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
@@ -566,4 +569,55 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('Tap_SharedFileRow_OpensPreviewFromGrantStream', (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(root: folder, path: const [], children: [child]),
+    );
+    when(() => cubit.openPreviewStream(child))
+        .thenAnswer((_) => Stream.value(Uint8List.fromList(utf8.encode('hello'))));
+
+    await tester.pumpWidget(build());
+    await tester.tap(find.text('child.txt'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(FilePreviewPage), findsOneWidget);
+    expect(find.text('hello'), findsOneWidget);
+    verify(() => cubit.openPreviewStream(child)).called(1);
+  });
+
+  testWidgets('SingleFileCard_UnsupportedType_HasNoPreviewButton', (tester) async {
+    final docx = FileDto(
+      id: 'd1',
+      name: 'report.docx',
+      isFolder: false,
+      sizeBytes: 2048,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(root: docx, path: const [], children: null),
+    );
+
+    await tester.pumpWidget(build());
+
+    expect(find.text('Preview'), findsNothing);
+    expect(find.text('Download'), findsOneWidget);
+  });
+
+  testWidgets('SingleFileCard_PreviewableType_ShowsPreviewButton', (tester) async {
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(root: file, path: const [], children: null),
+    );
+
+    await tester.pumpWidget(build());
+
+    expect(find.text('Preview'), findsOneWidget);
+  });
 }

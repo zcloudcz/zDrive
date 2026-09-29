@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "Liberando espacio…",
   "cloudMigrationFreed": "{count} archivos liberados, {size}",
   "freeUpKeptPinned": "{count} conservados en este dispositivo: conservar siempre",
-  "cloudMigrationKeeping": "Conservando todo en este dispositivo…"
+  "cloudMigrationKeeping": "Conservando todo en este dispositivo…",
+  "preview": "Vista previa",
+  "previewNotAvailable": "Vista previa no disponible",
+  "previewTooLarge": "Este archivo es demasiado grande para la vista previa. Descárgalo para abrirlo.",
+  "previewUnsupported": "Este tipo de archivo no admite vista previa. Descárgalo para abrirlo.",
+  "previewImageFailed": "Esta imagen no se puede mostrar en este dispositivo. Descárgala para abrirla."
 }

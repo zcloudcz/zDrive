@@ -565,4 +565,22 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Alles op dit apparaat bewaren…';
+
+  @override
+  String get previewNotAvailable => 'Voorbeeld niet beschikbaar';
+
+  @override
+  String get previewTooLarge =>
+      'Dit bestand is te groot voor een voorbeeld. Download het om het te openen.';
+
+  @override
+  String get previewUnsupported =>
+      'Van dit bestandstype kan geen voorbeeld worden getoond. Download het om het te openen.';
+
+  @override
+  String get previewImageFailed =>
+      'Deze afbeelding kan op dit apparaat niet worden weergegeven. Download de afbeelding om deze te openen.';
+
+  @override
+  String get preview => 'Voorbeeld';
 }

@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "Libération d’espace…",
   "cloudMigrationFreed": "{count} fichiers libérés, {size}",
   "freeUpKeptPinned": "{count} conservés sur cet appareil : toujours conserver",
-  "cloudMigrationKeeping": "Conservation de tout sur cet appareil…"
+  "cloudMigrationKeeping": "Conservation de tout sur cet appareil…",
+  "preview": "Aperçu",
+  "previewNotAvailable": "Aperçu non disponible",
+  "previewTooLarge": "Ce fichier est trop volumineux pour être prévisualisé. Téléchargez-le pour l'ouvrir.",
+  "previewUnsupported": "Ce type de fichier ne peut pas être prévisualisé. Téléchargez-le pour l'ouvrir.",
+  "previewImageFailed": "Cette image ne peut pas être affichée sur cet appareil. Téléchargez-la pour l'ouvrir."
 }

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -242,6 +244,13 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
         emit(latest.copyWith(navigationError: () => e));
       }
     }
+  }
+
+  /// Lazy verified byte stream of [file] for the in-app preview — the same
+  /// grant-authenticated path as [download], read into memory instead of saved.
+  Stream<Uint8List> openPreviewStream(FileDto file) async* {
+    final download = await _dataSource.openDownload(token, file.id);
+    yield* download.content;
   }
 
   Future<void> download(FileDto file) async {

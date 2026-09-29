@@ -12,6 +12,8 @@ import '../../../../shared/l10n/relative_time.dart';
 import '../../../../shared/theme/app_theme.dart';
 import '../../../../shared/widgets/brand_lockup.dart';
 import '../../../files/data/file_dtos.dart';
+import '../../../files/domain/file_preview_type.dart';
+import '../../../files/presentation/pages/file_preview_page.dart';
 import '../../../files/presentation/widgets/create_folder_dialog.dart';
 import '../../../files/presentation/widgets/file_icon_data.dart';
 import '../../../files/presentation/widgets/file_size_format.dart';
@@ -25,6 +27,20 @@ import '../share_link_cubit.dart';
 /// only exercising it through the widget tree.
 String formatShareExpiryDate(DateTime expiresAt, String locale) =>
     DateFormat.yMMMd(locale).format(expiresAt.toLocal());
+
+/// Opens the in-app preview of a shared [file], reading through the share's
+/// grant-authenticated download and offering the same download as the row.
+void _openSharePreview(BuildContext context, FileDto file) {
+  final cubit = context.read<ShareLinkCubit>();
+  FilePreviewPage.show(
+    context,
+    fileName: file.name,
+    mimeType: file.mimeType,
+    sizeBytes: file.sizeBytes,
+    openContent: () => cubit.openPreviewStream(file),
+    onDownload: (_) => cubit.download(file),
+  );
+}
 
 /// Maps a write/delete/upload error from the share write API to user-facing
 /// text — the status codes the backend contract documents for those calls,
@@ -699,12 +715,22 @@ class _SingleFileCard extends StatelessWidget {
                   ],
                 ),
               )
-            else
+            else ...[
+              if (detectPreviewKind(mimeType: file.mimeType, fileName: file.name) !=
+                  PreviewKind.unsupported) ...[
+                FilledButton.icon(
+                  onPressed: () => _openSharePreview(context, file),
+                  icon: const Icon(Icons.visibility_outlined),
+                  label: Text(l10n.preview),
+                ),
+                const SizedBox(height: 8),
+              ],
               FilledButton.icon(
                 onPressed: () => context.read<ShareLinkCubit>().download(file),
                 icon: const Icon(Icons.download),
                 label: Text(l10n.download),
               ),
+            ],
             if (canReplace) ...[
               const SizedBox(height: 12),
               if (uploadError != null) ...[
@@ -799,7 +825,9 @@ class _ShareChildRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [?downloadAction, ?deleteAction],
             ),
-      onTap: file.isFolder ? () => context.read<ShareLinkCubit>().openFolder(file) : null,
+      onTap: file.isFolder
+          ? () => context.read<ShareLinkCubit>().openFolder(file)
+          : () => _openSharePreview(context, file),
     );
   }
 }
