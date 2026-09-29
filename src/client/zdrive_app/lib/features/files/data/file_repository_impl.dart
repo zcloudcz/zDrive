@@ -6,6 +6,7 @@ import 'package:injectable/injectable.dart';
 import '../../../core/diagnostics/diagnostics.dart';
 
 import '../domain/file_item.dart';
+import '../domain/file_preview_type.dart';
 import '../domain/file_repository.dart';
 import '../domain/file_version.dart';
 import 'file_dtos.dart';
@@ -280,6 +281,7 @@ class FileRepositoryImpl implements FileRepository {
         isFolder: false,
         parentId: parentId,
         sizeBytes: sizeBytes,
+        mimeType: mimeTypeForFileName(fileName),
         originDeviceId: originDeviceId,
       );
     } on DioException catch (e) {

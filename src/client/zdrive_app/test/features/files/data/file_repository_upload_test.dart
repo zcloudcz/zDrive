@@ -65,6 +65,7 @@ void main() {
     final token = CancelToken();
     when(() => remote.createFile(
       name: 'big.bin', isFolder: false, parentId: null, sizeBytes: 10,
+      mimeType: any(named: 'mimeType'),
     )).thenAnswer((_) => created.future);
 
     final result = repository.uploadFile(null, 'big.bin', const Stream.empty(), 10, null,
@@ -93,6 +94,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
         )).thenAnswer((_) async => fileDto('new-id', 'report.pdf'));
@@ -123,6 +125,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
         )).thenThrow(conflict409());
@@ -158,6 +161,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
         )).thenAnswer((_) async => fileDto('retry-id', 'report.pdf'));
@@ -178,6 +182,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
         )).thenThrow(conflict409());
@@ -204,6 +209,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
         )).thenThrow(conflict409());
@@ -232,6 +238,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
         )).thenAnswer((_) async => fileDto('retry-id', 'report.pdf'));
@@ -251,6 +258,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
         )).thenThrow(conflict409());
@@ -368,6 +376,7 @@ void main() {
     when(() => remote.createFile(
           name: 'report.pdf',
           isFolder: false,
+          mimeType: any(named: 'mimeType'),
           parentId: null,
           sizeBytes: 10,
           originDeviceId: any(named: 'originDeviceId'),
@@ -388,6 +397,7 @@ void main() {
     final createCaptured = verify(() => remote.createFile(
             name: 'report.pdf',
             isFolder: false,
+            mimeType: any(named: 'mimeType'),
             parentId: null,
             sizeBytes: 10,
             originDeviceId: captureAny(named: 'originDeviceId')))
@@ -400,5 +410,32 @@ void main() {
             originDeviceId: captureAny(named: 'originDeviceId')))
         .captured;
     expect(versionCaptured.single, 'dev-2');
+  });
+
+  test('UploadFile_KnownExtension_SendsMimeTypeWhenCreatingNode', () async {
+    when(() => remote.createFile(
+          name: 'photo.JPG',
+          isFolder: false,
+          parentId: null,
+          sizeBytes: 10,
+          mimeType: 'image/jpeg',
+        )).thenAnswer((_) async => fileDto('new-id', 'photo.JPG'));
+    when(() => upload.uploadFile('new-id', 'photo.JPG', any(), 10,
+            onProgress: any(named: 'onProgress')))
+        .thenAnswer((_) async =>
+            const UploadCompleteDto(blobPath: 'p', manifestHash: 'hash-6', totalSize: 10));
+    when(() => remote.createFileVersion('new-id',
+        blobVersionId: 'hash-6',
+        sizeBytes: 10,
+        manifestHash: 'hash-6')).thenAnswer((_) async => <String, dynamic>{});
+
+    await repository.uploadFile(null, 'photo.JPG', const Stream.empty(), 10, null);
+
+    verify(() => remote.createFile(
+        name: 'photo.JPG',
+        isFolder: false,
+        parentId: null,
+        sizeBytes: 10,
+        mimeType: 'image/jpeg')).called(1);
   });
 }
