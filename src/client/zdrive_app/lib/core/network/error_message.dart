@@ -54,10 +54,13 @@ String describeAuthError(Object error, AppLocalizations l10n) {
     if (path == '/users/me/2fa/confirm' && statusCode == 400) {
       return l10n.authTwoFactorInvalidCode;
     }
+    if (path == '/users/me/2fa/setup' && statusCode == 400) {
+      return l10n.twoFactorPasswordInvalid;
+    }
     if (path == '/users/me/2fa/disable' && statusCode == 400) {
-      return _hasValidationError(error, 'password')
-          ? l10n.twoFactorPasswordInvalid
-          : l10n.authTwoFactorInvalidCode;
+      // One answer for a wrong password, a wrong code and a refused attempt:
+      // the server deliberately does not say which.
+      return l10n.twoFactorInvalidPasswordOrCode;
     }
     if (path == '/auth/register' && statusCode == 409) {
       return l10n.authEmailAlreadyRegistered;

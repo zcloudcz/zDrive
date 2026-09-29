@@ -194,5 +194,7 @@
   "twoFactorDisable": "オフにする",
   "twoFactorDisableInfo": "2段階認証をオフにするには、パスワードと現在のコード(またはリカバリーコード)を入力してください。",
   "twoFactorDisableConfirm": "2段階認証をオフにする",
-  "twoFactorPasswordInvalid": "パスワードが正しくありません。"
+  "twoFactorPasswordInvalid": "パスワードが正しくありません。",
+  "twoFactorInvalidPasswordOrCode": "パスワードまたはコードが正しくありません。",
+  "twoFactorEnablePasswordInfo": "2段階認証の設定を始めるには、パスワードを入力してください。"
 }

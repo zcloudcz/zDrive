@@ -219,14 +219,23 @@ void main() {
       );
     });
 
-    test('disable: wrong password vs wrong code are told apart', () {
-      expect(
-        describeAuthError(validation('/users/me/2fa/disable', 'password'), en),
-        en.twoFactorPasswordInvalid,
+    test('disable: wrong password and wrong code get the same generic text', () {
+      final password = describeAuthError(
+        validation('/users/me/2fa/disable', 'password'),
+        en,
       );
+      final code = describeAuthError(
+        validation('/users/me/2fa/disable', 'code'),
+        en,
+      );
+      expect(password, en.twoFactorInvalidPasswordOrCode);
+      expect(code, password);
+    });
+
+    test('setup: wrong password -> password message', () {
       expect(
-        describeAuthError(validation('/users/me/2fa/disable', 'code'), en),
-        en.authTwoFactorInvalidCode,
+        describeAuthError(validation('/users/me/2fa/setup', 'password'), en),
+        en.twoFactorPasswordInvalid,
       );
     });
   });

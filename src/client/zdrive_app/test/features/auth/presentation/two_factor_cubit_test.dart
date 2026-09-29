@@ -72,10 +72,12 @@ void main() {
     blocTest<TwoFactorCubit, TwoFactorState>(
       'beginSetup -> enrolling with the issued secret',
       build: () {
-        when(() => repository.setupTwoFactor()).thenAnswer((_) async => setup);
+        when(
+          () => repository.setupTwoFactor(password: 'pw'),
+        ).thenAnswer((_) async => setup);
         return TwoFactorCubit(repository);
       },
-      act: (c) => c.beginSetup(),
+      act: (c) => c.beginSetup('pw'),
       expect: () => [
         const TwoFactorOff(busy: true),
         const TwoFactorEnrolling(setup),
@@ -85,10 +87,12 @@ void main() {
     blocTest<TwoFactorCubit, TwoFactorState>(
       'beginSetup failure -> off with the error',
       build: () {
-        when(() => repository.setupTwoFactor()).thenThrow(Exception('boom'));
+        when(
+          () => repository.setupTwoFactor(password: any(named: 'password')),
+        ).thenThrow(Exception('boom'));
         return TwoFactorCubit(repository);
       },
-      act: (c) => c.beginSetup(),
+      act: (c) => c.beginSetup('pw'),
       expect: () => [
         const TwoFactorOff(busy: true),
         isA<TwoFactorOff>().having((s) => s.error, 'error', isNotNull),

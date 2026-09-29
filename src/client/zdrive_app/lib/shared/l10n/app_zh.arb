@@ -194,5 +194,7 @@
   "twoFactorDisable": "关闭",
   "twoFactorDisableInfo": "请输入密码和当前验证码(或恢复码)以关闭两步验证。",
   "twoFactorDisableConfirm": "关闭两步验证",
-  "twoFactorPasswordInvalid": "密码不正确。"
+  "twoFactorPasswordInvalid": "密码不正确。",
+  "twoFactorInvalidPasswordOrCode": "密码或验证码不正确。",
+  "twoFactorEnablePasswordInfo": "请输入密码以开始设置两步验证。"
 }

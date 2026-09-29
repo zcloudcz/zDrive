@@ -20,9 +20,9 @@ public sealed class User
     // pending enrollment that login ignores until it is confirmed with a code.
     public string? TwoFactorSecretProtected { get; set; }
     public DateTime? TwoFactorEnabledAt { get; set; }
-    // RFC 6238 time step of the last accepted code — a code is only accepted
-    // for a strictly later step, so the same code can't be replayed.
-    public long? TwoFactorLastUsedStep { get; set; }
+    // When the pending secret was issued; setup returns the same pending
+    // secret for a short while instead of replacing it on every call.
+    public DateTime? TwoFactorSecretCreatedAt { get; set; }
 
     public bool TwoFactorEnabled => TwoFactorEnabledAt is not null;
 

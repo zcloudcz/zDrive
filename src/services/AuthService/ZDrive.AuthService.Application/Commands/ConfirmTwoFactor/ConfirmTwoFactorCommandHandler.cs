@@ -33,13 +33,24 @@ public sealed class ConfirmTwoFactorCommandHandler : IRequestHandler<ConfirmTwoF
         if (user.TwoFactorSecretProtected is null)
             throw TwoFactorVerifier.Invalid("code", "Two-factor setup has not been started.");
 
-        if (!_verifier.VerifyTotp(user, request.Code))
+        if (!await _verifier.VerifyTotpAsync(user, request.Code, cancellationToken))
             throw TwoFactorVerifier.Invalid("code", "Invalid code.");
 
         user.TwoFactorEnabledAt = DateTime.UtcNow;
         var recoveryCodes = await _verifier.ReplaceRecoveryCodesAsync(user, cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
+        // Enabling 2FA signs out every other session.
+        var tokens = await _verifier.RotateSessionAsync(user, cancellationToken);
 
-        return new RecoveryCodesDto(recoveryCodes);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // The same code was confirmed concurrently and lost the race.
+            throw TwoFactorVerifier.Invalid("code", "Invalid code.");
+        }
+
+        return new RecoveryCodesDto(recoveryCodes, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt);
     }
 }

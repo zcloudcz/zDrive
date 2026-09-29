@@ -39,10 +39,15 @@ abstract class AuthRepository {
   });
   Future<User> loginWithEntra(String accessToken, {String? entraRefreshToken});
   Future<User> getCurrentUser();
-  Future<TwoFactorSetup> setupTwoFactor();
+  /// Needs the current password: a stolen session alone must not be able to
+  /// bind another authenticator.
+  Future<TwoFactorSetup> setupTwoFactor({required String password});
 
-  /// Turns 2FA on; returns the one-time recovery codes.
+  /// Turns 2FA on; returns the one-time recovery codes. All other sessions are
+  /// signed out; the fresh token pair for this device is stored here.
   Future<List<String>> confirmTwoFactor(String code);
+
+  /// Same session rotation as [confirmTwoFactor].
   Future<void> disableTwoFactor({
     required String password,
     required String code,

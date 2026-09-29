@@ -38,29 +38,6 @@ class AuthRemoteDataSource {
     return AuthResponseDto.fromJson(unwrapMap(response));
   }
 
-  Future<TwoFactorSetupDto> setupTwoFactor() async {
-    final response = await _dio.post(ApiConstants.twoFactorSetup);
-    return TwoFactorSetupDto.fromJson(unwrapMap(response));
-  }
-
-  Future<List<String>> confirmTwoFactor(String code) async {
-    final response = await _dio.post(
-      ApiConstants.twoFactorConfirm,
-      data: {'code': code},
-    );
-    return (unwrapMap(response)['recoveryCodes'] as List).cast<String>();
-  }
-
-  Future<void> disableTwoFactor({
-    required String password,
-    required String code,
-  }) async {
-    await _dio.post(
-      ApiConstants.twoFactorDisable,
-      data: {'password': password, 'code': code},
-    );
-  }
-
   Future<AuthResponseDto> register({
     required String email,
     required String password,
@@ -77,6 +54,41 @@ class AuthRemoteDataSource {
     final response = await _dio.post(
       ApiConstants.authEntraExchange,
       data: {'accessToken': accessToken},
+    );
+    return AuthResponseDto.fromJson(unwrapMap(response));
+  }
+
+  Future<TwoFactorSetupDto> setupTwoFactor({required String password}) async {
+    final response = await _dio.post(
+      ApiConstants.twoFactorSetup,
+      data: {'password': password},
+    );
+    return TwoFactorSetupDto.fromJson(unwrapMap(response));
+  }
+
+  /// Returns the one-time recovery codes and the fresh token pair — enabling
+  /// 2FA signs out every other session, this device included until it stores
+  /// these.
+  Future<({List<String> recoveryCodes, AuthResponseDto tokens})>
+  confirmTwoFactor(String code) async {
+    final response = await _dio.post(
+      ApiConstants.twoFactorConfirm,
+      data: {'code': code},
+    );
+    final data = unwrapMap(response);
+    return (
+      recoveryCodes: (data['recoveryCodes'] as List).cast<String>(),
+      tokens: AuthResponseDto.fromJson(data),
+    );
+  }
+
+  Future<AuthResponseDto> disableTwoFactor({
+    required String password,
+    required String code,
+  }) async {
+    final response = await _dio.post(
+      ApiConstants.twoFactorDisable,
+      data: {'password': password, 'code': code},
     );
     return AuthResponseDto.fromJson(unwrapMap(response));
   }

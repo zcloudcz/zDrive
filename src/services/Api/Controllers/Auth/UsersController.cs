@@ -43,11 +43,12 @@ public sealed class UsersController : ControllerBase
 
     [HttpPost("me/2fa/setup")]
     [ProducesResponseType(typeof(ApiResponse<TwoFactorSetupDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> SetupTwoFactor(CancellationToken ct)
+    public async Task<IActionResult> SetupTwoFactor([FromBody] SetupTwoFactorRequest request, CancellationToken ct)
     {
-        var result = await _mediator.Send(new SetupTwoFactorCommand(User.GetUserId()), ct);
+        var result = await _mediator.Send(new SetupTwoFactorCommand(User.GetUserId(), request.Password), ct);
         return Ok(ApiResponse<TwoFactorSetupDto>.Ok(result));
     }
 
@@ -63,13 +64,13 @@ public sealed class UsersController : ControllerBase
     }
 
     [HttpPost("me/2fa/disable")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DisableTwoFactor([FromBody] DisableTwoFactorRequest request, CancellationToken ct)
     {
-        await _mediator.Send(new DisableTwoFactorCommand(User.GetUserId(), request.Password, request.Code), ct);
-        return NoContent();
+        var tokens = await _mediator.Send(new DisableTwoFactorCommand(User.GetUserId(), request.Password, request.Code), ct);
+        return Ok(ApiResponse<AuthTokenDto>.Ok(tokens));
     }
 }
 
@@ -78,3 +79,5 @@ public sealed record UpdateProfileRequest(string? DisplayName, string? AvatarUrl
 public sealed record ConfirmTwoFactorRequest(string Code);
 
 public sealed record DisableTwoFactorRequest(string Password, string Code);
+
+public sealed record SetupTwoFactorRequest(string Password);

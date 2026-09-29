@@ -105,10 +105,28 @@ class _LoadFailed extends StatelessWidget {
   }
 }
 
-class _Off extends StatelessWidget {
+class _Off extends StatefulWidget {
   const _Off({required this.state});
 
   final TwoFactorOff state;
+
+  @override
+  State<_Off> createState() => _OffState();
+}
+
+class _OffState extends State<_Off> {
+  final _password = TextEditingController();
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_password.text.isEmpty || widget.state.busy) return;
+    context.read<TwoFactorCubit>().beginSetup(_password.text);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -117,14 +135,25 @@ class _Off extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(l10n.twoFactorStatusOff),
+        const SizedBox(height: 16),
+        Text(l10n.twoFactorEnablePasswordInfo),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _password,
+          decoration: InputDecoration(
+            labelText: l10n.password,
+            prefixIcon: const Icon(Icons.lock_outlined),
+          ),
+          obscureText: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submit(),
+        ),
         const SizedBox(height: 8),
-        _ErrorLine(state.error),
+        _ErrorLine(widget.state.error),
         const SizedBox(height: 8),
         FilledButton(
-          onPressed: state.busy
-              ? null
-              : () => context.read<TwoFactorCubit>().beginSetup(),
-          child: state.busy ? const _Busy() : Text(l10n.twoFactorEnable),
+          onPressed: widget.state.busy ? null : _submit,
+          child: widget.state.busy ? const _Busy() : Text(l10n.twoFactorEnable),
         ),
       ],
     );

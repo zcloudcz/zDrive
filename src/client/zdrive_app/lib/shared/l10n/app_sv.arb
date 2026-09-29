@@ -194,5 +194,7 @@
   "twoFactorDisable": "Slå av",
   "twoFactorDisableInfo": "Ange ditt lösenord och en aktuell kod (eller en återställningskod) för att slå av tvåstegsverifiering.",
   "twoFactorDisableConfirm": "Slå av tvåstegsverifiering",
-  "twoFactorPasswordInvalid": "Lösenordet är inte korrekt."
+  "twoFactorPasswordInvalid": "Lösenordet är inte korrekt.",
+  "twoFactorInvalidPasswordOrCode": "Lösenordet eller koden är inte korrekt.",
+  "twoFactorEnablePasswordInfo": "Ange ditt lösenord för att börja ställa in tvåstegsverifiering."
 }

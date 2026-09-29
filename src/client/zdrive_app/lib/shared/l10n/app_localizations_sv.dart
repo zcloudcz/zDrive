@@ -652,4 +652,12 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'Lösenordet är inte korrekt.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'Lösenordet eller koden är inte korrekt.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Ange ditt lösenord för att börja ställa in tvåstegsverifiering.';
 }

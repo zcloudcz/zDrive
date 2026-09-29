@@ -203,4 +203,65 @@ void main() {
       verify(() => tokenStorage.clear()).called(1);
     });
   });
+
+  group('two-factor enrollment sessions', () {
+    test('confirmTwoFactor stores the fresh token pair — the old refresh '
+        'token was revoked server-side', () async {
+      when(() => remoteDataSource.confirmTwoFactor('123456')).thenAnswer(
+        (_) async => (
+          recoveryCodes: ['AAAA-BBBB-CCCC-DDDD'],
+          tokens: AuthResponseDto(
+            accessToken: 'new-access',
+            refreshToken: 'new-refresh',
+            expiresAt: DateTime.utc(2030),
+          ),
+        ),
+      );
+
+      final codes = await repository.confirmTwoFactor('123456');
+
+      expect(codes, ['AAAA-BBBB-CCCC-DDDD']);
+      verify(
+        () => tokenStorage.saveTokens(
+          accessToken: 'new-access',
+          refreshToken: 'new-refresh',
+        ),
+      ).called(1);
+    });
+
+    test('disableTwoFactor stores the fresh token pair', () async {
+      when(
+        () => remoteDataSource.disableTwoFactor(
+          password: 'pw',
+          code: '123456',
+        ),
+      ).thenAnswer(
+        (_) async => AuthResponseDto(
+          accessToken: 'new-access',
+          refreshToken: 'new-refresh',
+          expiresAt: DateTime.utc(2030),
+        ),
+      );
+
+      await repository.disableTwoFactor(password: 'pw', code: '123456');
+
+      verify(
+        () => tokenStorage.saveTokens(
+          accessToken: 'new-access',
+          refreshToken: 'new-refresh',
+        ),
+      ).called(1);
+    });
+
+    test('setupTwoFactor passes the password through', () async {
+      when(() => remoteDataSource.setupTwoFactor(password: 'pw')).thenAnswer(
+        (_) async =>
+            const TwoFactorSetupDto(secret: 'S', otpAuthUri: 'otpauth://x'),
+      );
+
+      final setup = await repository.setupTwoFactor(password: 'pw');
+
+      expect(setup.secret, 'S');
+    });
+  });
 }

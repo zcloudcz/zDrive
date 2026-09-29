@@ -19,11 +19,11 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                 type: "timestamp with time zone",
                 nullable: true);
 
-            migrationBuilder.AddColumn<long>(
-                name: "TwoFactorLastUsedStep",
+            migrationBuilder.AddColumn<DateTime>(
+                name: "TwoFactorSecretCreatedAt",
                 schema: "auth",
                 table: "users",
-                type: "bigint",
+                type: "timestamp with time zone",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
@@ -56,6 +56,7 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Salt = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                     CodeHash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     UsedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
@@ -96,11 +97,34 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "two_factor_guards",
+                schema: "auth",
+                columns: table => new
+                {
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    LastUsedStep = table.Column<long>(type: "bigint", nullable: true),
+                    FailureWindowStart = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    FailureCount = table.Column<int>(type: "integer", nullable: false),
+                    Version = table.Column<Guid>(type: "uuid", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_two_factor_guards", x => x.UserId);
+                    table.ForeignKey(
+                        name: "FK_two_factor_guards_users_UserId",
+                        column: x => x.UserId,
+                        principalSchema: "auth",
+                        principalTable: "users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
             migrationBuilder.CreateIndex(
-                name: "IX_recovery_codes_UserId_CodeHash",
+                name: "IX_recovery_codes_UserId",
                 schema: "auth",
                 table: "recovery_codes",
-                columns: new[] { "UserId", "CodeHash" });
+                column: "UserId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_two_factor_challenges_TokenHash",
@@ -131,13 +155,17 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                 name: "two_factor_challenges",
                 schema: "auth");
 
+            migrationBuilder.DropTable(
+                name: "two_factor_guards",
+                schema: "auth");
+
             migrationBuilder.DropColumn(
                 name: "TwoFactorEnabledAt",
                 schema: "auth",
                 table: "users");
 
             migrationBuilder.DropColumn(
-                name: "TwoFactorLastUsedStep",
+                name: "TwoFactorSecretCreatedAt",
                 schema: "auth",
                 table: "users");
 

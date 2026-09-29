@@ -12,7 +12,7 @@ using ZDrive.AuthService.Infrastructure.Persistence;
 namespace ZDrive.AuthService.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDbContext))]
-    [Migration("20260929183035_AddTwoFactor")]
+    [Migration("20260929201339_AddTwoFactor")]
     partial class AddTwoFactor
     {
         /// <inheritdoc />
@@ -90,6 +90,11 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<string>("Salt")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<DateTime?>("UsedAt")
                         .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
@@ -99,7 +104,7 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "CodeHash");
+                    b.HasIndex("UserId");
 
                     b.ToTable("recovery_codes", "auth");
                 });
@@ -180,6 +185,7 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("FailedAttempts")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<string>("TokenHash")
@@ -202,6 +208,29 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("two_factor_challenges", "auth");
+                });
+
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.TwoFactorGuard", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FailureCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("FailureWindowStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("LastUsedStep")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("two_factor_guards", "auth");
                 });
 
             modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.User", b =>
@@ -247,9 +276,8 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                     b.Property<DateTime?>("TwoFactorEnabledAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<long?>("TwoFactorLastUsedStep")
-                        .IsConcurrencyToken()
-                        .HasColumnType("bigint");
+                    b.Property<DateTime?>("TwoFactorSecretCreatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("TwoFactorSecretProtected")
                         .HasMaxLength(512)
@@ -303,6 +331,17 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                     b.HasOne("ZDrive.AuthService.Domain.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.TwoFactorGuard", b =>
+                {
+                    b.HasOne("ZDrive.AuthService.Domain.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("ZDrive.AuthService.Domain.Entities.TwoFactorGuard", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

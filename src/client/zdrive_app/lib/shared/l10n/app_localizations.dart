@@ -1283,6 +1283,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The password is not correct.'**
   String get twoFactorPasswordInvalid;
+
+  /// No description provided for @twoFactorInvalidPasswordOrCode.
+  ///
+  /// In en, this message translates to:
+  /// **'The password or code is not correct.'**
+  String get twoFactorInvalidPasswordOrCode;
+
+  /// No description provided for @twoFactorEnablePasswordInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your password to start setting up two-factor authentication.'**
+  String get twoFactorEnablePasswordInfo;
 }
 
 class _AppLocalizationsDelegate

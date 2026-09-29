@@ -7,6 +7,7 @@ namespace ZDrive.AuthService.Domain.Entities;
 public sealed class TwoFactorChallenge
 {
     public const int MaxFailedAttempts = 5;
+    public const int MaxLivePerUser = 5;
 
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
@@ -15,6 +16,7 @@ public sealed class TwoFactorChallenge
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAt { get; set; }
     public DateTime? UsedAt { get; set; }
+    // Counts every evaluated attempt (reserved before the code is checked).
     public int FailedAttempts { get; set; }
 
     public bool IsUsable => UsedAt is null && FailedAttempts < MaxFailedAttempts && DateTime.UtcNow < ExpiresAt;

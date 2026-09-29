@@ -53,13 +53,20 @@ void main() {
     return AppLocalizations.of(tester.element(find.byType(TwoFactorSettingsPage)))!;
   }
 
-  testWidgets('off: offers to turn 2FA on', (tester) async {
+  testWidgets('off: asks for the password first, then starts setup with it', (
+    tester,
+  ) async {
     final l10n = await pump(tester, const TwoFactorOff());
-    when(() => cubit.beginSetup()).thenAnswer((_) async {});
+    when(() => cubit.beginSetup(any())).thenAnswer((_) async {});
 
+    // No password typed: nothing is sent.
+    await tester.tap(find.text(l10n.twoFactorEnable));
+    verifyNever(() => cubit.beginSetup(any()));
+
+    await tester.enterText(find.byType(TextField), 'Password1');
     await tester.tap(find.text(l10n.twoFactorEnable));
 
-    verify(() => cubit.beginSetup()).called(1);
+    verify(() => cubit.beginSetup('Password1')).called(1);
   });
 
   testWidgets('Entra-only account: no setup is offered', (tester) async {

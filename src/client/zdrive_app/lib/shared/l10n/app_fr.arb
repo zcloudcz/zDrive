@@ -194,5 +194,7 @@
   "twoFactorDisable": "Désactiver",
   "twoFactorDisableInfo": "Saisissez votre mot de passe et un code actuel (ou un code de récupération) pour désactiver l'authentification à deux facteurs.",
   "twoFactorDisableConfirm": "Désactiver l'authentification à deux facteurs",
-  "twoFactorPasswordInvalid": "Le mot de passe n'est pas correct."
+  "twoFactorPasswordInvalid": "Le mot de passe n'est pas correct.",
+  "twoFactorInvalidPasswordOrCode": "Le mot de passe ou le code n'est pas correct.",
+  "twoFactorEnablePasswordInfo": "Saisissez votre mot de passe pour commencer la configuration de l'authentification à deux facteurs."
 }

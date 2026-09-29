@@ -194,5 +194,7 @@
   "twoFactorDisable": "Desactivar",
   "twoFactorDisableInfo": "Introduce tu contraseña y un código actual (o un código de recuperación) para desactivar la verificación en dos pasos.",
   "twoFactorDisableConfirm": "Desactivar la verificación en dos pasos",
-  "twoFactorPasswordInvalid": "La contraseña no es correcta."
+  "twoFactorPasswordInvalid": "La contraseña no es correcta.",
+  "twoFactorInvalidPasswordOrCode": "La contraseña o el código no es correcto.",
+  "twoFactorEnablePasswordInfo": "Introduce tu contraseña para empezar a configurar la verificación en dos pasos."
 }

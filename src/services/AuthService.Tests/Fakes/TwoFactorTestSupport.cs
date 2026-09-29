@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using OtpNet;
 using ZDrive.AuthService.Application.Auth;
 using ZDrive.AuthService.Application.Interfaces;
@@ -26,7 +27,10 @@ public sealed class TwoFactorTestSupport
     public IPasswordHasher Hasher { get; } = new Argon2PasswordHasher();
     public TwoFactorVerifier Verifier { get; }
 
-    public TwoFactorTestSupport() => Verifier = new TwoFactorVerifier(Db, Totp, Protector);
+    public TwoFactorTestSupport(int maxFailedAttempts = 10) =>
+        Verifier = new TwoFactorVerifier(
+            Db, Totp, Protector, new FakeJwtTokenGenerator(),
+            Options.Create(new TwoFactorOptions { MaxFailedAttempts = maxFailedAttempts }));
 
     public async Task<User> AddUserAsync(string? password = "Password1")
     {
@@ -50,6 +54,7 @@ public sealed class TwoFactorTestSupport
     {
         var secret = Totp.GenerateSecret();
         user.TwoFactorSecretProtected = Protector.Protect(secret);
+        user.TwoFactorSecretCreatedAt = DateTime.UtcNow;
         user.TwoFactorEnabledAt = DateTime.UtcNow;
         await Db.SaveChangesAsync();
         return secret;

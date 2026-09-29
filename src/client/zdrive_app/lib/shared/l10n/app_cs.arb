@@ -249,5 +249,7 @@
   "twoFactorDisable": "Vypnout",
   "twoFactorDisableInfo": "Pro vypnutí dvoufázového ověření zadejte heslo a aktuální kód (nebo záložní kód).",
   "twoFactorDisableConfirm": "Vypnout dvoufázové ověření",
-  "twoFactorPasswordInvalid": "Heslo není správné."
+  "twoFactorPasswordInvalid": "Heslo není správné.",
+  "twoFactorInvalidPasswordOrCode": "Heslo nebo kód není správný.",
+  "twoFactorEnablePasswordInfo": "Pro zahájení nastavení dvoufázového ověření zadejte své heslo."
 }

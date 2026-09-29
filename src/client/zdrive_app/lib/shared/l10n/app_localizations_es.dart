@@ -665,4 +665,12 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'La contraseña no es correcta.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'La contraseña o el código no es correcto.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Introduce tu contraseña para empezar a configurar la verificación en dos pasos.';
 }

@@ -221,7 +221,11 @@ tokens, completed by `POST /auth/login/2fa`. Secrets are encrypted with ASP.NET
 Core Data Protection. The key ring lives in `auth."DataProtectionKeys"` (works
 on every host with no config; not encrypted at rest, same as the App Service
 default). That table must be included in DB backups: losing it makes every
-stored secret undecryptable and locks out all 2FA users. Entra accounts get MFA
+stored secret undecryptable and locks out all 2FA users. The keys are stored
+as plain XML, i.e. not protected at rest; protecting them with Azure Key Vault
+(`ProtectKeysWithAzureKeyVault`) is a pending decision. Second-factor attempts
+are capped per challenge (5) and per user (`TwoFactor:MaxFailedAttempts`, default
+10 per `TwoFactor:FailureWindowMinutes`, default 15). Entra accounts get MFA
 from Entra instead.
 
 ### Multi-tenant isolation

@@ -93,10 +93,14 @@ class TwoFactorCubit extends Cubit<TwoFactorState> {
     }
   }
 
-  Future<void> beginSetup() async {
+  Future<void> beginSetup(String password) async {
     emit(const TwoFactorOff(busy: true));
     try {
-      emit(TwoFactorEnrolling(await _repository.setupTwoFactor()));
+      emit(
+        TwoFactorEnrolling(
+          await _repository.setupTwoFactor(password: password),
+        ),
+      );
     } catch (e, st) {
       Diagnostics.error('auth.two_factor_setup_failed', e, st);
       emit(TwoFactorOff(error: e));

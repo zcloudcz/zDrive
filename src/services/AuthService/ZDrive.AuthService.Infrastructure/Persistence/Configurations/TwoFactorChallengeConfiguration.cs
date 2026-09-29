@@ -22,6 +22,10 @@ public sealed class TwoFactorChallengeConfiguration : IEntityTypeConfiguration<T
         // Two concurrent completions of one challenge: the second save fails.
         builder.Property(c => c.UsedAt).IsConcurrencyToken();
 
+        // Parallel wrong guesses: only one increment per value can win, so the
+        // attempt cap cannot be outrun by concurrent requests.
+        builder.Property(c => c.FailedAttempts).IsConcurrencyToken();
+
         builder.HasOne(c => c.User)
             .WithMany()
             .HasForeignKey(c => c.UserId)

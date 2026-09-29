@@ -12,11 +12,15 @@ public sealed class RecoveryCodeConfiguration : IEntityTypeConfiguration<Recover
 
         builder.HasKey(rc => rc.Id);
 
+        builder.Property(rc => rc.Salt)
+            .IsRequired()
+            .HasMaxLength(32);
+
         builder.Property(rc => rc.CodeHash)
             .IsRequired()
             .HasMaxLength(64);
 
-        builder.HasIndex(rc => new { rc.UserId, rc.CodeHash });
+        builder.HasIndex(rc => rc.UserId);
 
         // Two concurrent uses of the same code: the second save fails instead
         // of both succeeding.

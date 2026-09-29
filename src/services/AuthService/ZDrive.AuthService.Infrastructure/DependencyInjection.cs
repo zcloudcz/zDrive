@@ -69,6 +69,7 @@ public static class DependencyInjection
             .PersistKeysToDbContext<AuthDbContext>();
         services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
         services.AddSingleton<ITotpService, TotpService>();
+        services.Configure<TwoFactorOptions>(configuration.GetSection(TwoFactorOptions.SectionName));
 
         // Authentication
         var rsa = RSA.Create();

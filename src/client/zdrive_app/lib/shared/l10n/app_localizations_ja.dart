@@ -635,4 +635,10 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'パスワードが正しくありません。';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode => 'パスワードまたはコードが正しくありません。';
+
+  @override
+  String get twoFactorEnablePasswordInfo => '2段階認証の設定を始めるには、パスワードを入力してください。';
 }

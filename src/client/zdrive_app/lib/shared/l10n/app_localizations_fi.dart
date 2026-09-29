@@ -657,4 +657,12 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'Salasana ei ole oikea.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'Salasana tai koodi ei ole oikea.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Aloita kaksivaiheisen tunnistautumisen käyttöönotto antamalla salasanasi.';
 }

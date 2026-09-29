@@ -650,4 +650,11 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'Heslo není správné.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode => 'Heslo nebo kód není správný.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Pro zahájení nastavení dvoufázového ověření zadejte své heslo.';
 }

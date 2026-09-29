@@ -649,4 +649,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'The password is not correct.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'The password or code is not correct.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Enter your password to start setting up two-factor authentication.';
 }

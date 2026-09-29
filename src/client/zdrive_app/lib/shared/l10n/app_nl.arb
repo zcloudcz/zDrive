@@ -194,5 +194,7 @@
   "twoFactorDisable": "Uitzetten",
   "twoFactorDisableInfo": "Voer je wachtwoord en een actuele code (of een herstelcode) in om verificatie in twee stappen uit te zetten.",
   "twoFactorDisableConfirm": "Verificatie in twee stappen uitzetten",
-  "twoFactorPasswordInvalid": "Het wachtwoord is onjuist."
+  "twoFactorPasswordInvalid": "Het wachtwoord is onjuist.",
+  "twoFactorInvalidPasswordOrCode": "Het wachtwoord of de code is onjuist.",
+  "twoFactorEnablePasswordInfo": "Voer je wachtwoord in om de verificatie in twee stappen in te stellen."
 }

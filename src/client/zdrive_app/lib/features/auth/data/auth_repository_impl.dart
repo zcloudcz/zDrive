@@ -132,20 +132,37 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<TwoFactorSetup> setupTwoFactor() async {
-    final dto = await _remoteDataSource.setupTwoFactor();
+  Future<TwoFactorSetup> setupTwoFactor({required String password}) async {
+    final dto = await _remoteDataSource.setupTwoFactor(password: password);
     return TwoFactorSetup(secret: dto.secret, otpAuthUri: dto.otpAuthUri);
   }
 
   @override
-  Future<List<String>> confirmTwoFactor(String code) =>
-      _remoteDataSource.confirmTwoFactor(code);
+  Future<List<String>> confirmTwoFactor(String code) async {
+    final result = await _remoteDataSource.confirmTwoFactor(code);
+    // The server just revoked every refresh token, including this device's
+    // old one — the new pair must replace it or the next refresh logs out.
+    await _tokenStorage.saveTokens(
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken,
+    );
+    return result.recoveryCodes;
+  }
 
   @override
   Future<void> disableTwoFactor({
     required String password,
     required String code,
-  }) => _remoteDataSource.disableTwoFactor(password: password, code: code);
+  }) async {
+    final tokens = await _remoteDataSource.disableTwoFactor(
+      password: password,
+      code: code,
+    );
+    await _tokenStorage.saveTokens(
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    );
+  }
 
   @override
   Future<void> logout() async {

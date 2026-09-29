@@ -274,5 +274,7 @@
   "twoFactorDisable": "Turn off",
   "twoFactorDisableInfo": "Enter your password and a current code (or a recovery code) to turn off two-factor authentication.",
   "twoFactorDisableConfirm": "Turn off two-factor authentication",
-  "twoFactorPasswordInvalid": "The password is not correct."
+  "twoFactorPasswordInvalid": "The password is not correct.",
+  "twoFactorInvalidPasswordOrCode": "The password or code is not correct.",
+  "twoFactorEnablePasswordInfo": "Enter your password to start setting up two-factor authentication."
 }

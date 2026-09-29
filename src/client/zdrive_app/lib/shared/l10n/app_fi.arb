@@ -194,5 +194,7 @@
   "twoFactorDisable": "Poista käytöstä",
   "twoFactorDisableInfo": "Poista kaksivaiheinen tunnistautuminen käytöstä antamalla salasanasi ja voimassa oleva koodi (tai palautuskoodi).",
   "twoFactorDisableConfirm": "Poista kaksivaiheinen tunnistautuminen käytöstä",
-  "twoFactorPasswordInvalid": "Salasana ei ole oikea."
+  "twoFactorPasswordInvalid": "Salasana ei ole oikea.",
+  "twoFactorInvalidPasswordOrCode": "Salasana tai koodi ei ole oikea.",
+  "twoFactorEnablePasswordInfo": "Aloita kaksivaiheisen tunnistautumisen käyttöönotto antamalla salasanasi."
 }

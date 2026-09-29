@@ -626,4 +626,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => '密码不正确。';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode => '密码或验证码不正确。';
+
+  @override
+  String get twoFactorEnablePasswordInfo => '请输入密码以开始设置两步验证。';
 }

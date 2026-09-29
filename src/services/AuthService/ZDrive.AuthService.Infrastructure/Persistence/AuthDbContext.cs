@@ -15,6 +15,7 @@ public sealed class AuthDbContext : DbContext, IAuthDbContext, IDataProtectionKe
     public DbSet<ExternalIdentity> ExternalIdentities => Set<ExternalIdentity>();
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<TwoFactorChallenge> TwoFactorChallenges => Set<TwoFactorChallenge>();
+    public DbSet<TwoFactorGuard> TwoFactorGuards => Set<TwoFactorGuard>();
     // Data Protection key ring (encrypts TOTP secrets), kept in the DB so it
     // survives restarts on any host.
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();

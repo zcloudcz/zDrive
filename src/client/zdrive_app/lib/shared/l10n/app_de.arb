@@ -194,5 +194,7 @@
   "twoFactorDisable": "Ausschalten",
   "twoFactorDisableInfo": "Gib dein Passwort und einen aktuellen Code (oder einen Wiederherstellungscode) ein, um die Zwei-Faktor-Authentifizierung auszuschalten.",
   "twoFactorDisableConfirm": "Zwei-Faktor-Authentifizierung ausschalten",
-  "twoFactorPasswordInvalid": "Das Passwort ist nicht korrekt."
+  "twoFactorPasswordInvalid": "Das Passwort ist nicht korrekt.",
+  "twoFactorInvalidPasswordOrCode": "Das Passwort oder der Code ist nicht korrekt.",
+  "twoFactorEnablePasswordInfo": "Gib dein Passwort ein, um die Einrichtung der Zwei-Faktor-Authentifizierung zu starten."
 }

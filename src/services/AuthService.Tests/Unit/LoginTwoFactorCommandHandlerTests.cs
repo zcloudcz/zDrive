@@ -198,4 +198,75 @@ public sealed class LoginTwoFactorCommandHandlerTests
         validator.Validate(new LoginTwoFactorCommand("c", null, null)).IsValid.Should().BeFalse();
         validator.Validate(new LoginTwoFactorCommand("c", "123456", null)).IsValid.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task LoginTwoFactor_WrongCodesAcrossManyChallenges_HitThePerUserCap()
+    {
+        var t = new TwoFactorTestSupport(maxFailedAttempts: 4);
+        var user = await t.AddUserAsync("Password1");
+        var secret = await t.EnableTwoFactorAsync(user);
+        var login = new LoginCommandHandler(t.Db, t.Hasher, new FakeJwtTokenGenerator());
+        var twoFactor = new LoginTwoFactorCommandHandler(t.Db, new FakeJwtTokenGenerator(), t.Verifier);
+        var valid = TwoFactorTestSupport.CodeFor(secret);
+        var wrong = valid == "000000" ? "000001" : "000000";
+
+        // 4 wrong guesses spread over 2 fresh challenges (never 5 on one).
+        for (var i = 0; i < 2; i++)
+        {
+            var challenge = (await login.Handle(new LoginCommand(user.Email, "Password1"), default)).ChallengeToken!;
+            for (var j = 0; j < 2; j++)
+                await FluentActions.Awaiting(() => twoFactor.Handle(new LoginTwoFactorCommand(challenge, wrong, null), default))
+                    .Should().ThrowAsync<ValidationException>();
+        }
+
+        var fresh = (await login.Handle(new LoginCommand(user.Email, "Password1"), default)).ChallengeToken!;
+        var act = () => twoFactor.Handle(new LoginTwoFactorCommand(fresh, valid, null), default);
+
+        await act.Should().ThrowAsync<ValidationException>("the per-user cap is spent");
+    }
+
+    [Fact]
+    public async Task LoginTwoFactor_SuccessfulLogin_DoesNotConsumeThePerUserCap()
+    {
+        var t = new TwoFactorTestSupport(maxFailedAttempts: 2);
+        var user = await t.AddUserAsync("Password1");
+        var secret = await t.EnableTwoFactorAsync(user);
+        var login = new LoginCommandHandler(t.Db, t.Hasher, new FakeJwtTokenGenerator());
+        var twoFactor = new LoginTwoFactorCommandHandler(t.Db, new FakeJwtTokenGenerator(), t.Verifier);
+        var codes = await t.Verifier.ReplaceRecoveryCodesAsync(user, default);
+        await t.Db.SaveChangesAsync();
+
+        for (var i = 0; i < 4; i++)
+        {
+            var challenge = (await login.Handle(new LoginCommand(user.Email, "Password1"), default)).ChallengeToken!;
+            (await twoFactor.Handle(new LoginTwoFactorCommand(challenge, null, codes[i]), default))
+                .AccessToken.Should().NotBeNullOrEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task Login_ManyChallenges_OnlyTheNewestLiveOnesAreKept()
+    {
+        var user = await _t.AddUserAsync("Password1");
+        await _t.EnableTwoFactorAsync(user);
+
+        for (var i = 0; i < 8; i++)
+            await LoginHandler().Handle(new LoginCommand(user.Email, "Password1"), default);
+
+        (await _t.Db.TwoFactorChallenges.CountAsync(c => c.UserId == user.Id))
+            .Should().Be(TwoFactorChallenge.MaxLivePerUser);
+    }
+
+    [Fact]
+    public async Task VerifyRecoveryCode_TwoCodesWithSameContentUseDifferentSalts()
+    {
+        var user = await _t.AddUserAsync();
+        await _t.Verifier.ReplaceRecoveryCodesAsync(user, default);
+        await _t.Db.SaveChangesAsync();
+
+        var stored = await _t.Db.RecoveryCodes.ToListAsync();
+
+        stored.Select(c => c.Salt).Should().OnlyHaveUniqueItems();
+        stored.Should().OnlyContain(c => c.Salt.Length == 32 && c.CodeHash.Length == 64);
+    }
 }

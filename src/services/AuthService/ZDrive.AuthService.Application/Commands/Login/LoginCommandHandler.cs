@@ -65,14 +65,18 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, LoginRes
 
     private async Task<string> CreateChallengeAsync(Guid userId, CancellationToken cancellationToken)
     {
-        // Housekeeping: drop this user's dead challenges. Live ones stay, so a
-        // second login (another device, or someone who only knows the
-        // password) cannot invalidate a challenge that is being completed.
-        var now = DateTime.UtcNow;
-        _db.TwoFactorChallenges.RemoveRange(
-            await _db.TwoFactorChallenges
-                .Where(c => c.UserId == userId && (c.UsedAt != null || c.ExpiresAt < now))
-                .ToListAsync(cancellationToken));
+        // Housekeeping: drop this user's dead challenges (used, expired,
+        // burned) and keep only the newest live ones, so rows cannot pile up.
+        // Live ones otherwise stay: a second login (another device, or someone
+        // who only knows the password) must not kill a challenge that is
+        // being completed.
+        var existing = await _db.TwoFactorChallenges
+            .Where(c => c.UserId == userId)
+            .OrderByDescending(c => c.CreatedAt)
+            .ToListAsync(cancellationToken);
+        var live = existing.Where(c => c.IsUsable).ToList();
+        _db.TwoFactorChallenges.RemoveRange(existing.Except(live));
+        _db.TwoFactorChallenges.RemoveRange(live.Skip(Entities.TwoFactorChallenge.MaxLivePerUser - 1));
 
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         _db.TwoFactorChallenges.Add(new Entities.TwoFactorChallenge
@@ -82,8 +86,22 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, LoginRes
             TokenHash = TwoFactorVerifier.HashToken(token),
             ExpiresAt = DateTime.UtcNow.Add(ChallengeLifetime)
         });
-        await _db.SaveChangesAsync(cancellationToken);
 
-        return token;
+        // A challenge being completed concurrently can change or vanish under
+        // a housekeeping delete; that is benign — skip the delete, keep the
+        // new challenge.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                return token;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < 5 && ex.Entries.All(e => e.State == EntityState.Deleted))
+            {
+                foreach (var entry in ex.Entries)
+                    entry.State = EntityState.Detached;
+            }
+        }
     }
 }

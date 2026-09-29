@@ -658,4 +658,12 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'Het wachtwoord is onjuist.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'Het wachtwoord of de code is onjuist.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Voer je wachtwoord in om de verificatie in twee stappen in te stellen.';
 }

@@ -24,10 +24,20 @@ public sealed class ZdriveAuthClient(HttpClient http)
                 $"Login failed ({(int)response.StatusCode} {response.StatusCode}): invalid credentials or unreachable API.");
         }
 
-        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<AuthTokens>>(JsonDefaults.Options, ct)
+        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<LoginResult>>(JsonDefaults.Options, ct)
             ?? throw new ZdriveApiException("Login failed: empty response from API.");
         if (!envelope.Success || envelope.Data is null)
             throw new ZdriveApiException($"Login failed: {envelope.Error?.Message ?? "unknown error"}.");
+
+        if (envelope.Data.TwoFactorRequired)
+        {
+            throw new ZdriveApiException(
+                "Login failed: this account has two-factor authentication enabled, which BackupCli does not support. " +
+                "Use an account without 2FA for backups.");
+        }
+
+        if (envelope.Data.AccessToken is null || envelope.Data.RefreshToken is null)
+            throw new ZdriveApiException("Login failed: the API returned no tokens.");
 
         AccessToken = envelope.Data.AccessToken;
         _refreshToken = envelope.Data.RefreshToken;

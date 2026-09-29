@@ -11,5 +11,6 @@ public interface IAuthDbContext
     DbSet<ExternalIdentity> ExternalIdentities { get; }
     DbSet<RecoveryCode> RecoveryCodes { get; }
     DbSet<TwoFactorChallenge> TwoFactorChallenges { get; }
+    DbSet<TwoFactorGuard> TwoFactorGuards { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -653,4 +653,12 @@ class AppLocalizationsSk extends AppLocalizations {
 
   @override
   String get twoFactorPasswordInvalid => 'Heslo nie je správne.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'Heslo alebo kód nie je správny.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Na začatie nastavenia dvojfázového overenia zadajte svoje heslo.';
 }
