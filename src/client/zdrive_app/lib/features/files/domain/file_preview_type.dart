@@ -44,14 +44,22 @@ String? mimeTypeForFileName(String fileName) => lookupMimeType(fileName);
 /// The preview kind for a file, from its stored [mimeType] when it is
 /// informative, otherwise from the extension of [fileName].
 PreviewKind detectPreviewKind({String? mimeType, required String fileName}) {
+  final stored = mimeType?.toLowerCase();
+  final informative =
+      stored != null && stored.isNotEmpty && stored != 'application/octet-stream';
+
+  // An informative stored image/PDF type wins over the extension lists, so a
+  // renamed scan.png -> scan.txt is still shown as the image it is.
+  if (informative) {
+    if (_imageMimeTypes.contains(stored)) return PreviewKind.image;
+    if (stored == 'application/pdf') return PreviewKind.pdf;
+  }
+
   final dot = fileName.lastIndexOf('.');
   final extension = dot < 0 ? '' : fileName.substring(dot + 1).toLowerCase();
   if (_textExtensions.contains(extension)) return PreviewKind.text;
 
-  final stored = mimeType?.toLowerCase();
-  final mime = stored == null || stored.isEmpty || stored == 'application/octet-stream'
-      ? mimeTypeForFileName(fileName)
-      : stored;
+  final mime = informative ? stored : mimeTypeForFileName(fileName);
   if (mime == null) return PreviewKind.unsupported;
   if (_imageMimeTypes.contains(mime)) return PreviewKind.image;
   if (mime == 'application/pdf') return PreviewKind.pdf;

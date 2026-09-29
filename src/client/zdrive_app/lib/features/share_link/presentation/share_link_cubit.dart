@@ -5,6 +5,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../files/data/file_dtos.dart';
+import '../../files/data/file_saver.dart';
 import '../data/share_link_data_source.dart';
 import '../data/share_link_dtos.dart';
 
@@ -157,7 +158,15 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
   // same way SyncBloc's creation site adds LoadSyncStatus rather than the
   // bloc loading in its own constructor. A constructor-time emit runs
   // synchronously before any listener (including bloc_test's) can attach.
-  ShareLinkCubit(this._dataSource, this.token) : super(const ShareLinkLoading());
+  /// The platform saver — only used to save bytes the preview already loaded.
+  final Future<void> Function(String fileName, Stream<Uint8List> content) _save;
+
+  ShareLinkCubit(
+    this._dataSource,
+    this.token, {
+    Future<void> Function(String fileName, Stream<Uint8List> content) save = saveFileStream,
+  })  : _save = save,
+        super(const ShareLinkLoading());
 
   Future<void> load() async {
     emit(const ShareLinkLoading());
@@ -253,27 +262,35 @@ class ShareLinkCubit extends Cubit<ShareLinkState> {
     yield* download.content;
   }
 
-  Future<void> download(FileDto file) async {
+  /// [loadedBytes] are content the preview already downloaded and verified:
+  /// they are saved as they are, without asking for a new grant. A download of
+  /// the same file that is still running makes this a no-op.
+  Future<void> download(FileDto file, {Uint8List? loadedBytes}) async {
     final current = state;
     if (current is! ShareLinkLoaded) return;
+    if (current.downloadProgress.containsKey(file.id)) return;
     emit(current.copyWith(
       downloadProgress: {...current.downloadProgress, file.id: 0},
       downloadErrors: {...current.downloadErrors}..remove(file.id),
     ));
     try {
-      await _dataSource.downloadFile(
-        token,
-        file.id,
-        onProgress: (progress) {
-          if (isClosed) return;
-          final latest = state;
-          if (latest is ShareLinkLoaded) {
-            emit(latest.copyWith(
-              downloadProgress: {...latest.downloadProgress, file.id: progress},
-            ));
-          }
-        },
-      );
+      if (loadedBytes != null) {
+        await _save(file.name, Stream.value(loadedBytes));
+      } else {
+        await _dataSource.downloadFile(
+          token,
+          file.id,
+          onProgress: (progress) {
+            if (isClosed) return;
+            final latest = state;
+            if (latest is ShareLinkLoaded) {
+              emit(latest.copyWith(
+                downloadProgress: {...latest.downloadProgress, file.id: progress},
+              ));
+            }
+          },
+        );
+      }
       if (isClosed) return;
       _clearDownloadProgress(file.id);
     } catch (e) {

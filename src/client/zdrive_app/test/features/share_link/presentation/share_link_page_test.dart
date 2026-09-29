@@ -620,4 +620,86 @@ void main() {
 
     expect(find.text('Preview'), findsOneWidget);
   });
+
+  group('download from the preview', () {
+    testWidgets('Download_FromPreviewOfShareRow_ShowsErrorSnackBarAboveThePreview',
+        (tester) async {
+      whenListen(
+        cubit,
+        const Stream<ShareLinkState>.empty(),
+        initialState: ShareLinkLoaded(
+          root: folder,
+          path: const [],
+          children: [child],
+          downloadErrors: {child.id: Exception('boom')},
+        ),
+      );
+      when(() => cubit.openPreviewStream(child))
+          .thenAnswer((_) => Stream.value(Uint8List.fromList(utf8.encode('hello'))));
+      when(() => cubit.download(child, loadedBytes: any(named: 'loadedBytes')))
+          .thenAnswer((_) async {});
+
+      await tester.pumpWidget(build());
+      await tester.tap(find.text('child.txt'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.download));
+      await tester.pumpAndSettle();
+
+      // The loaded preview's bytes are handed over, not re-downloaded.
+      verify(() => cubit.download(child,
+          loadedBytes: Uint8List.fromList(utf8.encode('hello')))).called(1);
+      expect(find.byType(FilePreviewPage), findsOneWidget);
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(find.byType(AlertDialog), findsNothing);
+    });
+
+    testWidgets('Download_FromPreviewWhileAlreadyRunning_DoesNotStartAnother',
+        (tester) async {
+      whenListen(
+        cubit,
+        const Stream<ShareLinkState>.empty(),
+        initialState: ShareLinkLoaded(
+          root: folder,
+          path: const [],
+          children: [child],
+          downloadProgress: {child.id: 0.5},
+        ),
+      );
+      when(() => cubit.openPreviewStream(child))
+          .thenAnswer((_) => Stream.value(Uint8List.fromList(utf8.encode('hello'))));
+
+      await tester.pumpWidget(build());
+      await tester.tap(find.text('child.txt'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.download).last);
+      await tester.pumpAndSettle();
+
+      verifyNever(() => cubit.download(child, loadedBytes: any(named: 'loadedBytes')));
+    });
+  });
+
+  testWidgets('Tap_UnsupportedSharedFileRow_DownloadsInsteadOfPreviewing', (tester) async {
+    final docx = FileDto(
+      id: 'd1',
+      name: 'report.docx',
+      isFolder: false,
+      sizeBytes: 5,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    whenListen(
+      cubit,
+      const Stream<ShareLinkState>.empty(),
+      initialState: ShareLinkLoaded(root: folder, path: const [], children: [docx]),
+    );
+    when(() => cubit.download(docx)).thenAnswer((_) async {});
+
+    await tester.pumpWidget(build());
+    await tester.tap(find.text('report.docx'));
+    await tester.pumpAndSettle();
+
+    verify(() => cubit.download(docx)).called(1);
+    expect(find.byType(FilePreviewPage), findsNothing);
+  });
 }
+

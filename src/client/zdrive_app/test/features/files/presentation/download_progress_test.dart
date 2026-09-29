@@ -38,6 +38,7 @@ class _Picker extends FilePicker {
 }
 
 void main() {
+  downloadHelperTests();
   late _Repository repository;
   late _Picker picker;
   late StreamController<Uint8List> content;
@@ -168,3 +169,35 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
 }
+
+void downloadHelperTests() {
+  test('DownloadFile_LoadedBytesGiven_SavesThemWithoutDownloadingAgain', () async {
+    final repository = _Repository();
+    final file = FileItem(
+      id: 'f1',
+      name: 'a.txt',
+      isFolder: false,
+      createdAt: DateTime(2026),
+      updatedAt: DateTime(2026),
+    );
+    final saved = <int>[];
+    String? savedName;
+
+    await downloadFile(
+      file,
+      repository,
+      loadedBytes: Uint8List.fromList([1, 2, 3]),
+      save: (name, content) async {
+        savedName = name;
+        await for (final chunk in content) {
+          saved.addAll(chunk);
+        }
+      },
+    );
+
+    expect(savedName, 'a.txt');
+    expect(saved, [1, 2, 3]);
+    verifyNever(() => repository.downloadFileStream(any()));
+  });
+}
+

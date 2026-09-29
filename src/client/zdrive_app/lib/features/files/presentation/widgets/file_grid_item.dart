@@ -90,7 +90,7 @@ class FileGridItem extends StatelessWidget {
                         case 'share':
                           onShare();
                         case 'download':
-                        onDownload?.call();
+                          onDownload?.call();
                         case 'versions':
                           onVersions();
                         case 'keep':

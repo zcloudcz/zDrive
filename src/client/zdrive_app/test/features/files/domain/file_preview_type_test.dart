@@ -98,4 +98,27 @@ void main() {
       expect(mimeTypeForFileName('noextension'), isNull);
     });
   });
+
+  group('detectPreviewKind stored type precedence', () {
+    test('DetectPreviewKind_StoredImageTypeWithTextExtension_ReturnsImage', () {
+      expect(
+        detectPreviewKind(mimeType: 'image/png', fileName: 'scan.txt'),
+        PreviewKind.image,
+      );
+    });
+
+    test('DetectPreviewKind_StoredPdfTypeWithTextExtension_ReturnsPdf', () {
+      expect(
+        detectPreviewKind(mimeType: 'application/pdf', fileName: 'scan.md'),
+        PreviewKind.pdf,
+      );
+    });
+
+    test('DetectPreviewKind_TsWithVideoMimeType_StillReturnsText', () {
+      expect(
+        detectPreviewKind(mimeType: 'video/mp2t', fileName: 'app.ts'),
+        PreviewKind.text,
+      );
+    });
+  });
 }

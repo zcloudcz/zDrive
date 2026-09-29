@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -38,8 +40,57 @@ void _openSharePreview(BuildContext context, FileDto file) {
     mimeType: file.mimeType,
     sizeBytes: file.sizeBytes,
     openContent: () => cubit.openPreviewStream(file),
-    onDownload: (_) => cubit.download(file),
+    onDownload: (previewContext, loadedBytes) =>
+        _downloadFromPreview(previewContext, cubit, file, loadedBytes),
   );
+}
+
+/// Download started from the preview: the progress dialog and any error are
+/// shown above the preview (the share page underneath is hidden), the same
+/// way the file browser does it. A download of [file] that is already running
+/// is not started a second time.
+Future<void> _downloadFromPreview(
+  BuildContext context,
+  ShareLinkCubit cubit,
+  FileDto file,
+  Uint8List? loadedBytes,
+) async {
+  final before = cubit.state;
+  if (before is ShareLinkLoaded && before.downloadProgress.containsKey(file.id)) return;
+  final l10n = AppLocalizations.of(context)!;
+  final messenger = ScaffoldMessenger.of(context);
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final progressRoute = DialogRoute<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => PopScope(
+      canPop: false,
+      child: AlertDialog(
+        title: Text(l10n.downloadProgress),
+        content: Row(
+          children: [
+            CircularProgressIndicator(semanticsLabel: l10n.downloadProgress),
+            const SizedBox(width: 24),
+            Expanded(child: Text(file.name)),
+          ],
+        ),
+      ),
+    ),
+  );
+  navigator.push(progressRoute);
+  try {
+    // Paint the dialog before the save dialog / network I/O starts.
+    await WidgetsBinding.instance.endOfFrame;
+    await cubit.download(file, loadedBytes: loadedBytes);
+  } finally {
+    if (navigator.mounted && progressRoute.isActive) navigator.removeRoute(progressRoute);
+  }
+  // ShareLinkCubit.download reports failures through its state, not by throwing.
+  final after = cubit.state;
+  final error = after is ShareLinkLoaded ? after.downloadErrors[file.id] : null;
+  if (error != null && messenger.mounted) {
+    messenger.showSnackBar(SnackBar(content: Text(describeError(error, l10n))));
+  }
 }
 
 /// Maps a write/delete/upload error from the share write API to user-facing
@@ -827,7 +878,12 @@ class _ShareChildRow extends StatelessWidget {
             ),
       onTap: file.isFolder
           ? () => context.read<ShareLinkCubit>().openFolder(file)
-          : () => _openSharePreview(context, file),
+          // Same rule as the single-file card: previewable types open the
+          // preview, anything else downloads.
+          : detectPreviewKind(mimeType: file.mimeType, fileName: file.name) !=
+                  PreviewKind.unsupported
+              ? () => _openSharePreview(context, file)
+              : () => context.read<ShareLinkCubit>().download(file),
     );
   }
 }

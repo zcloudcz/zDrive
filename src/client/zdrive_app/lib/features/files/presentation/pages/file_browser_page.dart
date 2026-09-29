@@ -505,12 +505,17 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       mimeType: file.mimeType,
       sizeBytes: file.sizeBytes,
       openContent: () => getIt<FileRepository>().downloadFileStream(file.id),
-      onDownload: (previewContext) => _downloadFile(previewContext, file),
+      onDownload: (previewContext, loadedBytes) =>
+          _downloadFile(previewContext, file, loadedBytes: loadedBytes),
       onShare: (previewContext) => _showShareDialog(previewContext, file),
     );
   }
 
-  Future<void> _downloadFile(BuildContext context, FileItem file) async {
+  Future<void> _downloadFile(
+    BuildContext context,
+    FileItem file, {
+    Uint8List? loadedBytes,
+  }) async {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context, rootNavigator: true);
     final l10n = AppLocalizations.of(context)!;
@@ -536,7 +541,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       // Paint feedback before opening the native save dialog or starting I/O.
       await WidgetsBinding.instance.endOfFrame;
       if (!context.mounted || !progressRoute.isActive) return;
-      await downloadFile(file, getIt<FileRepository>());
+      await downloadFile(file, getIt<FileRepository>(), loadedBytes: loadedBytes);
     } catch (e) {
       if (context.mounted && messenger.mounted) {
         messenger.showSnackBar(SnackBar(content: Text(describeError(e, l10n))));
@@ -711,6 +716,12 @@ Future<void> downloadFile(
   FileItem file,
   FileRepository repository, {
   Future<void> Function(String fileName, Stream<Uint8List> content) save = saveFileStream,
+  Uint8List? loadedBytes,
 }) async {
-  await save(file.name, repository.downloadFileStream(file.id));
+  // Bytes already loaded (and verified) by the preview are saved as they are
+  // instead of downloading the file a second time.
+  await save(
+    file.name,
+    loadedBytes != null ? Stream.value(loadedBytes) : repository.downloadFileStream(file.id),
+  );
 }

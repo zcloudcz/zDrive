@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:bloc_test/bloc_test.dart';
@@ -32,7 +33,7 @@ void main() {
     ),
     act: (cubit) => cubit.load(),
     expect: () => [
-      const FilePreviewLoading(progress: 0),
+      const FilePreviewLoading(progress: null),
       FilePreviewLoaded(kind: PreviewKind.image, bytes: _bytes(3)),
     ],
   );
@@ -45,7 +46,7 @@ void main() {
     ),
     act: (cubit) => cubit.load(),
     expect: () => [
-      const FilePreviewLoading(progress: 0),
+      const FilePreviewLoading(progress: null),
       isA<FilePreviewError>(),
     ],
   );
@@ -114,4 +115,51 @@ void main() {
     act: (cubit) => cubit.load(),
     expect: () => [const FilePreviewUnsupported()],
   );
+
+  blocTest<FilePreviewCubit, FilePreviewState>(
+    'Load_DeclaredSizeZero_ProgressStaysIndeterminate',
+    build: () => FilePreviewCubit(
+      fileName: 'a.txt',
+      sizeBytes: 0,
+      openContent: () => Stream.fromIterable([_bytes(2), _bytes(2)]),
+    ),
+    act: (cubit) => cubit.load(),
+    expect: () => [
+      const FilePreviewLoading(progress: null),
+      FilePreviewLoaded(kind: PreviewKind.text, bytes: _bytes(4)),
+    ],
+  );
+
+  test('Close_WhileLoading_CancelsTheTransfer', () async {
+    var cancelled = false;
+    final controller = StreamController<Uint8List>(onCancel: () => cancelled = true);
+    final cubit = FilePreviewCubit(
+      fileName: 'a.png',
+      openContent: () => controller.stream,
+    );
+    final loading = cubit.load();
+    controller.add(_bytes(2));
+    await Future<void>.delayed(Duration.zero);
+
+    await cubit.close();
+    await loading;
+
+    expect(cancelled, isTrue);
+  });
+
+  test('Load_TooLargeMidStream_CancelsTheTransfer', () async {
+    var cancelled = false;
+    final controller = StreamController<Uint8List>(onCancel: () => cancelled = true);
+    final cubit = FilePreviewCubit(
+      fileName: 'a.txt',
+      openContent: () => controller.stream,
+    );
+    final loading = cubit.load();
+    controller.add(_bytes(previewTextMaxBytes + 1));
+    await loading;
+
+    expect(cubit.state, isA<FilePreviewTooLarge>());
+    expect(cancelled, isTrue);
+    await cubit.close();
+  });
 }

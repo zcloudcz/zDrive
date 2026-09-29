@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -38,7 +39,7 @@ void main() {
         fileName: 'photo.png',
         sizeBytes: _png.length,
         openContent: () => Stream.value(Uint8List.fromList(_png)),
-        onDownload: (_) {},
+        onDownload: (_, _) {},
       )));
       await tester.pump();
       await tester.pump();
@@ -54,7 +55,7 @@ void main() {
         openContent: () => Stream.value(
           Uint8List.fromList([...utf8.encode('héllo '), 0xFF, ...utf8.encode(' end')]),
         ),
-        onDownload: (_) {},
+        onDownload: (_, _) {},
       )));
       await tester.pump();
       await tester.pump();
@@ -69,7 +70,7 @@ void main() {
         fileName: 'huge.png',
         sizeBytes: previewMaxBytes + 1,
         openContent: () => fail('content must not be opened'),
-        onDownload: (_) => downloads++,
+        onDownload: (_, _) => downloads++,
       )));
       await tester.pump();
 
@@ -85,7 +86,7 @@ void main() {
         fileName: 'report.docx',
         sizeBytes: 2048,
         openContent: () => fail('content must not be opened'),
-        onDownload: (_) => downloads++,
+        onDownload: (_, _) => downloads++,
       )));
       await tester.pump();
 
@@ -105,17 +106,57 @@ void main() {
               ? Stream<Uint8List>.error(StateError('boom'))
               : Stream.value(Uint8List.fromList(utf8.encode('recovered')));
         },
-        onDownload: (_) {},
+        onDownload: (_, _) {},
       )));
       await tester.pump();
       await tester.pump();
 
       expect(find.text('Retry'), findsOneWidget);
       await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('recovered'), findsOneWidget);
+    });
+
+    testWidgets('Download_AfterLoaded_PassesLoadedBytesToCaller', (tester) async {
+      Uint8List? received;
+      var calls = 0;
+      await tester.pumpWidget(_app(FilePreviewPage(
+        fileName: 'notes.txt',
+        openContent: () => Stream.value(Uint8List.fromList(utf8.encode('abc'))),
+        onDownload: (_, bytes) {
+          calls++;
+          received = bytes;
+        },
+      )));
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('recovered'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.download));
+
+      expect(calls, 1);
+      expect(received, Uint8List.fromList(utf8.encode('abc')));
+    });
+
+    testWidgets('Download_BeforeLoaded_PassesNoBytes', (tester) async {
+      final never = StreamController<Uint8List>();
+      addTearDown(never.close);
+      var calls = 0;
+      Uint8List? received = Uint8List(1);
+      await tester.pumpWidget(_app(FilePreviewPage(
+        fileName: 'notes.txt',
+        openContent: () => never.stream,
+        onDownload: (_, bytes) {
+          calls++;
+          received = bytes;
+        },
+      )));
+      await tester.pump();
+
+      await tester.tap(find.byIcon(Icons.download));
+
+      expect(calls, 1);
+      expect(received, isNull);
     });
 
     testWidgets('Preview_ToolbarShareAndClose_InvokeCallbacksAndPop', (tester) async {
@@ -126,7 +167,7 @@ void main() {
             context,
             fileName: 'notes.txt',
             openContent: () => Stream.value(Uint8List.fromList(utf8.encode('x'))),
-            onDownload: (_) {},
+            onDownload: (_, _) {},
             onShare: (_) => shares++,
           ),
           child: const Text('open'),

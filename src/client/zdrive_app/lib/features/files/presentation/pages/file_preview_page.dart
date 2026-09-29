@@ -23,8 +23,10 @@ class FilePreviewPage extends StatelessWidget {
   final Stream<Uint8List> Function() openContent;
 
   /// Called with this page's context, so anything it shows opens above the
-  /// preview rather than beneath it.
-  final void Function(BuildContext context) onDownload;
+  /// preview rather than beneath it. [loadedBytes] is the already downloaded
+  /// and verified content when the preview has finished loading — the caller
+  /// should save those instead of downloading the file again.
+  final void Function(BuildContext context, Uint8List? loadedBytes) onDownload;
   final void Function(BuildContext context)? onShare;
 
   const FilePreviewPage({
@@ -42,7 +44,7 @@ class FilePreviewPage extends StatelessWidget {
     BuildContext context, {
     required String fileName,
     required Stream<Uint8List> Function() openContent,
-    required void Function(BuildContext context) onDownload,
+    required void Function(BuildContext context, Uint8List? loadedBytes) onDownload,
     String? mimeType,
     int? sizeBytes,
     void Function(BuildContext context)? onShare,
@@ -91,7 +93,7 @@ class FilePreviewPage extends StatelessWidget {
                   builder: (context) => IconButton(
                     icon: const Icon(Icons.download),
                     tooltip: l10n.download,
-                    onPressed: () => onDownload(context),
+                    onPressed: () => _download(context),
                   ),
                 ),
                 if (onShare != null)
@@ -139,12 +141,17 @@ class FilePreviewPage extends StatelessWidget {
     );
   }
 
+  void _download(BuildContext context) {
+    final state = context.read<FilePreviewCubit>().state;
+    onDownload(context, state is FilePreviewLoaded ? state.bytes : null);
+  }
+
   Widget _notice(BuildContext context, String message) {
     return _PreviewNotice(
       mimeType: mimeType,
       sizeBytes: sizeBytes,
       message: message,
-      onDownload: () => onDownload(context),
+      onDownload: () => _download(context),
     );
   }
 
@@ -157,6 +164,12 @@ class FilePreviewPage extends StatelessWidget {
             child: Image.memory(
               bytes,
               fit: BoxFit.contain,
+              // Decode no wider than the screen needs: a full-resolution
+              // 48 MP photo would exhaust memory on mobile.
+              cacheWidth: (MediaQuery.sizeOf(context).width *
+                      MediaQuery.devicePixelRatioOf(context))
+                  .round()
+                  .clamp(1, 4096),
               // Decoding is up to the platform codec (HEIC in particular), so
               // a failure here means "unavailable", not "broken file".
               errorBuilder: (context, _, _) => _notice(
@@ -169,7 +182,11 @@ class FilePreviewPage extends StatelessWidget {
       case PreviewKind.text:
         return _TextPreview(bytes: bytes);
       case PreviewKind.pdf:
-        return PdfViewer.data(bytes, sourceName: fileName);
+        return PdfViewer.data(
+          bytes,
+          // pdfrx caches documents globally by this name.
+          sourceName: '${context.read<FilePreviewCubit>().documentKey}/$fileName',
+        );
       case PreviewKind.unsupported:
         return _notice(context, AppLocalizations.of(context)!.previewUnsupported);
     }
