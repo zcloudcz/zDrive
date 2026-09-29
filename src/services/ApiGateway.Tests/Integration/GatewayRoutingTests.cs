@@ -67,21 +67,6 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
             .ClusterId.Should().Be("apiCluster");
     }
 
-    /// <summary>
-    /// The SignalR hub route deliberately carries no AuthorizationPolicy.
-    /// SignalR passes its token in the <c>access_token</c> query string
-    /// because the browser WebSocket transport cannot send an Authorization
-    /// header, and NotificationService reads it there
-    /// (<c>NotificationService.Infrastructure.DependencyInjection</c> installs
-    /// an <c>OnMessageReceived</c> handler scoped to /hubs/sync). The gateway
-    /// has no such handler, so applying its default policy would 401 a request
-    /// the destination can authenticate perfectly well.
-    /// </summary>
-    /// <remarks>
-    /// Asserted against the route table rather than by issuing a request: a
-    /// developer running NotificationService locally on :5106 would get a real
-    /// 401 from the hub's [Authorize] and turn a status-code assertion red.
-    /// </remarks>
     [Fact]
     public void ThumbnailRoute_HasItsOwnRateLimitPolicy_AndOnlyMatchesThumbnailPaths()
     {
@@ -109,6 +94,21 @@ public sealed class GatewayRoutingTests : IClassFixture<GatewayFactory>
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    /// <summary>
+    /// The SignalR hub route deliberately carries no AuthorizationPolicy.
+    /// SignalR passes its token in the <c>access_token</c> query string
+    /// because the browser WebSocket transport cannot send an Authorization
+    /// header, and NotificationService reads it there
+    /// (<c>NotificationService.Infrastructure.DependencyInjection</c> installs
+    /// an <c>OnMessageReceived</c> handler scoped to /hubs/sync). The gateway
+    /// has no such handler, so applying its default policy would 401 a request
+    /// the destination can authenticate perfectly well.
+    /// </summary>
+    /// <remarks>
+    /// Asserted against the route table rather than by issuing a request: a
+    /// developer running NotificationService locally on :5106 would get a real
+    /// 401 from the hub's [Authorize] and turn a status-code assertion red.
+    /// </remarks>
     [Fact]
     public void SyncHubRoute_IsRoutedWithoutAuthorizationPolicy()
     {
