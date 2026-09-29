@@ -15,4 +15,12 @@ public sealed class VersioningOptions
     /// Zero or negative disables pruning.
     /// </summary>
     public int MaxVersionsPerFile { get; set; } = 10;
+
+    /// <summary>
+    /// Minimum age in days before a version may be pruned. A version is only
+    /// pruned when it is beyond the newest MaxVersionsPerFile AND older than
+    /// this many days, so MaxVersionsPerFile is NOT a hard cap when young
+    /// versions exceed it. Zero or negative (default) means age is ignored.
+    /// </summary>
+    public int MinRetentionDays { get; set; } = 0;
 }

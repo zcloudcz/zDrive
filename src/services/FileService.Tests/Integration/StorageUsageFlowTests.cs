@@ -36,12 +36,13 @@ public sealed class StorageUsageFlowTests : IClassFixture<FileServiceFactory>
 
     public StorageUsageFlowTests(FileServiceFactory factory) => _factory = factory;
 
-    private HttpClient CreateQuotaClient()
+    private HttpClient CreateQuotaClient(int? minRetentionDays = null)
     {
         var host = _factory.WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
-                new KeyValuePair<string, string?>("Storage:DefaultUserQuotaBytes", QuotaBytes.ToString())
+                new KeyValuePair<string, string?>("Storage:DefaultUserQuotaBytes", QuotaBytes.ToString()),
+                new KeyValuePair<string, string?>("Versioning:MinRetentionDays", minRetentionDays?.ToString())
             ])));
 
         var client = host.CreateClient();
@@ -78,6 +79,23 @@ public sealed class StorageUsageFlowTests : IClassFixture<FileServiceFactory>
 
         usage.LimitBytes.Should().Be(QuotaBytes);
         usage.UsedBytes.Should().Be(900);
+    }
+
+    [Fact]
+    public async Task GetUsage_YoungVersionsAboveMaxVersions_CountedInFull()
+    {
+        var client = CreateQuotaClient(minRetentionDays: 30);
+
+        // FileServiceFactory.MaxVersionsPerFile is 3; with a 30-day minimum
+        // retention none of these brand-new versions may be pruned, so all
+        // five stay and the SUM is 100 + 110 + 120 + 130 + 140 = 600.
+        var file = await CreateFile(client, "young.txt");
+        for (var size = 100; size <= 140; size += 10)
+            await CreateVersion(client, file.Id, sizeBytes: size);
+
+        var usage = await GetUsage(client);
+
+        usage.UsedBytes.Should().Be(600);
     }
 
     [Fact]
