@@ -30,6 +30,12 @@ public static class VersionRetention
 
         if (options.MinRetentionDays > 0)
         {
+            // A minimum age reaching back before DateTime.MinValue (e.g. a
+            // huge value meant as "keep forever") would make AddDays throw;
+            // nothing can be that old, so nothing is prunable.
+            if (options.MinRetentionDays >= (utcNow - DateTime.MinValue).TotalDays)
+                return existing.Where(_ => false);
+
             var cutoff = utcNow.AddDays(-options.MinRetentionDays);
             beyondLimit = beyondLimit.Where(v => v.CreatedAt < cutoff);
         }

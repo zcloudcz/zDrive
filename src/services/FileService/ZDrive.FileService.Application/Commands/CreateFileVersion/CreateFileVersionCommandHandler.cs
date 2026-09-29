@@ -98,7 +98,8 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
 
         // The new version is only in the change tracker — this query hits the
         // database and does not see it. Keeping MaxVersionsPerFile - 1 existing
-        // rows therefore yields exactly MaxVersionsPerFile after SaveChanges.
+        // rows therefore yields MaxVersionsPerFile after SaveChanges (more when
+        // MinRetentionDays keeps younger versions).
         return await VersionRetention
             .SelectPrunable(_db.FileVersions.Where(v => v.FileId == fileId), _options, _time.GetUtcNow().UtcDateTime)
             .ToListAsync(cancellationToken);

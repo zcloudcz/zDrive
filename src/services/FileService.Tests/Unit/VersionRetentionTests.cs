@@ -77,6 +77,14 @@ public sealed class VersionRetentionTests
     }
 
     [Fact]
+    public void SelectPrunable_MinRetentionBeyondCalendar_NeverPrunesAndDoesNotThrow()
+    {
+        var options = new VersioningOptions { MaxVersionsPerFile = 3, MinRetentionDays = int.MaxValue };
+
+        VersionRetention.SelectPrunable(Versions(5, daysApart: 400).AsQueryable(), options, Now).Should().BeEmpty();
+    }
+
+    [Fact]
     public void SelectPrunable_LimitDisabled_NeverPrunes()
     {
         var options = new VersioningOptions { MaxVersionsPerFile = 0, MinRetentionDays = 30 };
