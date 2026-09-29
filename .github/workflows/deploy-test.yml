@@ -31,9 +31,9 @@
 #        CONTAINERAPP_NAMES_JSON <- terraform output -json container_app_names
 #                                   (map: gateway/auth/file/storage/sync/photo/notification -> Container App name)
 #
-# NOTE: Auth+File+Storage+Sync were merged into one host, src/services/Api,
+# NOTE: Auth+File+Storage+Sync+Photo were merged into one host, src/services/Api,
 # deployed under the matrix key "api" below. CONTAINERAPP_NAMES_JSON and
-# infra/terraform/container-apps/ still define 7 apps (one per old service) —
+# infra/terraform/container-apps/ still define 7 apps (one per old service, photo included) —
 # this workflow was intentionally left pointing only its own matrix at the
 # merge; reconciling Terraform/the Container Apps names map is a separate,
 # deliberately out-of-scope follow-up (Container Apps is not zDrive's
@@ -69,7 +69,6 @@ jobs:
         service:
           - { key: gateway, dir: ApiGateway }
           - { key: api, dir: Api }
-          - { key: photo, dir: PhotoService }
           - { key: notification, dir: NotificationService }
 
     steps:

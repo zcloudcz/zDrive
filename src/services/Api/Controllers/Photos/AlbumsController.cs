@@ -10,7 +10,7 @@ using ZDrive.PhotoService.Application.Queries.GetAlbumPhotos;
 using ZDrive.PhotoService.Application.Queries.GetAlbums;
 using ZDrive.Shared.Auth;
 
-namespace ZDrive.PhotoService.Api.Controllers;
+namespace ZDrive.Api.Controllers.Photos;
 
 [ApiController]
 [Route("api/v1/albums")]

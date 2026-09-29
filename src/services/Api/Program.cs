@@ -5,10 +5,11 @@ using ZDrive.AuthService.Infrastructure.Persistence;
 using ZDrive.FileService.Infrastructure.Persistence;
 using ZDrive.StorageService.Infrastructure.Persistence;
 using ZDrive.SyncService.Infrastructure.Persistence;
+using ZDrive.PhotoService.Infrastructure.Persistence;
 using ZDrive.Shared.Extensions;
 using ZDrive.Shared.Middleware;
 using ZDrive.Shared.Persistence;
-// NOTE: no `using ZDrive.*Service.Application;` / `...Infrastructure;` — all four
+// NOTE: no `using ZDrive.*Service.Application;` / `...Infrastructure;` — all five
 // AddApplication()/AddInfrastructure() extension methods share the same signature
 // across namespaces, so a using would cause a CS0121 ambiguity. Called fully
 // qualified below instead.
@@ -33,8 +34,10 @@ ZDrive.StorageService.Application.DependencyInjection.AddApplication(builder.Ser
 ZDrive.StorageService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
 ZDrive.SyncService.Application.DependencyInjection.AddApplication(builder.Services);
 ZDrive.SyncService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
+ZDrive.PhotoService.Application.DependencyInjection.AddApplication(builder.Services);
+ZDrive.PhotoService.Infrastructure.DependencyInjection.AddInfrastructure(builder.Services, builder.Configuration, builder.Environment.IsDevelopment());
 
-// One validation behavior for all four MediatR assemblies (was 4 identical copies).
+// One validation behavior for all five MediatR assemblies.
 builder.Services.AddTransient(typeof(MediatR.IPipelineBehavior<,>), typeof(ZDrive.Shared.Behaviors.ValidationBehavior<,>));
 
 // Controllers live in THIS assembly, so plain AddControllers() finds them —
@@ -86,7 +89,8 @@ builder.Services.AddHealthChecks()
     .AddDbContextCheck<AuthDbContext>("auth-db", tags: ["ready"])
     .AddDbContextCheck<FileDbContext>("files-db", tags: ["ready"])
     .AddDbContextCheck<StorageDbContext>("storage-db", tags: ["ready"])
-    .AddDbContextCheck<SyncDbContext>("sync-db", tags: ["ready"]);
+    .AddDbContextCheck<SyncDbContext>("sync-db", tags: ["ready"])
+    .AddDbContextCheck<PhotoDbContext>("photos-db", tags: ["ready"]);
 
 builder.Services.AddCors(options =>
 {
@@ -109,7 +113,7 @@ if (!shareGrantOptions.TryGetKey(out _))
     app.Logger.LogInformation("Sharing:DownloadGrantKey is missing or too short — public share downloads are disabled.");
 
 // Each context migrates its own schema + own __EFMigrationsHistory (advisory
-// lock per schema inside MigrateWithBaselineAsync), so running all four in
+// lock per schema inside MigrateWithBaselineAsync), so running all five in
 // one process against the shared "zdrive" DB is safe. Sequential on purpose.
 using (var scope = app.Services.CreateScope())
 {
@@ -117,6 +121,7 @@ using (var scope = app.Services.CreateScope())
     await scope.ServiceProvider.GetRequiredService<FileDbContext>().MigrateWithBaselineAsync("files");
     await scope.ServiceProvider.GetRequiredService<StorageDbContext>().MigrateWithBaselineAsync("storage");
     await scope.ServiceProvider.GetRequiredService<SyncDbContext>().MigrateWithBaselineAsync("sync");
+    await scope.ServiceProvider.GetRequiredService<PhotoDbContext>().MigrateWithBaselineAsync("photos");
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();

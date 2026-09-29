@@ -1,44 +1,16 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using MediatR;
-using ZDrive.PhotoService.Application.DTOs;
-using ZDrive.PhotoService.Application.Interfaces;
-using ZDrive.PhotoService.Domain.Entities;
-using ZDrive.PhotoService.Domain.Enums;
 
-namespace ZDrive.PhotoService.Application.Commands.IngestPhoto;
+namespace ZDrive.PhotoService.Application.Common;
 
-public sealed partial class IngestPhotoCommandHandler : IRequestHandler<IngestPhotoCommand, PhotoDto>
+/// <summary>Last-resort capture date for images without EXIF.</summary>
+public static partial class FileNameDateParser
 {
-    private readonly IPhotoDbContext _db;
-
-    public IngestPhotoCommandHandler(IPhotoDbContext db) => _db = db;
-
-    public async Task<PhotoDto> Handle(IngestPhotoCommand request, CancellationToken cancellationToken)
-    {
-        var photo = new Photo
-        {
-            Id = Guid.NewGuid(),
-            FileId = request.FileId,
-            UserId = request.UserId,
-            TenantId = request.TenantId,
-            OriginalFileName = request.OriginalFileName,
-            BlobPath = request.BlobPath,
-            TakenAt = TryParseDateFromFileName(request.OriginalFileName),
-            ProcessingStatus = ProcessingStatus.Ingested,
-        };
-
-        _db.Photos.Add(photo);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        return photo.ToDto();
-    }
-
     /// <summary>
     /// Attempts to extract a date/time from the file name when no EXIF data is available.
     /// Supports patterns like: IMG_20231225_143022, 2023-12-25_14-30-22, 20231225_143022.
     /// </summary>
-    internal static DateTime? TryParseDateFromFileName(string fileName)
+    public static DateTime? TryParse(string fileName)
     {
         var name = Path.GetFileNameWithoutExtension(fileName);
 

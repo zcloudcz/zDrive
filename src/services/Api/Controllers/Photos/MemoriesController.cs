@@ -5,7 +5,7 @@ using ZDrive.PhotoService.Application.Commands.DismissMemory;
 using ZDrive.PhotoService.Application.Queries.GetMemories;
 using ZDrive.Shared.Auth;
 
-namespace ZDrive.PhotoService.Api.Controllers;
+namespace ZDrive.Api.Controllers.Photos;
 
 [ApiController]
 [Route("api/v1/memories")]

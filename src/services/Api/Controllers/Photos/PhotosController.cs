@@ -2,13 +2,12 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ZDrive.PhotoService.Application.Commands.AddTag;
-using ZDrive.PhotoService.Application.Commands.IngestPhoto;
 using ZDrive.PhotoService.Application.Queries.GetPhoto;
 using ZDrive.PhotoService.Application.Queries.GetTimeline;
 using ZDrive.PhotoService.Application.Queries.SearchPhotos;
 using ZDrive.Shared.Auth;
 
-namespace ZDrive.PhotoService.Api.Controllers;
+namespace ZDrive.Api.Controllers.Photos;
 
 [ApiController]
 [Route("api/v1/photos")]
@@ -18,20 +17,6 @@ public class PhotosController : ControllerBase
     private readonly IMediator _mediator;
 
     public PhotosController(IMediator mediator) => _mediator = mediator;
-
-    [HttpPost("ingest")]
-    public async Task<IActionResult> Ingest([FromBody] IngestPhotoCommand command, CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        var enriched = command with
-        {
-            UserId = userId,
-            // Implicit single-user tenant when no tenant claim is present (see CLAUDE.md).
-            TenantId = User.GetTenantId() ?? userId
-        };
-        var result = await _mediator.Send(enriched, ct);
-        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
-    }
 
     [HttpGet("timeline")]
     public async Task<IActionResult> GetTimeline(

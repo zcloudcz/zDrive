@@ -27,17 +27,8 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
         return (await response.Content.ReadFromJsonAsync<AlbumDto>())!;
     }
 
-    private async Task<PhotoDto> IngestPhotoAsync(string fileName = "album-photo.jpg")
-    {
-        var response = await _client.PostAsJsonAsync("/api/v1/photos/ingest", new
-        {
-            fileId = Guid.NewGuid(),
-            originalFileName = fileName,
-            blobPath = $"/tenant/user/{fileName}"
-        });
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        return (await response.Content.ReadFromJsonAsync<PhotoDto>())!;
-    }
+    private Task<PhotoDto> SeedPhotoAsync(string fileName = "album-photo.jpg") =>
+        _factory.SeedPhotoAsync(fileName);
 
     [Fact]
     public async Task Create_ValidName_AppearsInGetAll()
@@ -62,7 +53,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
     public async Task AddPhotos_ExistingAlbumAndPhoto_AppearsInGetPhotos()
     {
         var album = await CreateAlbumAsync("AddPhotos_Existing");
-        var photo = await IngestPhotoAsync();
+        var photo = await SeedPhotoAsync();
 
         var addResponse = await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new
         {
@@ -85,14 +76,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
         // (added count excludes it), not added and not a hard failure.
         var album = await CreateAlbumAsync("AddPhotos_ForeignPhoto");
 
-        using var foreignClient = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
-        var foreignPhotoResponse = await foreignClient.PostAsJsonAsync("/api/v1/photos/ingest", new
-        {
-            fileId = Guid.NewGuid(),
-            originalFileName = "not-yours.jpg",
-            blobPath = "/tenant/other/not-yours.jpg"
-        });
-        var foreignPhoto = (await foreignPhotoResponse.Content.ReadFromJsonAsync<PhotoDto>())!;
+        var foreignPhoto = await _factory.SeedPhotoAsync("not-yours.jpg", Guid.NewGuid(), Guid.NewGuid());
 
         var addResponse = await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new
         {
@@ -112,7 +96,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
     [Fact]
     public async Task AddPhotos_NonExistingAlbum_Returns404()
     {
-        var photo = await IngestPhotoAsync();
+        var photo = await SeedPhotoAsync();
 
         var response = await _client.PostAsJsonAsync($"/api/v1/albums/{Guid.NewGuid()}/photos", new
         {
@@ -133,7 +117,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
     public async Task RemovePhoto_ExistingAssociation_NoLongerInGetPhotos()
     {
         var album = await CreateAlbumAsync("RemovePhoto_Existing");
-        var photo = await IngestPhotoAsync();
+        var photo = await SeedPhotoAsync();
         await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new { photoIds = new[] { photo.Id } });
 
         var removeResponse = await _client.DeleteAsync($"/api/v1/albums/{album.Id}/photos/{photo.Id}");

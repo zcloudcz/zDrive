@@ -64,7 +64,7 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
                 options => options.DownloadGrantKey = TestShareGrantKey);
         });
 
-        // The merged host migrates all four contexts on startup, so all four
+        // The merged host migrates all five contexts on startup, so all five
         // connection strings must point at this factory's single Postgres
         // container (each context's own schema, matching DependencyInjection.cs).
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -73,6 +73,7 @@ public sealed class StorageServiceFactory : WebApplicationFactory<Program>, IAsy
             ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
             ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
             ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+            ["ConnectionStrings:PhotoDb"] = _postgres.GetConnectionString() + ";Search Path=photos",
         }));
 
         builder.ConfigureServices(services =>
