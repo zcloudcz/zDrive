@@ -301,6 +301,34 @@ public sealed class TwoFactorFlowTests : IClassFixture<AuthServiceFactory>
     }
 
     [Fact]
+    public async Task LoginTwoFactor_FreshHostSameDatabase_DecryptsSecretWithKeyFromDatabase()
+    {
+        var account = await RegisterAsync();
+        var setup = await SetupAsync(account);
+        await EnableAsync(account, setup.Secret);
+
+        // A second host: its own DI container and key cache, same Postgres.
+        // It can only decrypt the stored secret if the key ring lives in the DB.
+        await using var otherHost = _factory.WithWebHostBuilder(_ => { });
+        var otherClient = otherHost.CreateClient();
+
+        var loginResponse = await otherClient.PostAsJsonAsync("/api/v1/auth/login",
+            new { email = account.Email, password = Password });
+        var login = (await loginResponse.Content.ReadFromJsonAsync<ApiResponse<LoginResultDto>>())!.Data!;
+        login.TwoFactorRequired.Should().BeTrue();
+
+        var response = await otherClient.PostAsJsonAsync("/api/v1/auth/login/2fa", new
+        {
+            challengeToken = login.ChallengeToken,
+            code = TwoFactorTestSupport.CodeFor(setup.Secret)
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<AuthDbContext>().DataProtectionKeys.Should().NotBeEmpty();
+    }
+
+    [Fact]
     public async Task LoginTwoFactor_MissingCode_Returns400()
     {
         var response = await CompleteLoginAsync("whatever");
