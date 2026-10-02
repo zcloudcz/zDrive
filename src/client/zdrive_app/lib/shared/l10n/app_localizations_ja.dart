@@ -545,4 +545,100 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'すべてをこのデバイスに保持しています…';
+
+  @override
+  String get twoFactorTitle => '2段階認証';
+
+  @override
+  String get twoFactorPrompt => '認証アプリに表示される6桁のコードを入力してください。';
+
+  @override
+  String get twoFactorRecoveryPrompt => 'リカバリーコードのいずれかを入力してください。';
+
+  @override
+  String get twoFactorCodeLabel => '6桁のコード';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'リカバリーコード';
+
+  @override
+  String get twoFactorVerifyButton => '確認';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'リカバリーコードを使用';
+
+  @override
+  String get twoFactorUseAuthenticator => '認証アプリのコードを使用';
+
+  @override
+  String get twoFactorBackToSignIn => 'サインインに戻る';
+
+  @override
+  String get authTwoFactorInvalidCode => 'コードが正しくありません。もう一度お試しください。';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'このサインインの有効期限が切れました。戻ってもう一度サインインしてください。';
+
+  @override
+  String get twoFactorStatusOff =>
+      '2段階認証はオフです。オンにすると、サインイン時に認証アプリのコードが必要になります。';
+
+  @override
+  String get twoFactorStatusOn => '2段階認証はオンです。';
+
+  @override
+  String get twoFactorUnavailable =>
+      'このアカウントでは2段階認証を利用できません。サインインのセキュリティは ZCLOUD アカウントで管理されています。';
+
+  @override
+  String get twoFactorEnable => 'オンにする';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'このQRコードを認証アプリでスキャンするか、セットアップキーを手動で入力してください。その後、アプリに表示される6桁のコードを入力します。';
+
+  @override
+  String get twoFactorSetupKey => 'セットアップキー';
+
+  @override
+  String get twoFactorCopy => 'コピー';
+
+  @override
+  String get twoFactorCopied => 'コピーしました';
+
+  @override
+  String get twoFactorConfirmButton => '確認してオンにする';
+
+  @override
+  String get twoFactorRecoveryCodesTitle => 'リカバリーコードを保存してください';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      '認証アプリにアクセスできなくなった場合、各コードは1回だけ使用できます。今回のみ表示されます。';
+
+  @override
+  String get twoFactorCopyCodes => 'すべてのコードをコピー';
+
+  @override
+  String get twoFactorDone => '完了';
+
+  @override
+  String get twoFactorDisable => 'オフにする';
+
+  @override
+  String get twoFactorDisableInfo =>
+      '2段階認証をオフにするには、パスワードと現在のコード(またはリカバリーコード)を入力してください。';
+
+  @override
+  String get twoFactorDisableConfirm => '2段階認証をオフにする';
+
+  @override
+  String get twoFactorPasswordInvalid => 'パスワードが正しくありません。';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode => 'パスワードまたはコードが正しくありません。';
+
+  @override
+  String get twoFactorEnablePasswordInfo => '2段階認証の設定を始めるには、パスワードを入力してください。';
 }

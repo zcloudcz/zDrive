@@ -13,14 +13,46 @@ class AuthRepositoryImpl implements AuthRepository {
   AuthRepositoryImpl(this._remoteDataSource, this._tokenStorage);
 
   @override
-  Future<User> login({required String email, required String password}) async {
+  Future<LoginResult> login({
+    required String email,
+    required String password,
+  }) async {
     final response = await _remoteDataSource.login(
       email: email,
       password: password,
     );
+    if (response.twoFactorRequired) {
+      return LoginTwoFactorRequired(response.challengeToken!);
+    }
+    return LoginSucceeded(
+      await _startPasswordSession(
+        response.accessToken!,
+        response.refreshToken!,
+      ),
+    );
+  }
+
+  @override
+  Future<User> completeTwoFactorLogin({
+    required String challengeToken,
+    String? code,
+    String? recoveryCode,
+  }) async {
+    final response = await _remoteDataSource.loginTwoFactor(
+      challengeToken: challengeToken,
+      code: code,
+      recoveryCode: recoveryCode,
+    );
+    return _startPasswordSession(response.accessToken, response.refreshToken);
+  }
+
+  Future<User> _startPasswordSession(
+    String accessToken,
+    String refreshToken,
+  ) async {
     await _tokenStorage.saveTokens(
-      accessToken: response.accessToken,
-      refreshToken: response.refreshToken,
+      accessToken: accessToken,
+      refreshToken: refreshToken,
     );
     // Password login never carries an Entra refresh token — drop any stale
     // one a previous Entra sign-in on this device left behind (Opus review
@@ -94,6 +126,41 @@ class AuthRepositoryImpl implements AuthRepository {
       email: dto.email,
       displayName: dto.displayName,
       avatarUrl: dto.avatarUrl,
+      twoFactorEnabled: dto.twoFactorEnabled,
+      hasPassword: dto.hasPassword,
+    );
+  }
+
+  @override
+  Future<TwoFactorSetup> setupTwoFactor({required String password}) async {
+    final dto = await _remoteDataSource.setupTwoFactor(password: password);
+    return TwoFactorSetup(secret: dto.secret, otpAuthUri: dto.otpAuthUri);
+  }
+
+  @override
+  Future<List<String>> confirmTwoFactor(String code) async {
+    final result = await _remoteDataSource.confirmTwoFactor(code);
+    // The server just revoked every refresh token, including this device's
+    // old one — the new pair must replace it or the next refresh logs out.
+    await _tokenStorage.saveTokens(
+      accessToken: result.tokens.accessToken,
+      refreshToken: result.tokens.refreshToken,
+    );
+    return result.recoveryCodes;
+  }
+
+  @override
+  Future<void> disableTwoFactor({
+    required String password,
+    required String code,
+  }) async {
+    final tokens = await _remoteDataSource.disableTwoFactor(
+      password: password,
+      code: code,
+    );
+    await _tokenStorage.saveTokens(
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     );
   }
 

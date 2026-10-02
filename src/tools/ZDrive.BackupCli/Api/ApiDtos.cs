@@ -19,6 +19,12 @@ public sealed class ApiError
 
 public sealed record AuthTokens(string AccessToken, string RefreshToken, DateTime ExpiresAt);
 
+/// <summary>
+/// `auth/login` response: tokens for a normal account; for an account with
+/// two-factor authentication the tokens are null and TwoFactorRequired is set.
+/// </summary>
+public sealed record LoginResult(string? AccessToken, string? RefreshToken, DateTime? ExpiresAt, bool TwoFactorRequired = false);
+
 public sealed record FileNode(
     Guid Id,
     string Name,

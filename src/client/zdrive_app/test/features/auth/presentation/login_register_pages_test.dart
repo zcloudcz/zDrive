@@ -140,6 +140,141 @@ void main() {
       },
     );
 
+    testWidgets('2FA challenge replaces the form with the code step', (
+      tester,
+    ) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: const AuthTwoFactorRequired('challenge-1'),
+      );
+
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(find.text(l10n.twoFactorPrompt), findsOneWidget);
+      expect(find.byType(TextFormField), findsNothing);
+      expect(find.widgetWithText(TextField, l10n.twoFactorCodeLabel), findsOne);
+    });
+
+    testWidgets('submitting the code dispatches TwoFactorCodeSubmitted', (
+      tester,
+    ) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: const AuthTwoFactorRequired('challenge-1'),
+      );
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pumpAndSettle();
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+
+      await tester.enterText(find.byType(TextField), '123456');
+      await tester.tap(find.text(l10n.twoFactorVerifyButton));
+      await tester.pump();
+
+      verify(
+        () => authBloc.add(const TwoFactorCodeSubmitted(code: '123456')),
+      ).called(1);
+    });
+
+    testWidgets('the recovery link switches the field and submits a '
+        'recovery code', (tester) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: const AuthTwoFactorRequired('challenge-1'),
+      );
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pumpAndSettle();
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+
+      await tester.tap(find.text(l10n.twoFactorUseRecoveryCode));
+      await tester.pump();
+      expect(find.text(l10n.twoFactorRecoveryPrompt), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'ABCDE-FGHJK');
+      await tester.tap(find.text(l10n.twoFactorVerifyButton));
+      await tester.pump();
+
+      verify(
+        () => authBloc.add(
+          const TwoFactorCodeSubmitted(recoveryCode: 'ABCDE-FGHJK'),
+        ),
+      ).called(1);
+    });
+
+    testWidgets('a rejected code shows the error and keeps the step', (
+      tester,
+    ) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: AuthTwoFactorRequired(
+          'challenge-1',
+          error: DioException(
+            requestOptions: RequestOptions(path: '/auth/login/2fa'),
+            response: Response(
+              requestOptions: RequestOptions(path: '/auth/login/2fa'),
+              statusCode: 400,
+              data: {
+                'error': {
+                  'validationErrors': {
+                    'code': ['Invalid code.'],
+                  },
+                },
+              },
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pumpAndSettle();
+
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+      expect(find.text(l10n.authTwoFactorInvalidCode), findsOneWidget);
+    });
+
+    testWidgets('while a code is being checked the button is disabled', (
+      tester,
+    ) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: const AuthTwoFactorRequired(
+          'challenge-1',
+          submitting: true,
+        ),
+      );
+
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pump();
+
+      final button = tester.widget<FilledButton>(find.byType(FilledButton));
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('back to sign in dispatches TwoFactorCancelled', (
+      tester,
+    ) async {
+      whenListen(
+        authBloc,
+        const Stream<AuthState>.empty(),
+        initialState: const AuthTwoFactorRequired('challenge-1'),
+      );
+      await tester.pumpWidget(build(const LoginPage()));
+      await tester.pumpAndSettle();
+      final l10n = AppLocalizations.of(tester.element(find.byType(LoginPage)))!;
+
+      await tester.tap(find.text(l10n.twoFactorBackToSignIn));
+      await tester.pump();
+
+      verify(() => authBloc.add(const TwoFactorCancelled())).called(1);
+    });
+
     testWidgets('loading state disables the button and shows progress', (
       tester,
     ) async {

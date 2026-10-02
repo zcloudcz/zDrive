@@ -42,7 +42,14 @@ class HomePage extends StatelessWidget {
           WindowsDownloadButton(
             compact: MediaQuery.sizeOf(context).width < 600,
           ),
-          const AppSettingsMenu(),
+          AppSettingsMenu(
+            // No local password (Entra-only) means no 2FA setup here.
+            onTwoFactorSettings: switch (context.watch<AuthBloc>().state) {
+              Authenticated(:final user) when user.hasPassword =>
+                () => context.push('/settings/2fa'),
+              _ => null,
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: l10n.logout,

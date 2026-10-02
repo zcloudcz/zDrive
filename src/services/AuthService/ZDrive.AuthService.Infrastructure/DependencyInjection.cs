@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -57,6 +59,17 @@ public static class DependencyInjection
 
         // Password hashing
         services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
+
+        // TOTP 2FA. Secrets are encrypted with Data Protection, so the key ring
+        // must survive restarts/redeploys on every host: if it is lost, every
+        // stored secret becomes undecryptable and 2FA users are locked out.
+        // Keys therefore live in the auth database (auth."DataProtectionKeys").
+        services.AddDataProtection()
+            .SetApplicationName("zdrive")
+            .PersistKeysToDbContext<AuthDbContext>();
+        services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
+        services.AddSingleton<ITotpService, TotpService>();
+        services.Configure<TwoFactorOptions>(configuration.GetSection(TwoFactorOptions.SectionName));
 
         // Authentication
         var rsa = RSA.Create();

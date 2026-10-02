@@ -564,4 +564,105 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Säilytetään kaikki tällä laitteella…';
+
+  @override
+  String get twoFactorTitle => 'Kaksivaiheinen tunnistautuminen';
+
+  @override
+  String get twoFactorPrompt =>
+      'Anna todennussovelluksesi näyttämä 6-numeroinen koodi.';
+
+  @override
+  String get twoFactorRecoveryPrompt => 'Anna yksi palautuskoodeistasi.';
+
+  @override
+  String get twoFactorCodeLabel => '6-numeroinen koodi';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Palautuskoodi';
+
+  @override
+  String get twoFactorVerifyButton => 'Vahvista';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Käytä palautuskoodia';
+
+  @override
+  String get twoFactorUseAuthenticator => 'Käytä todennussovelluksen koodia';
+
+  @override
+  String get twoFactorBackToSignIn => 'Takaisin kirjautumiseen';
+
+  @override
+  String get authTwoFactorInvalidCode => 'Koodi ei kelpaa. Yritä uudelleen.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'Kirjautuminen on vanhentunut. Palaa takaisin ja kirjaudu uudelleen.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'Kaksivaiheinen tunnistautuminen on pois päältä. Kun otat sen käyttöön, kirjautuminen edellyttää koodia todennussovelluksesta.';
+
+  @override
+  String get twoFactorStatusOn =>
+      'Kaksivaiheinen tunnistautuminen on käytössä.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'Kaksivaiheinen tunnistautuminen ei ole käytettävissä tälle tilille. Kirjautumisen turvallisuutta hallitaan ZCLOUD-tililläsi.';
+
+  @override
+  String get twoFactorEnable => 'Ota käyttöön';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Skannaa tämä QR-koodi todennussovelluksella tai anna asetusavain käsin. Kirjoita sitten sovelluksen näyttämä 6-numeroinen koodi.';
+
+  @override
+  String get twoFactorSetupKey => 'Asetusavain';
+
+  @override
+  String get twoFactorCopy => 'Kopioi';
+
+  @override
+  String get twoFactorCopied => 'Kopioitu';
+
+  @override
+  String get twoFactorConfirmButton => 'Vahvista ja ota käyttöön';
+
+  @override
+  String get twoFactorRecoveryCodesTitle => 'Tallenna palautuskoodisi';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Jokainen koodi toimii vain kerran, jos menetät pääsyn todennussovellukseesi. Ne näytetään vain nyt.';
+
+  @override
+  String get twoFactorCopyCodes => 'Kopioi kaikki koodit';
+
+  @override
+  String get twoFactorDone => 'Valmis';
+
+  @override
+  String get twoFactorDisable => 'Poista käytöstä';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Poista kaksivaiheinen tunnistautuminen käytöstä antamalla salasanasi ja voimassa oleva koodi (tai palautuskoodi).';
+
+  @override
+  String get twoFactorDisableConfirm =>
+      'Poista kaksivaiheinen tunnistautuminen käytöstä';
+
+  @override
+  String get twoFactorPasswordInvalid => 'Salasana ei ole oikea.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'Salasana tai koodi ei ole oikea.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Aloita kaksivaiheisen tunnistautumisen käyttöönotto antamalla salasanasi.';
 }

@@ -9,7 +9,10 @@ import '../../core/di/injection.dart';
 import '../../core/events/remote_file_change_notifier.dart';
 import '../../features/auth/presentation/entra_callback_page.dart';
 import '../../features/auth/presentation/login_page.dart';
+import '../../features/auth/domain/auth_repository.dart';
 import '../../features/auth/presentation/register_page.dart';
+import '../../features/auth/presentation/two_factor_cubit.dart';
+import '../../features/auth/presentation/two_factor_settings_page.dart';
 import '../../features/files/presentation/pages/file_browser_page.dart';
 import '../../features/files/presentation/pages/search_page.dart';
 import '../../features/files/presentation/pages/trash_page.dart';
@@ -71,6 +74,13 @@ GoRouter createRouter(AuthBloc authBloc, {Uri? launchUri}) {
         path: '/s/:token',
         builder: (_, state) =>
             ShareLinkPage(token: state.pathParameters['token']!),
+      ),
+      GoRoute(
+        path: '/settings/2fa',
+        builder: (_, _) => BlocProvider(
+          create: (_) => TwoFactorCubit(getIt<AuthRepository>())..load(),
+          child: const TwoFactorSettingsPage(),
+        ),
       ),
       StatefulShellRoute.indexedStack(
         // SyncBloc lives here, not inside SyncPage: sync then runs for the

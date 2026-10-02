@@ -569,4 +569,108 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Conservando todo en este dispositivo…';
+
+  @override
+  String get twoFactorTitle => 'Verificación en dos pasos';
+
+  @override
+  String get twoFactorPrompt =>
+      'Introduce el código de 6 dígitos de tu aplicación de autenticación.';
+
+  @override
+  String get twoFactorRecoveryPrompt =>
+      'Introduce uno de tus códigos de recuperación.';
+
+  @override
+  String get twoFactorCodeLabel => 'Código de 6 dígitos';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Código de recuperación';
+
+  @override
+  String get twoFactorVerifyButton => 'Verificar';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Usar un código de recuperación';
+
+  @override
+  String get twoFactorUseAuthenticator =>
+      'Usar un código de la aplicación de autenticación';
+
+  @override
+  String get twoFactorBackToSignIn => 'Volver a iniciar sesión';
+
+  @override
+  String get authTwoFactorInvalidCode =>
+      'El código no es válido. Inténtalo de nuevo.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'Este inicio de sesión ha caducado. Vuelve atrás e inicia sesión de nuevo.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'La verificación en dos pasos está desactivada. Actívala para exigir un código de tu aplicación de autenticación al iniciar sesión.';
+
+  @override
+  String get twoFactorStatusOn => 'La verificación en dos pasos está activada.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'La verificación en dos pasos no está disponible para esta cuenta. La seguridad del inicio de sesión se gestiona desde tu cuenta ZCLOUD.';
+
+  @override
+  String get twoFactorEnable => 'Activar';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Escanea este código QR con tu aplicación de autenticación o introduce la clave de configuración manualmente. Después escribe el código de 6 dígitos que muestra la aplicación.';
+
+  @override
+  String get twoFactorSetupKey => 'Clave de configuración';
+
+  @override
+  String get twoFactorCopy => 'Copiar';
+
+  @override
+  String get twoFactorCopied => 'Copiado';
+
+  @override
+  String get twoFactorConfirmButton => 'Confirmar y activar';
+
+  @override
+  String get twoFactorRecoveryCodesTitle =>
+      'Guarda tus códigos de recuperación';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Cada código funciona una sola vez si pierdes el acceso a tu aplicación de autenticación. Solo se muestran ahora.';
+
+  @override
+  String get twoFactorCopyCodes => 'Copiar todos los códigos';
+
+  @override
+  String get twoFactorDone => 'Listo';
+
+  @override
+  String get twoFactorDisable => 'Desactivar';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Introduce tu contraseña y un código actual (o un código de recuperación) para desactivar la verificación en dos pasos.';
+
+  @override
+  String get twoFactorDisableConfirm =>
+      'Desactivar la verificación en dos pasos';
+
+  @override
+  String get twoFactorPasswordInvalid => 'La contraseña no es correcta.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'La contraseña o el código no es correcto.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Introduce tu contraseña para empezar a configurar la verificación en dos pasos.';
 }

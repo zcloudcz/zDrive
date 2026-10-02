@@ -570,4 +570,108 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Alles wird auf diesem Gerät behalten…';
+
+  @override
+  String get twoFactorTitle => 'Zwei-Faktor-Authentifizierung';
+
+  @override
+  String get twoFactorPrompt =>
+      'Gib den 6-stelligen Code aus deiner Authenticator-App ein.';
+
+  @override
+  String get twoFactorRecoveryPrompt =>
+      'Gib einen deiner Wiederherstellungscodes ein.';
+
+  @override
+  String get twoFactorCodeLabel => '6-stelliger Code';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Wiederherstellungscode';
+
+  @override
+  String get twoFactorVerifyButton => 'Bestätigen';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Wiederherstellungscode verwenden';
+
+  @override
+  String get twoFactorUseAuthenticator => 'Authenticator-Code verwenden';
+
+  @override
+  String get twoFactorBackToSignIn => 'Zurück zur Anmeldung';
+
+  @override
+  String get authTwoFactorInvalidCode =>
+      'Der Code ist ungültig. Bitte versuche es erneut.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'Diese Anmeldung ist abgelaufen. Gehe zurück und melde dich erneut an.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'Die Zwei-Faktor-Authentifizierung ist ausgeschaltet. Wenn du sie einschaltest, brauchst du bei der Anmeldung einen Code aus deiner Authenticator-App.';
+
+  @override
+  String get twoFactorStatusOn =>
+      'Die Zwei-Faktor-Authentifizierung ist eingeschaltet.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'Die Zwei-Faktor-Authentifizierung ist für dieses Konto nicht verfügbar. Die Anmeldesicherheit wird über dein ZCLOUD-Konto verwaltet.';
+
+  @override
+  String get twoFactorEnable => 'Einschalten';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Scanne diesen QR-Code mit deiner Authenticator-App oder gib den Einrichtungsschlüssel manuell ein. Gib dann den 6-stelligen Code ein, den die App anzeigt.';
+
+  @override
+  String get twoFactorSetupKey => 'Einrichtungsschlüssel';
+
+  @override
+  String get twoFactorCopy => 'Kopieren';
+
+  @override
+  String get twoFactorCopied => 'Kopiert';
+
+  @override
+  String get twoFactorConfirmButton => 'Bestätigen und einschalten';
+
+  @override
+  String get twoFactorRecoveryCodesTitle =>
+      'Speichere deine Wiederherstellungscodes';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Jeder Code funktioniert einmal, falls du den Zugriff auf deine Authenticator-App verlierst. Sie werden nur jetzt angezeigt.';
+
+  @override
+  String get twoFactorCopyCodes => 'Alle Codes kopieren';
+
+  @override
+  String get twoFactorDone => 'Fertig';
+
+  @override
+  String get twoFactorDisable => 'Ausschalten';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Gib dein Passwort und einen aktuellen Code (oder einen Wiederherstellungscode) ein, um die Zwei-Faktor-Authentifizierung auszuschalten.';
+
+  @override
+  String get twoFactorDisableConfirm =>
+      'Zwei-Faktor-Authentifizierung ausschalten';
+
+  @override
+  String get twoFactorPasswordInvalid => 'Das Passwort ist nicht korrekt.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'Das Passwort oder der Code ist nicht korrekt.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Gib dein Passwort ein, um die Einrichtung der Zwei-Faktor-Authentifizierung zu starten.';
 }

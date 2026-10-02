@@ -56,6 +56,34 @@ void main() {
     });
   }
 
+  testWidgets('TwoFactorItem_NoCallback_IsHidden', (tester) async {
+    await pumpMenu(tester, 'en');
+    expect(find.text('Two-factor authentication'), findsNothing);
+  });
+
+  testWidgets('TwoFactorItem_WithCallback_ShowsAndInvokesIt', (tester) async {
+    var opened = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          appBar: AppBar(
+            actions: [AppSettingsMenu(onTwoFactorSettings: () => opened++)],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Two-factor authentication'));
+    await tester.pumpAndSettle();
+
+    expect(opened, 1);
+  });
+
   testWidgets('Exit_Windows_InvokesExplicitQuit', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     final calls = <String>[];

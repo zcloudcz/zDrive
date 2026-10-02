@@ -99,6 +99,94 @@ void main() {
     );
   });
 
+  group('TwoFactorCodeSubmitted', () {
+    blocTest<AuthBloc, AuthState>(
+      'emits [submitting, Authenticated] when the code is accepted',
+      build: () {
+        when(
+          () => mockAuthRepository.completeTwoFactorLogin(
+            challengeToken: 'challenge-1',
+            code: '123456',
+            recoveryCode: null,
+          ),
+        ).thenAnswer((_) async => testUser);
+        return buildBloc();
+      },
+      seed: () => const AuthTwoFactorRequired('challenge-1'),
+      act: (bloc) => bloc.add(const TwoFactorCodeSubmitted(code: '123456')),
+      expect: () => [
+        const AuthTwoFactorRequired('challenge-1', submitting: true),
+        const Authenticated(testUser),
+      ],
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'sends a recovery code instead of a TOTP code when given one',
+      build: () {
+        when(
+          () => mockAuthRepository.completeTwoFactorLogin(
+            challengeToken: 'challenge-1',
+            code: null,
+            recoveryCode: 'ABCDE-FGHJK',
+          ),
+        ).thenAnswer((_) async => testUser);
+        return buildBloc();
+      },
+      seed: () => const AuthTwoFactorRequired('challenge-1'),
+      act: (bloc) =>
+          bloc.add(const TwoFactorCodeSubmitted(recoveryCode: 'ABCDE-FGHJK')),
+      expect: () => [
+        const AuthTwoFactorRequired('challenge-1', submitting: true),
+        const Authenticated(testUser),
+      ],
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'stays on the code step, carrying the error, when the code is rejected',
+      build: () {
+        when(
+          () => mockAuthRepository.completeTwoFactorLogin(
+            challengeToken: any(named: 'challengeToken'),
+            code: any(named: 'code'),
+            recoveryCode: any(named: 'recoveryCode'),
+          ),
+        ).thenThrow(Exception('invalid code'));
+        return buildBloc();
+      },
+      seed: () => const AuthTwoFactorRequired('challenge-1'),
+      act: (bloc) => bloc.add(const TwoFactorCodeSubmitted(code: '000000')),
+      expect: () => [
+        const AuthTwoFactorRequired('challenge-1', submitting: true),
+        isA<AuthTwoFactorRequired>()
+            .having((s) => s.challengeToken, 'challengeToken', 'challenge-1')
+            .having((s) => s.submitting, 'submitting', false)
+            .having((s) => s.error, 'error', isA<Exception>()),
+      ],
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'is ignored when no 2FA challenge is pending',
+      build: buildBloc,
+      act: (bloc) => bloc.add(const TwoFactorCodeSubmitted(code: '123456')),
+      expect: () => <AuthState>[],
+      verify: (_) => verifyNever(
+        () => mockAuthRepository.completeTwoFactorLogin(
+          challengeToken: any(named: 'challengeToken'),
+          code: any(named: 'code'),
+          recoveryCode: any(named: 'recoveryCode'),
+        ),
+      ),
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'TwoFactorCancelled drops the challenge and returns to Unauthenticated',
+      build: buildBloc,
+      seed: () => const AuthTwoFactorRequired('challenge-1'),
+      act: (bloc) => bloc.add(const TwoFactorCancelled()),
+      expect: () => [const Unauthenticated()],
+    );
+  });
+
   group('LoginRequested', () {
     blocTest<AuthBloc, AuthState>(
       'emits [AuthLoading, Authenticated] on successful login',
@@ -108,13 +196,33 @@ void main() {
             email: any(named: 'email'),
             password: any(named: 'password'),
           ),
-        ).thenAnswer((_) async => testUser);
+        ).thenAnswer((_) async => const LoginSucceeded(testUser));
         return buildBloc();
       },
       act: (bloc) => bloc.add(
         const LoginRequested(email: 'test@example.com', password: 'password'),
       ),
       expect: () => [const AuthLoading(), const Authenticated(testUser)],
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'emits [AuthLoading, AuthTwoFactorRequired] when the account has 2FA',
+      build: () {
+        when(
+          () => mockAuthRepository.login(
+            email: any(named: 'email'),
+            password: any(named: 'password'),
+          ),
+        ).thenAnswer((_) async => const LoginTwoFactorRequired('challenge-1'));
+        return buildBloc();
+      },
+      act: (bloc) => bloc.add(
+        const LoginRequested(email: 'test@example.com', password: 'password'),
+      ),
+      expect: () => [
+        const AuthLoading(),
+        const AuthTwoFactorRequired('challenge-1'),
+      ],
     );
 
     blocTest<AuthBloc, AuthState>(

@@ -15,6 +15,7 @@ import '../../../core/diagnostics/diagnostics.dart';
 import '../../../core/network/error_message.dart';
 import '../../../shared/widgets/windows_download_button.dart';
 import 'widgets/auth_scaffold.dart';
+import 'widgets/two_factor_step.dart';
 
 /// What went wrong in the native (ADR 0003) sign-in step, before AuthBloc
 /// ever got involved — mirrors `_CallbackFailure` in EntraCallbackPage
@@ -163,6 +164,20 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    // The code step replaces the form inline (rather than a separate route)
+    // for as long as AuthBloc holds a 2FA challenge, including while a code
+    // is being checked. Controllers live in this State, so the email survives
+    // a round trip through "back to sign in".
+    return BlocBuilder<AuthBloc, AuthState>(
+      buildWhen: (previous, current) =>
+          previous is AuthTwoFactorRequired || current is AuthTwoFactorRequired,
+      builder: (context, state) => state is AuthTwoFactorRequired
+          ? AuthScaffold(child: TwoFactorStep(state: state))
+          : _buildForm(context),
+    );
+  }
+
+  Widget _buildForm(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final entraSignInVisible = widget.entraSignInVisible ?? kEntraSignInVisible;
 

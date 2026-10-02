@@ -1,13 +1,19 @@
+import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:zdrive_app/core/auth/auth_bloc.dart';
 import 'package:zdrive_app/features/home/presentation/home_page.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations.dart';
 import 'package:zdrive_app/shared/l10n/app_localizations_en.dart';
 import 'package:zdrive_app/shared/router/app_router.dart';
 import 'package:zdrive_app/shared/theme/app_theme.dart';
 import 'package:zdrive_app/shared/widgets/brand_lockup.dart';
+
+// HomePage reads AuthBloc to decide whether the account menu offers 2FA.
+class _MockAuthBloc extends MockBloc<AuthEvent, AuthState> implements AuthBloc {}
 
 void main() {
   // buildHomeDestinations takes photosEnabled as a parameter (default:
@@ -112,17 +118,26 @@ void main() {
         ),
       ],
     );
-    return MaterialApp.router(
-      routerConfig: router,
-      theme: theme,
-      localizationsDelegates: const [
-        AppLocalizations.delegate,
-        GlobalMaterialLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-      ],
-      supportedLocales: AppLocalizations.supportedLocales,
-      locale: const Locale('en'),
+    final authBloc = _MockAuthBloc();
+    whenListen(
+      authBloc,
+      const Stream<AuthState>.empty(),
+      initialState: const Unauthenticated(),
+    );
+    return BlocProvider<AuthBloc>.value(
+      value: authBloc,
+      child: MaterialApp.router(
+        routerConfig: router,
+        theme: theme,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('en'),
+      ),
     );
   }
 

@@ -23,6 +23,25 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FriendlyName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Xml")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DataProtectionKeys", "auth");
+                });
+
             modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.ExternalIdentity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -55,6 +74,36 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("external_identities", "auth");
+                });
+
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.RecoveryCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Salt")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("recovery_codes", "auth");
                 });
 
             modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.RefreshToken", b =>
@@ -120,6 +169,67 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                     b.ToTable("tenants", "auth");
                 });
 
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.TwoFactorChallenge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FailedAttempts")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .IsConcurrencyToken()
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("two_factor_challenges", "auth");
+                });
+
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.TwoFactorGuard", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("FailureCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("FailureWindowStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("LastUsedStep")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("two_factor_guards", "auth");
+                });
+
             modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -160,6 +270,16 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("TwoFactorEnabledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("TwoFactorSecretCreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TwoFactorSecretProtected")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
@@ -181,11 +301,44 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.RecoveryCode", b =>
+                {
+                    b.HasOne("ZDrive.AuthService.Domain.Entities.User", "User")
+                        .WithMany("RecoveryCodes")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("ZDrive.AuthService.Domain.Entities.User", "User")
                         .WithMany("RefreshTokens")
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.TwoFactorChallenge", b =>
+                {
+                    b.HasOne("ZDrive.AuthService.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.TwoFactorGuard", b =>
+                {
+                    b.HasOne("ZDrive.AuthService.Domain.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("ZDrive.AuthService.Domain.Entities.TwoFactorGuard", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -210,6 +363,8 @@ namespace ZDrive.AuthService.Infrastructure.Migrations
 
             modelBuilder.Entity("ZDrive.AuthService.Domain.Entities.User", b =>
                 {
+                    b.Navigation("RecoveryCodes");
+
                     b.Navigation("RefreshTokens");
                 });
 #pragma warning restore 612, 618

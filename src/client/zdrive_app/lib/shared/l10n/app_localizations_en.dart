@@ -557,4 +557,104 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Keeping everything on this device…';
+
+  @override
+  String get twoFactorTitle => 'Two-factor authentication';
+
+  @override
+  String get twoFactorPrompt =>
+      'Enter the 6-digit code from your authenticator app.';
+
+  @override
+  String get twoFactorRecoveryPrompt => 'Enter one of your recovery codes.';
+
+  @override
+  String get twoFactorCodeLabel => '6-digit code';
+
+  @override
+  String get twoFactorRecoveryCodeLabel => 'Recovery code';
+
+  @override
+  String get twoFactorVerifyButton => 'Verify';
+
+  @override
+  String get twoFactorUseRecoveryCode => 'Use a recovery code';
+
+  @override
+  String get twoFactorUseAuthenticator => 'Use an authenticator code';
+
+  @override
+  String get twoFactorBackToSignIn => 'Back to sign in';
+
+  @override
+  String get authTwoFactorInvalidCode =>
+      'That code is not valid. Please try again.';
+
+  @override
+  String get authTwoFactorChallengeExpired =>
+      'This sign-in has expired. Go back and sign in again.';
+
+  @override
+  String get twoFactorStatusOff =>
+      'Two-factor authentication is off. Turn it on to require a code from your authenticator app when you sign in.';
+
+  @override
+  String get twoFactorStatusOn => 'Two-factor authentication is on.';
+
+  @override
+  String get twoFactorUnavailable =>
+      'Two-factor authentication is not available for this account. Sign-in security is managed by your ZCLOUD account.';
+
+  @override
+  String get twoFactorEnable => 'Turn on';
+
+  @override
+  String get twoFactorSetupInstructions =>
+      'Scan this QR code with your authenticator app, or enter the setup key manually. Then type the 6-digit code the app shows.';
+
+  @override
+  String get twoFactorSetupKey => 'Setup key';
+
+  @override
+  String get twoFactorCopy => 'Copy';
+
+  @override
+  String get twoFactorCopied => 'Copied';
+
+  @override
+  String get twoFactorConfirmButton => 'Confirm and turn on';
+
+  @override
+  String get twoFactorRecoveryCodesTitle => 'Save your recovery codes';
+
+  @override
+  String get twoFactorRecoveryCodesInfo =>
+      'Each code works once if you lose access to your authenticator app. They are shown only now.';
+
+  @override
+  String get twoFactorCopyCodes => 'Copy all codes';
+
+  @override
+  String get twoFactorDone => 'Done';
+
+  @override
+  String get twoFactorDisable => 'Turn off';
+
+  @override
+  String get twoFactorDisableInfo =>
+      'Enter your password and a current code (or a recovery code) to turn off two-factor authentication.';
+
+  @override
+  String get twoFactorDisableConfirm => 'Turn off two-factor authentication';
+
+  @override
+  String get twoFactorPasswordInvalid => 'The password is not correct.';
+
+  @override
+  String get twoFactorInvalidPasswordOrCode =>
+      'The password or code is not correct.';
+
+  @override
+  String get twoFactorEnablePasswordInfo =>
+      'Enter your password to start setting up two-factor authentication.';
 }
