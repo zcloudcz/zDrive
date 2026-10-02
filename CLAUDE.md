@@ -187,8 +187,16 @@ gives us versioning for free):
   `POST /storage/files/{id}/manifests/{hash}/restore` (blob flip). The client
   orchestrates both calls — there is no service-to-service messaging yet.
 - Retention: `Versioning:MaxVersionsPerFile` (FileService appsettings,
-  default 10) prunes the oldest metadata rows on insert. Orphaned blob
-  snapshots/chunks are garbage, not data loss; GC is future work.
+  default 10) prunes the oldest metadata rows on insert (new upload and
+  restore alike). `Versioning:MinRetentionDays` (default 0 = off, age is
+  ignored) adds a minimum age: a version is pruned only if it is outside the
+  newest `MaxVersionsPerFile` **and** older than `MinRetentionDays`, so
+  `MaxVersionsPerFile` is NOT a hard cap — young versions above it are kept
+  and the count can exceed it (and count toward the quota) until they age
+  out. The version being written is never pruned. Pruning still only happens
+  on insert (no periodic job), which is fine because the age is a minimum.
+  Orphaned blob snapshots/chunks are garbage, not data loss; GC is future
+  work.
 
 ### File change log (server-side sync events)
 

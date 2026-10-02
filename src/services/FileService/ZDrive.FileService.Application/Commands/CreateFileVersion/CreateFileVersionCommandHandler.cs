@@ -14,12 +14,15 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
     private readonly IFileDbContext _db;
     private readonly VersioningOptions _options;
     private readonly IStorageQuota _quota;
+    private readonly TimeProvider _time;
 
-    public CreateFileVersionCommandHandler(IFileDbContext db, IOptions<VersioningOptions> options, IStorageQuota quota)
+    public CreateFileVersionCommandHandler(
+        IFileDbContext db, IOptions<VersioningOptions> options, IStorageQuota quota, TimeProvider? time = null)
     {
         _db = db;
         _options = options.Value;
         _quota = quota;
+        _time = time ?? TimeProvider.System;
     }
 
     public async Task<FileVersionDto> Handle(CreateFileVersionCommand request, CancellationToken cancellationToken)
@@ -82,10 +85,11 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
     }
 
     /// <summary>
-    /// Retention policy: keeps at most MaxVersionsPerFile versions (including
-    /// the one being added in this request); the oldest rows are selected for
-    /// removal. Single source of truth for "what retention prunes" — used both
-    /// to net the quota check against freed bytes and to actually delete.
+    /// Retention policy (see <see cref="VersionRetention"/>): keeps at least the
+    /// newest MaxVersionsPerFile versions (including the one being added in
+    /// this request) and any version younger than MinRetentionDays. Single
+    /// source of truth for "what retention prunes" — used both to net the quota
+    /// check against freed bytes and to actually delete.
     /// </summary>
     private async Task<List<FileVersion>> SelectVersionsToPruneAsync(Guid fileId, CancellationToken cancellationToken)
     {
@@ -94,11 +98,10 @@ public sealed class CreateFileVersionCommandHandler : IRequestHandler<CreateFile
 
         // The new version is only in the change tracker — this query hits the
         // database and does not see it. Keeping MaxVersionsPerFile - 1 existing
-        // rows therefore yields exactly MaxVersionsPerFile after SaveChanges.
-        return await _db.FileVersions
-            .Where(v => v.FileId == fileId)
-            .OrderByDescending(v => v.VersionNumber)
-            .Skip(Math.Max(0, _options.MaxVersionsPerFile - 1))
+        // rows therefore yields MaxVersionsPerFile after SaveChanges (more when
+        // MinRetentionDays keeps younger versions).
+        return await VersionRetention
+            .SelectPrunable(_db.FileVersions.Where(v => v.FileId == fileId), _options, _time.GetUtcNow().UtcDateTime)
             .ToListAsync(cancellationToken);
     }
 }
