@@ -16,7 +16,7 @@ public static class DependencyInjection
         // EF Core + PostgreSQL
         services.AddDbContext<SyncDbContext>(options =>
             options.UseNpgsql(
-                configuration.GetConnectionString("SyncDb"),
+                configuration.GetConnectionString("ZDriveDb"),
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "sync")));
 
         services.AddScoped<ISyncDbContext>(sp => sp.GetRequiredService<SyncDbContext>());

@@ -554,14 +554,14 @@ Předpoklad: PR z tohoto plánu je zmergovaný, `dotnet publish src/services/Api
    přejmenování App Service nejde, nový název by znamenal novou app = nové outbound IP
    na stejném plánu, což firewall Postgresu už pokrývá — ale zbytečně). Alternativa:
    založit `zdrive-api` a `zdrive-auth` smazat s ostatními — víc kroků, stejný výsledek.
-2. **App settings na `zdrive-auth` doplnit** (hodnoty opsat z `zdrive-file`/`-storage`/`-sync`):
-   `ConnectionStrings__FileDb`, `ConnectionStrings__StorageDb`, `ConnectionStrings__SyncDb`
-   a `ConnectionStrings__PhotoDb` (PhotoService je od PR #80 pátý modul Api; stejný
-   server jako `AuthDb`, liší se jen `Search Path=files|storage|sync|photos`).
-   **`PhotoDb` musí být nastaven PŘED nasazením ZIPu:** `appsettings.json` má localhost
+2. **App settings na `zdrive-auth` doplnit:**
+   `ConnectionStrings__ZDriveDb` — JEDEN connection string pro všech pět modulů
+   (auth/files/storage/sync/photos). Schéma je v EF modelu a migracích, ne ve stringu,
+   takže hodnota = dnešní `AuthDb` bez `;Search Path=auth`. Staré `ConnectionStrings__AuthDb|FileDb|
+   StorageDb|SyncDb|PhotoDb` se už nečtou — po ověřeném startu smazat.
+   **`ZDriveDb` musí být nastaven PŘED nasazením ZIPu:** `appsettings.json` má localhost
    fallback a `MigrateWithBaselineAsync` běží před `app.Run()`, takže chybějící/špatný
-   connection string shodí celý proces (auth/files/sync také) do crash-loopu,
-   pro žádnou z pěti DB není mimo Development guard,
+   connection string shodí celý proces do crash-loopu,
    `AZURE_STORAGE_CONNECTION_STRING` (nebo `ConnectionStrings__AzureBlobStorage`),
    `Sharing__DownloadGrantKey` (stejná hodnota, jakou má dnes file i storage),
    `Versioning__MaxVersionsPerFile` / `Storage__DefaultUserQuotaBytes` pokud jsou
