@@ -84,6 +84,27 @@ public sealed class PhotoImageProcessorTests
     }
 
     [Fact]
+    public void Process_JpegDeclaringMoreThanLimitButDecodingScaledBelowIt_IsProcessed()
+    {
+        // 4096x2048 declares 8.4 MP; JPEG decodes at 1/4 scale (1024x512 = 0.5 MP).
+        var processor = new SkiaPhotoImageProcessor(maxDecodedPixels: 1_000_000);
+
+        var result = processor.Process(TestImages.Jpeg(4096, 2048));
+
+        Size(result.Thumbnails[1024]).Should().Be((1024, 512));
+    }
+
+    [Fact]
+    public void Process_PngAboveLimit_IsRejectedBecausePngCannotDecodeScaled()
+    {
+        var processor = new SkiaPhotoImageProcessor(maxDecodedPixels: 1_000_000);
+
+        var act = () => processor.Process(TestImages.Png(1100, 1000));
+
+        act.Should().Throw<PermanentPhotoException>().WithMessage("TooManyPixels*");
+    }
+
+    [Fact]
     public void Process_ExifWithOutOfRangeOffset_StillProcessesAndFallsBackToWallClock()
     {
         var jpeg = TestImages.Jpeg(64, 48, new(DateTimeOriginal: "2021:07:04 12:00:00", OffsetTimeOriginal: "+15:00", Make: "Acme"));

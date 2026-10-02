@@ -236,11 +236,13 @@ WebP thumbnails with SkiaSharp to
 `{tenant}/{user}/thumbnails/{photoId}/{manifestHash[..16]}/{size}.webp` (the
 version in the key means a slow worker for an old version can never overwrite
 a newer one; not counted against the quota, which sums `file_versions`).
-Originals declaring more than `MaxDecodedPixels` are rejected before any
-decode buffer exists. HEIC/HEIF/AVIF cannot be decoded by Skia on Linux: those
+Images that would decode (after JPEG/WebP downscaling) to more than
+`MaxDecodedPixels` are rejected before any decode buffer exists. HEIC/HEIF/AVIF cannot be decoded by Skia on Linux: those
 photos get metadata but no thumbnails (`ThumbnailsReady = false`).
 Undecodable data fails at once (`Failed`); transient errors retry with
-backoff, max 3 attempts. Settings: `Photos:Ingest:*` (`Enabled`,
+backoff, max 3 attempts. An attempt is counted when the photo is claimed,
+so one that crashes the process is given up after 3 lease expiries instead
+of restarting the Api forever. Settings: `Photos:Ingest:*` (`Enabled`,
 `PollIntervalSeconds`, `BatchSize`, `MaxConcurrentProcessing`,
 `MaxSourceBytes`, `LeaseMinutes`, `MaxAttempts`, `MaxDecodedPixels`) and
 `Photos:Thumbnails:CacheMaxAgeSeconds`. Thumbnails are served by

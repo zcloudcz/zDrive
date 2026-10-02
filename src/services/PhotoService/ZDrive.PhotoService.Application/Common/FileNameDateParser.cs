@@ -21,7 +21,7 @@ public static partial class FileNameDateParser
             var dateStr = $"{match.Groups[1].Value}-{match.Groups[2].Value}-{match.Groups[3].Value} " +
                           $"{match.Groups[4].Value}:{match.Groups[5].Value}:{match.Groups[6].Value}";
 
-            if (DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dt))
+            if (DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dt))
                 return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
         }
 
@@ -32,7 +32,7 @@ public static partial class FileNameDateParser
             var dateStr = $"{dashMatch.Groups[1].Value}-{dashMatch.Groups[2].Value}-{dashMatch.Groups[3].Value} " +
                           $"{dashMatch.Groups[4].Value}:{dashMatch.Groups[5].Value}:{dashMatch.Groups[6].Value}";
 
-            if (DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dt))
+            if (DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dt))
                 return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
         }
 

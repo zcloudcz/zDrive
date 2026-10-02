@@ -9,13 +9,13 @@ public sealed class PhotoIngestOptions
     public bool Enabled { get; set; } = true;
     public int PollIntervalSeconds { get; set; } = 5;
     public int BatchSize { get; set; } = 500;
-    public int MaxConcurrentProcessing { get; set; } = 2;
+    public int MaxConcurrentProcessing { get; set; } = 1;
     public long MaxSourceBytes { get; set; } = 100 * 1024 * 1024;
     public int LeaseMinutes { get; set; } = 10;
     public int MaxAttempts { get; set; } = 3;
 
-    /// <summary>Originals declaring more pixels than this are rejected before any decode buffer is allocated (decompression-bomb guard).</summary>
-    public long MaxDecodedPixels { get; set; } = 100_000_000;
+    /// <summary>Images that would decode to more pixels than this (after codec downscaling) are rejected before any decode buffer is allocated (decompression-bomb guard). 40 MP = 160 MB RGBA.</summary>
+    public long MaxDecodedPixels { get; set; } = 40_000_000;
 }
 
 /// <summary>Bound from <c>Photos:Thumbnails</c>.</summary>

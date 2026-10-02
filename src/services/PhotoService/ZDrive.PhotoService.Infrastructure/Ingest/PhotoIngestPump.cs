@@ -284,9 +284,13 @@ public sealed class PhotoIngestPump
             // Needs work = never processed (Ingested) OR a newer version than the
             // processed one. Attempts caps retries for both; an already-processed
             // photo whose new version keeps failing stops here with Attempts = max.
+            // The attempt is counted HERE, at claim time, not after a failure: a
+            // photo that crashes the process (OOM, native decoder fault) never
+            // reaches RecordFailureAsync, and would otherwise be re-claimed after
+            // every lease expiry and take the whole Api down forever.
             cmd.CommandText =
                 """
-                UPDATE photos.photos SET "LockedUntil" = now() + make_interval(mins => @lease)
+                UPDATE photos.photos SET "LockedUntil" = now() + make_interval(mins => @lease), "Attempts" = "Attempts" + 1
                 WHERE "Id" IN (
                     SELECT "Id" FROM photos.photos
                     WHERE NOT "IsHidden" AND "SourceManifestHash" IS NOT NULL
@@ -376,7 +380,7 @@ public sealed class PhotoIngestPump
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Photo {PhotoId} ({FileId}) attempt {Attempt} failed", id, photo.FileId, photo.Attempts + 1);
+            _logger.LogWarning(ex, "Photo {PhotoId} ({FileId}) attempt {Attempt} failed", id, photo.FileId, photo.Attempts);
             await RecordFailureAsync(db, photo, manifestHash, $"{ex.GetType().Name}: {ex.Message}", permanent: false, ct);
         }
     }
@@ -387,7 +391,8 @@ public sealed class PhotoIngestPump
         // A photo that already has a good version keeps showing it: a failing
         // new version records the reason but never flips it to Failed.
         var hasGoodVersion = photo.ProcessedManifestHash is not null;
-        var attempts = photo.Attempts + 1;
+        // Already counted by ClaimAsync (photo was loaded after the claim).
+        var attempts = photo.Attempts;
         var gaveUp = permanent || attempts >= _options.MaxAttempts;
         var retryAt = gaveUp ? (DateTime?)null : DateTime.UtcNow + (attempts == 1 ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(5));
         var trimmed = reason.Length <= 1000 ? reason : reason[..1000];

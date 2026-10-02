@@ -20,7 +20,7 @@ public sealed class SkiaPhotoImageProcessor : IPhotoImageProcessor
 
     private readonly long _maxDecodedPixels;
 
-    public SkiaPhotoImageProcessor(long maxDecodedPixels = 100_000_000) => _maxDecodedPixels = maxDecodedPixels;
+    public SkiaPhotoImageProcessor(long maxDecodedPixels = 40_000_000) => _maxDecodedPixels = maxDecodedPixels;
 
     public PhotoProcessingResult Process(byte[] source)
     {
@@ -42,19 +42,12 @@ public sealed class SkiaPhotoImageProcessor : IPhotoImageProcessor
                 throw new PermanentPhotoException("Unsupported or corrupt image.");
             }
 
-            // Decompression-bomb guard: the header alone declares the size, so
-            // reject BEFORE any pixel buffer is allocated.
-            var declaredPixels = (long)codec.Info.Width * codec.Info.Height;
-            if (declaredPixels > _maxDecodedPixels)
-                throw new PermanentPhotoException(
-                    $"TooManyPixels: image declares {codec.Info.Width}x{codec.Info.Height} ({declaredPixels} pixels), limit is {_maxDecodedPixels}.");
-
             var origin = codec.EncodedOrigin;
             var swap = origin >= SKEncodedOrigin.LeftTop;
             var fullWidth = swap ? codec.Info.Height : codec.Info.Width;
             var fullHeight = swap ? codec.Info.Width : codec.Info.Height;
 
-            using var decoded = Decode(codec)
+            using var decoded = Decode(codec, _maxDecodedPixels)
                 ?? throw new PermanentPhotoException("Image could not be decoded.");
             var oriented = ApplyOrigin(decoded, origin);
             try
@@ -180,9 +173,9 @@ public sealed class SkiaPhotoImageProcessor : IPhotoImageProcessor
     /// that still has at least the largest thumbnail's worth of pixels: much
     /// less memory and CPU for multi-megapixel originals. Formats that cannot
     /// scale (PNG) report their own size and decode in full — bounded by the
-    /// pixel cap in <see cref="Process"/>.
+    /// pixel cap.
     /// </summary>
-    private static SKBitmap? Decode(SKCodec codec)
+    private static SKBitmap? Decode(SKCodec codec, long maxDecodedPixels)
     {
         var info = codec.Info;
         var target = ThumbnailSizes.All.Max();
@@ -195,6 +188,15 @@ public sealed class SkiaPhotoImageProcessor : IPhotoImageProcessor
                 break;
             }
         }
+
+        // Decompression-bomb guard on the size actually decoded, checked BEFORE
+        // the pixel buffer is allocated. Capping the declared size instead
+        // would reject a 50 MP camera JPEG that decodes at 1/4 scale for a few
+        // MB, while the real memory risk is formats that cannot scale (PNG).
+        var pixels = (long)info.Width * info.Height;
+        if (pixels > maxDecodedPixels)
+            throw new PermanentPhotoException(
+                $"TooManyPixels: image decodes at {info.Width}x{info.Height} ({pixels} pixels), limit is {maxDecodedPixels}.");
 
         var bitmap = new SKBitmap(info);
         var result = codec.GetPixels(info, bitmap.GetPixels());

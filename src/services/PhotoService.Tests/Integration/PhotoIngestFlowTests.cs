@@ -277,6 +277,47 @@ public sealed class PhotoIngestFlowTests : IClassFixture<PhotoServiceFactory>
     }
 
     [Fact]
+    public async Task IngestFlow_ProcessDiesMidPhotoThreeTimes_PhotoIsNoLongerClaimed()
+    {
+        var (client, _, _) = NewUser();
+        var file = await UploadImageAsync(client, "killer.jpg", TestImages.Jpeg(100, 60));
+        await _factory.AgeChangesAsync();
+        var pump = _factory.Services.GetRequiredService<PhotoIngestPump>();
+        await pump.ReconcileOnceAsync(CancellationToken.None);
+        var version = ThumbnailVersion.Of((await _factory.FindPhotoByFileAsync(file.Id))!.SourceManifestHash!);
+
+        try
+        {
+            for (var crash = 0; crash < 3; crash++)
+            {
+                // Cancelling mid-photo leaves the claim behind with no outcome
+                // recorded: the same DB state as an OOM / native decoder crash.
+                using var dying = new CancellationTokenSource();
+                var died = false;
+                _factory.BeforeThumbnailWrite = v =>
+                {
+                    if (v != version) return Task.CompletedTask;
+                    died = true;
+                    dying.Cancel();
+                    dying.Token.ThrowIfCancellationRequested();
+                    return Task.CompletedTask;
+                };
+                try { await pump.ProcessPendingAsync(dying.Token); }
+                catch (OperationCanceledException) { }
+                died.Should().BeTrue($"crash {crash + 1} must actually have claimed the photo");
+
+                await ExecutePhotoSqlAsync(
+                    $"""UPDATE photos.photos SET "LockedUntil" = now() - interval '1 second' WHERE "FileId" = '{file.Id}'""");
+            }
+        }
+        finally { _factory.BeforeThumbnailWrite = null; }
+
+        (await _factory.FindPhotoByFileAsync(file.Id))!.Attempts.Should().Be(3);
+        (await pump.ProcessNextAsync(CancellationToken.None)).Should().BeFalse(
+            "a photo that killed the process on every attempt must not be re-claimed forever");
+    }
+
+    [Fact]
     public async Task IngestPump_LowerIdCommitsLate_NotSkipped()
     {
         // ADR 0001 pattern: a change row with a LOWER id is still uncommitted
