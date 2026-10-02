@@ -27,18 +27,6 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
         return (await response.Content.ReadFromJsonAsync<AlbumDto>())!;
     }
 
-    private async Task<PhotoDto> IngestPhotoAsync(string fileName = "album-photo.jpg")
-    {
-        var response = await _client.PostAsJsonAsync("/api/v1/photos/ingest", new
-        {
-            fileId = Guid.NewGuid(),
-            originalFileName = fileName,
-            blobPath = $"/tenant/user/{fileName}"
-        });
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        return (await response.Content.ReadFromJsonAsync<PhotoDto>())!;
-    }
-
     [Fact]
     public async Task Create_ValidName_AppearsInGetAll()
     {
@@ -62,7 +50,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
     public async Task AddPhotos_ExistingAlbumAndPhoto_AppearsInGetPhotos()
     {
         var album = await CreateAlbumAsync("AddPhotos_Existing");
-        var photo = await IngestPhotoAsync();
+        var photo = await _factory.SeedPhotoAsync();
 
         var addResponse = await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new
         {
@@ -85,14 +73,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
         // (added count excludes it), not added and not a hard failure.
         var album = await CreateAlbumAsync("AddPhotos_ForeignPhoto");
 
-        using var foreignClient = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
-        var foreignPhotoResponse = await foreignClient.PostAsJsonAsync("/api/v1/photos/ingest", new
-        {
-            fileId = Guid.NewGuid(),
-            originalFileName = "not-yours.jpg",
-            blobPath = "/tenant/other/not-yours.jpg"
-        });
-        var foreignPhoto = (await foreignPhotoResponse.Content.ReadFromJsonAsync<PhotoDto>())!;
+        var foreignPhoto = await _factory.SeedPhotoAsync("not-yours.jpg", Guid.NewGuid(), Guid.NewGuid());
 
         var addResponse = await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new
         {
@@ -112,7 +93,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
     [Fact]
     public async Task AddPhotos_NonExistingAlbum_Returns404()
     {
-        var photo = await IngestPhotoAsync();
+        var photo = await _factory.SeedPhotoAsync();
 
         var response = await _client.PostAsJsonAsync($"/api/v1/albums/{Guid.NewGuid()}/photos", new
         {
@@ -133,7 +114,7 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
     public async Task RemovePhoto_ExistingAssociation_NoLongerInGetPhotos()
     {
         var album = await CreateAlbumAsync("RemovePhoto_Existing");
-        var photo = await IngestPhotoAsync();
+        var photo = await _factory.SeedPhotoAsync();
         await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new { photoIds = new[] { photo.Id } });
 
         var removeResponse = await _client.DeleteAsync($"/api/v1/albums/{album.Id}/photos/{photo.Id}");
@@ -202,5 +183,74 @@ public sealed class AlbumsFlowTests : IClassFixture<PhotoServiceFactory>
         var response = await foreignClient.DeleteAsync($"/api/v1/albums/{album.Id}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // The same user id under a different tenant claim must not reach the album:
+    // every album endpoint filters by tenant as well as user.
+    private HttpClient OtherTenantClient() =>
+        _factory.CreateAuthenticatedClient(_factory.TestUserId, Guid.NewGuid());
+
+    [Fact]
+    public async Task AddPhotos_PhotoFromAnotherTenant_IsNotAdded()
+    {
+        var album = await CreateAlbumAsync("AddPhotos_CrossTenantPhoto");
+        var otherTenantPhoto = await _factory.SeedPhotoAsync("other-tenant.jpg", _factory.TestUserId, Guid.NewGuid());
+
+        var response = await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new { photoIds = new[] { otherTenantPhoto.Id } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("added").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetAlbumPhotos_FromAnotherTenant_Returns404()
+    {
+        var album = await CreateAlbumAsync("GetPhotos_CrossTenant");
+        var photo = await _factory.SeedPhotoAsync();
+        await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new { photoIds = new[] { photo.Id } });
+
+        using var other = OtherTenantClient();
+        (await other.GetAsync($"/api/v1/albums/{album.Id}/photos")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task AlbumMutations_FromAnotherTenant_Return404AndChangeNothing()
+    {
+        var album = await CreateAlbumAsync("Mutations_CrossTenant");
+        var photo = await _factory.SeedPhotoAsync();
+        await _client.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new { photoIds = new[] { photo.Id } });
+        using var other = OtherTenantClient();
+
+        (await other.PutAsJsonAsync($"/api/v1/albums/{album.Id}", new { name = "hijacked" })).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await other.DeleteAsync($"/api/v1/albums/{album.Id}/photos/{photo.Id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await other.PostAsJsonAsync($"/api/v1/albums/{album.Id}/photos", new { photoIds = new[] { photo.Id } })).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await other.DeleteAsync($"/api/v1/albums/{album.Id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var list = await _client.GetFromJsonAsync<List<AlbumDto>>("/api/v1/albums");
+        var unchanged = list!.Single(a => a.Id == album.Id);
+        unchanged.Name.Should().Be("Mutations_CrossTenant");
+        unchanged.PhotoCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task UpdateAlbum_CoverPhotoOfAnotherTenant_Returns404()
+    {
+        var album = await CreateAlbumAsync("Cover_CrossTenant");
+        var foreign = await _factory.SeedPhotoAsync("cover.jpg", _factory.TestUserId, Guid.NewGuid());
+
+        var response = await _client.PutAsJsonAsync($"/api/v1/albums/{album.Id}", new { coverPhotoId = foreign.Id });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetAlbums_FromAnotherTenant_ListsNothingOfTheOtherTenant()
+    {
+        var album = await CreateAlbumAsync("List_CrossTenant");
+
+        using var other = OtherTenantClient();
+        var list = await other.GetFromJsonAsync<List<AlbumDto>>("/api/v1/albums");
+
+        list.Should().NotContain(a => a.Id == album.Id);
     }
 }

@@ -17,4 +17,5 @@ public sealed record PhotoDto(
     string ProcessingStatus,
     string OriginalFileName,
     string BlobPath,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    bool ThumbnailsReady);

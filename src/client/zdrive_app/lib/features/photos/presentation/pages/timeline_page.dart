@@ -89,17 +89,12 @@ class _PhotoThumbnail extends StatelessWidget {
       onTap: () {
         // Photo detail view — Phase 6
       },
-      // No thumbnail is rendered here on purpose: StorageService's
-      // GetThumbnailUrlQueryHandler only string-builds a CDN URL
-      // ({cdn}/{tenant}/{user}/thumbnails/{photoId}/{size}.webp) without
-      // checking a blob exists at that path, and nothing in the ingest
-      // pipeline (IngestPhotoCommandHandler) ever writes a thumbnail blob —
-      // there is no generator anywhere in the codebase yet. Photo.fileId
-      // could reach the *original* file via the existing file-download
-      // endpoint, but loading full-resolution originals into a scrolling
-      // thumbnail grid is a real performance anti-pattern, not a substitute
-      // for a thumbnail. Wire this up once Phase 5's thumbnail generation
-      // actually writes those blobs.
+      // No thumbnail is rendered here yet on purpose. The backend now generates
+      // 256/1024 WebP thumbnails (ingest worker) and serves them, authorized,
+      // from GET /api/v1/photos/{id}/thumbnail/{size}, but that needs the JWT
+      // header, so a plain Image.network will not do and loading full-resolution
+      // originals into a scrolling grid is a performance anti-pattern. Wire this
+      // up with an authenticated image provider once the ingest PR (#81) is deployed.
       child: Container(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Center(

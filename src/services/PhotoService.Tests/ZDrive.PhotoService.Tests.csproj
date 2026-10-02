@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PhotoService\ZDrive.PhotoService.Api\ZDrive.PhotoService.Api.csproj" />
+    <ProjectReference Include="..\Api\ZDrive.Api.csproj" />
     <ProjectReference Include="..\PhotoService\ZDrive.PhotoService.Infrastructure\ZDrive.PhotoService.Infrastructure.csproj" />
     <ProjectReference Include="..\PhotoService\ZDrive.PhotoService.Application\ZDrive.PhotoService.Application.csproj" />
   </ItemGroup>

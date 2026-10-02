@@ -33,11 +33,13 @@ Microservices behind an API Gateway (YARP):
 | `photo-service` | Photo processing pipeline, AI tagging, face clustering, albums, memories |
 | `notification-service` | Real-time events (SignalR), push (FCM/APNs), email |
 
-`auth-service`, `file-service`, `storage-service` and `sync-service` run in one
-process, `src/services/Api` (`ZDrive.Api`), to cut App Service count on the
-shared hosting plan — each still owns its Domain/Application/Infrastructure
-layers and its own PostgreSQL schema, only the API host is merged.
-`photo-service` and `notification-service` remain separate (and undeployed).
+`auth-service`, `file-service`, `storage-service`, `sync-service` and
+`photo-service` run in one process, `src/services/Api` (`ZDrive.Api`), to cut
+App Service count on the shared hosting plan — each still owns its
+Domain/Application/Infrastructure layers and its own PostgreSQL schema, only
+the API host is merged. `notification-service` remains separate (and
+undeployed). The Api host needs `ConnectionStrings:PhotoDb` (schema `photos`)
+in addition to the Auth/File/Storage/Sync ones.
 
 Inter-service communication: Azure Service Bus (async events), gRPC (sync calls).
 
@@ -48,12 +50,12 @@ zDrive/
 ├── src/
 │   ├── services/
 │   │   ├── ApiGateway/
-│   │   ├── Api/                    # merged host: Auth + File + Storage + Sync
+│   │   ├── Api/                    # merged host: Auth + File + Storage + Sync + Photo
 │   │   ├── AuthService/            # Domain/Application/Infrastructure only
 │   │   ├── FileService/            # Domain/Application/Infrastructure only
 │   │   ├── StorageService/         # Domain/Application/Infrastructure only
 │   │   ├── SyncService/            # Domain/Application/Infrastructure only
-│   │   ├── PhotoService/
+│   │   ├── PhotoService/           # Domain/Application/Infrastructure only
 │   │   └── NotificationService/
 │   ├── shared/                    # shared .NET libs (DTOs, contracts, utils)
 │   └── client/                    # Flutter app
@@ -75,10 +77,10 @@ dotnet test src/services/{ServiceName}.Tests
 dotnet run --project src/services/{ServiceName}
 ```
 
-Auth/File/Storage/Sync run as one host, `src/services/Api`
+Auth/File/Storage/Sync/Photo run as one host, `src/services/Api`
 (`dotnet run --project src/services/Api`), but each still owns its
 Infrastructure project's EF migrations. `src/services/Api` is now the only
-startup project for `dotnet ef`, for every one of those four contexts:
+startup project for `dotnet ef`, for every one of those five contexts:
 
 ```bash
 dotnet ef migrations add <Name> \
@@ -116,12 +118,13 @@ docker-compose one:
 | Define | Default | Pass it when |
 |--------|---------|--------------|
 | `API_BASE_URL` | `http://localhost:5100/api/v1` | Building for a deployed gateway — CI does this for the Pages build (`.github/workflows/deploy-web.yml`) |
-| `PHOTOS_ENABLED` | `false` | Running PhotoService locally. PhotoService and NotificationService are **not deployed** (MVP scope) and the gateway proxies their routes to localhost, so a deployed build answers 502 for them; the Photos tab and its route are therefore hidden by default |
+| `PHOTOS_ENABLED` | `false` | Running the photo backend locally or against a gateway whose Api host has the photo module deployed. PhotoService is part of the merged Api host, so once that build is deployed the photo routes are served by it (no separate photo service). NotificationService is still **not deployed** (MVP scope) and answers 502 through the gateway; the Photos tab and its route are hidden by default until the backend is rolled out |
 | `ENTRA_CLIENT_ID` | `` (empty) | Enabling Entra sign-in via Drive's own Entra app registration — web (ADR `docs/adr/0002-shared-zcloud-login-entra-sso.md`) and, on the same registration, iOS/Android/Windows (ADR `docs/adr/0003-native-entra-sign-in.md`; macOS/Linux stay password-only). Empty is the safety gate: with no client id the "Sign in with your ZCLOUD account" button on the login page does not render at all, on any platform. No production registration exists yet — see ADR 0002's Migration order step 1 for what a human needs to create in the Entra admin portal first |
 | `ENTRA_API_SCOPE` | `` (empty) | Same feature, same safety gate as `ENTRA_CLIENT_ID` — the sign-in button needs BOTH set to show, since a client id with no scope would still redirect through the whole Entra flow only to fail far from the cause. The scope requested alongside `openid`, e.g. `api://<drive-api-app-id>/access_as_user`; depends on how Drive's API app registration exposes its scope |
 
-`docker-compose up` **does** start PhotoService, so local work on photos needs
-the flag or the tab will not be there:
+`docker-compose up` only starts infrastructure; the photo backend runs inside
+the Api host (`dotnet run --project src/services/Api`), so local work on photos
+needs the Api running and the flag, or the tab will not be there:
 
 ```bash
 flutter run -d windows --dart-define=PHOTOS_ENABLED=true
@@ -209,7 +212,52 @@ alternatives rejected, and the known 5-second commit-order hold-back.
 
 ### Photo processing pipeline
 
-Async, event-driven via Service Bus:
+**Ingest is implemented in-process, without a broker.** `PhotoIngestWorker`
+(a `BackgroundService` in `ZDrive.Api`) has two independent loops. *Reconcile*
+reads FileService's *global* change log through the MediatR query
+`GetFileChangeBatchQuery` (same SHARE-lock + 5 s hold-back semantics as the
+per-user feed, one shared implementation: `FileChangeFeedReader`) and keeps a
+durable cursor in `photos.ingest_cursors`; it runs every
+`Photos:Ingest:PollIntervalSeconds`, or again at once while it reports more
+work, never per processed photo (the read takes a table-level lock).
+*Processing* runs `MaxConcurrentProcessing` workers that each claim one photo
+at a time.
+
+The change log starts empty (ADR 0001), so files uploaded before it existed
+never appear in it. On a fresh cursor the worker therefore **bootstraps**
+first: it captures the safe feed head, scans all live file nodes
+(`GetFileNodeBatchQuery`, keyset-paged by id, resumable through
+`BootstrapLastNodeId`), applies them exactly like feed changes, then moves the
+cursor to the captured head and follows the feed. Everything is state-based:
+for each file it looks at the file's *current* state and creates/queues
+(image, new `ManifestHash`), hides (trashed, renamed to a non-image; both
+restorable), un-hides, or deletes the `Photo` row and its thumbnails (node no
+longer exists; note `EmptyTrash` writes no change row, so full garbage
+collection of purged files and superseded thumbnail versions is future work).
+The `photos` table doubles as the work queue (lease + `FOR UPDATE SKIP
+LOCKED`); a photo needs work while `SourceManifestHash != ProcessedManifestHash`,
+and one that already has a processed version stays `Processed` and visible
+(current thumbnails included) while a newer version is queued or failing.
+Processing reads the original through Storage's manifest/chunk queries (chunk
+hashes verified), extracts EXIF with MetadataExtractor and writes 256/1024
+WebP thumbnails with SkiaSharp to
+`{tenant}/{user}/thumbnails/{photoId}/{manifestHash[..16]}/{size}.webp` (the
+version in the key means a slow worker for an old version can never overwrite
+a newer one; not counted against the quota, which sums `file_versions`).
+Images that would decode (after JPEG/WebP downscaling) to more than
+`MaxDecodedPixels` are rejected before any decode buffer exists. HEIC/HEIF/AVIF cannot be decoded by Skia on Linux: those
+photos get metadata but no thumbnails (`ThumbnailsReady = false`).
+Undecodable data fails at once (`Failed`); transient errors retry with
+backoff, max 3 attempts. An attempt is counted when the photo is claimed,
+so one that crashes the process is given up after 3 lease expiries instead
+of restarting the Api forever. Settings: `Photos:Ingest:*` (`Enabled`,
+`PollIntervalSeconds`, `BatchSize`, `MaxConcurrentProcessing`,
+`MaxSourceBytes`, `LeaseMinutes`, `MaxAttempts`, `MaxDecodedPixels`) and
+`Photos:Thumbnails:CacheMaxAgeSeconds`. Thumbnails are served by
+`GET /api/v1/photos/{id}/thumbnail/{256|1024}` (private cache + ETag); the
+gateway gives that one route its own `thumbnail` rate-limit budget.
+
+The Service Bus design below is the target for the AI stages, not what runs today:
 1. **Ingest** — EXIF extraction, thumbnail generation (256/1024/2048 WebP)
 2. **AI Analysis** — Azure AI Vision (tags), Face API (detection + embeddings), OCR
 3. **Clustering** — face→person assignment (cosine similarity), geo+time trip detection

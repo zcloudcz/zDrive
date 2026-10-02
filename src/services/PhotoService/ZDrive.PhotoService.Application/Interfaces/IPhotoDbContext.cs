@@ -10,5 +10,6 @@ public interface IPhotoDbContext
     DbSet<Album> Albums { get; }
     DbSet<AlbumPhoto> AlbumPhotos { get; }
     DbSet<Memory> Memories { get; }
+    DbSet<IngestCursor> IngestCursors { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

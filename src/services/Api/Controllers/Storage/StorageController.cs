@@ -14,7 +14,6 @@ using ZDrive.StorageService.Application.Queries.DownloadChunk;
 using ZDrive.StorageService.Application.Queries.GetChunkDownloadUrl;
 using ZDrive.StorageService.Application.Queries.GetDownloadUrl;
 using ZDrive.StorageService.Application.Queries.GetManifest;
-using ZDrive.StorageService.Application.Queries.GetThumbnailUrl;
 
 namespace ZDrive.Api.Controllers.Storage;
 
@@ -139,18 +138,6 @@ public sealed class StorageController : ControllerBase
         var query = new DownloadChunkQuery(tenantId, userId, fileId, hash);
         var stream = await _mediator.Send(query, ct);
         return File(stream, "application/octet-stream");
-    }
-
-    [HttpGet("thumbnail/{photoId:guid}")]
-    [ProducesResponseType(typeof(ApiResponse<string>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetThumbnailUrl(Guid photoId, [FromQuery] int size = 256, CancellationToken ct = default)
-    {
-        var userId = User.GetUserId();
-        var tenantId = User.GetTenantId() ?? userId;
-
-        var query = new GetThumbnailUrlQuery(tenantId, userId, photoId, size);
-        var result = await _mediator.Send(query, ct);
-        return Ok(ApiResponse<string>.Ok(result));
     }
 
     [HttpPost("files/{fileId:guid}/manifests/{manifestHash}/restore")]

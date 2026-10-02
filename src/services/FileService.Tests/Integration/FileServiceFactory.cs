@@ -43,7 +43,7 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     {
         builder.UseEnvironment("Development");
 
-        // Point all four connection strings at this factory's ephemeral
+        // Point all five connection strings at this factory's ephemeral
         // Testcontainers instance instead of the dev connection strings in
         // appsettings.json. AddInfrastructure reads this configuration value
         // lazily — inside the AddDbContext options delegate, evaluated on
@@ -52,14 +52,18 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
         // Everything else about the registration (snake_case naming,
         // schema-qualified migrations history table, and the
         // FileChangeInterceptor wiring) stays exactly what production wires
-        // in DependencyInjection.cs. The merged host migrates all four
-        // contexts on startup, so all four must point here, not just FileDb.
+        // in DependencyInjection.cs. The merged host migrates all five
+        // contexts on startup, so all five must point here, not just FileDb.
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
             ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
             ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
             ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+            ["ConnectionStrings:PhotoDb"] = _postgres.GetConnectionString() + ";Search Path=photos",
+            // The photo ingest worker takes its own SHARE locks on files.file_changes;
+            // only PhotoService.Tests exercises it (and drives it manually).
+            ["Photos:Ingest:Enabled"] = "false",
         }));
 
         // Make the service validate tokens signed by this factory's key instead

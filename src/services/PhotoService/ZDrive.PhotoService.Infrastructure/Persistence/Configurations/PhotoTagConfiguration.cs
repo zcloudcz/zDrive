@@ -12,6 +12,9 @@ public sealed class PhotoTagConfiguration : IEntityTypeConfiguration<PhotoTag>
 
         builder.HasKey(t => t.Id);
 
+        // Matches the Photo query filter.
+        builder.HasQueryFilter(t => !t.Photo!.IsHidden);
+
         builder.Property(t => t.Tag)
             .IsRequired()
             .HasMaxLength(256);
