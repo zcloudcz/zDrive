@@ -38,8 +38,10 @@ Microservices behind an API Gateway (YARP):
 App Service count on the shared hosting plan — each still owns its
 Domain/Application/Infrastructure layers and its own PostgreSQL schema, only
 the API host is merged. `notification-service` remains separate (and
-undeployed). The Api host needs `ConnectionStrings:PhotoDb` (schema `photos`)
-in addition to the Auth/File/Storage/Sync ones.
+undeployed). All five modules share one database and one connection string,
+`ConnectionStrings:ZDriveDb`. Schemas are named in code, not in the
+connection string: every DbContext calls `HasDefaultSchema`, migrations are
+schema-qualified, and so is every raw SQL statement — keep it that way.
 
 Inter-service communication: Azure Service Bus (async events), gRPC (sync calls).
 

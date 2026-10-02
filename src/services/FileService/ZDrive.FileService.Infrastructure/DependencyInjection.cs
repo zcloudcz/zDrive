@@ -27,7 +27,7 @@ public static class DependencyInjection
         // instead of constructing it by hand, so it shares the same registrations above.
         services.AddDbContext<FileDbContext>((sp, options) =>
             options.UseNpgsql(
-                    configuration.GetConnectionString("FileDb"),
+                    configuration.GetConnectionString("ZDriveDb"),
                     npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "files"))
                 .UseSnakeCaseNamingConvention()
                 .AddInterceptors(sp.GetRequiredService<FileChangeInterceptor>()));

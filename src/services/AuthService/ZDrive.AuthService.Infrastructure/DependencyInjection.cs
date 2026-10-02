@@ -24,7 +24,7 @@ public static class DependencyInjection
         // EF Core + PostgreSQL
         services.AddDbContext<AuthDbContext>(options =>
             options.UseNpgsql(
-                configuration.GetConnectionString("AuthDb"),
+                configuration.GetConnectionString("ZDriveDb"),
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
 
         services.AddScoped<IAuthDbContext>(sp => sp.GetRequiredService<AuthDbContext>());

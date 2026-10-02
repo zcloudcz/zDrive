@@ -43,8 +43,8 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
     {
         builder.UseEnvironment("Development");
 
-        // Point all five connection strings at this factory's ephemeral
-        // Testcontainers instance instead of the dev connection strings in
+        // Point the shared ZDriveDb connection string at this factory's ephemeral
+        // Testcontainers instance instead of the dev connection string in
         // appsettings.json. AddInfrastructure reads this configuration value
         // lazily — inside the AddDbContext options delegate, evaluated on
         // first DbContext resolution, not when AddInfrastructure itself runs —
@@ -53,14 +53,10 @@ public sealed class FileServiceFactory : WebApplicationFactory<Program>, IAsyncL
         // schema-qualified migrations history table, and the
         // FileChangeInterceptor wiring) stays exactly what production wires
         // in DependencyInjection.cs. The merged host migrates all five
-        // contexts on startup, so all five must point here, not just FileDb.
+        // contexts on startup; all five share this one ZDriveDb string.
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
-            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
-            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
-            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
-            ["ConnectionStrings:PhotoDb"] = _postgres.GetConnectionString() + ";Search Path=photos",
+            ["ConnectionStrings:ZDriveDb"] = _postgres.GetConnectionString(),
             // The photo ingest worker takes its own SHARE locks on files.file_changes;
             // only PhotoService.Tests exercises it (and drives it manually).
             ["Photos:Ingest:Enabled"] = "false",

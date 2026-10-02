@@ -18,7 +18,7 @@ public static class DependencyInjection
         // EF Core + PostgreSQL
         services.AddDbContext<PhotoDbContext>(options =>
             options.UseNpgsql(
-                configuration.GetConnectionString("PhotoDb"),
+                configuration.GetConnectionString("ZDriveDb"),
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "photos")));
 
         services.AddScoped<IPhotoDbContext>(sp => sp.GetRequiredService<PhotoDbContext>());

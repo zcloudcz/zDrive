@@ -73,16 +73,11 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
     {
         builder.UseEnvironment("Development");
 
-        // The merged host migrates all five contexts on startup, so all five
-        // connection strings must point at this one Postgres container (each
-        // context's own schema, matching DependencyInjection.cs).
+        // The merged host migrates all five contexts on startup. They share one
+        // database (ZDriveDb); each model and migration names its own schema.
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
-            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
-            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
-            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
-            ["ConnectionStrings:PhotoDb"] = _postgres.GetConnectionString() + ";Search Path=photos",
+            ["ConnectionStrings:ZDriveDb"] = _postgres.GetConnectionString(),
             // The photo ingest worker takes its own SHARE locks on files.file_changes;
             // only PhotoService.Tests exercises it (and drives it manually).
             ["Photos:Ingest:Enabled"] = "false",

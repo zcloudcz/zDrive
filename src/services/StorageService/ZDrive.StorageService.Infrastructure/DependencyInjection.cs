@@ -20,7 +20,7 @@ public static class DependencyInjection
         // EF Core + PostgreSQL
         services.AddDbContext<StorageDbContext>(options =>
             options.UseNpgsql(
-                configuration.GetConnectionString("StorageDb"),
+                configuration.GetConnectionString("ZDriveDb"),
                 npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "storage")));
 
         services.AddScoped<IStorageDbContext>(sp => sp.GetRequiredService<StorageDbContext>());

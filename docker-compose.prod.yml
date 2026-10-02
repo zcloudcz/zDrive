@@ -29,11 +29,7 @@ services:
       - .env.auth-secrets
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__AuthDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=auth
-      ConnectionStrings__FileDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=files
-      ConnectionStrings__StorageDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=storage
-      ConnectionStrings__SyncDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=sync
-      ConnectionStrings__PhotoDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=photos
+      ConnectionStrings__ZDriveDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev
       AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1
       Jwt__Issuer: zdrive
       Jwt__Audience: zdrive-api
