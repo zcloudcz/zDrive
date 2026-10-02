@@ -541,4 +541,19 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => '正在将所有内容保留在此设备上…';
+
+  @override
+  String get previewNotAvailable => '无法预览';
+
+  @override
+  String get previewTooLarge => '此文件太大，无法预览。请下载后打开。';
+
+  @override
+  String get previewUnsupported => '此类型的文件无法预览。请下载后打开。';
+
+  @override
+  String get previewImageFailed => '此设备无法显示这张图片。请下载后打开。';
+
+  @override
+  String get preview => '预览';
 }

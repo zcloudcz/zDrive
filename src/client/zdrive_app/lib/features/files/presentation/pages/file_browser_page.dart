@@ -29,6 +29,7 @@ import '../widgets/file_list_item.dart';
 import '../widgets/rename_dialog.dart';
 import '../widgets/share_dialog.dart';
 import '../widgets/version_history_dialog.dart';
+import 'file_preview_page.dart';
 
 class FileBrowserPage extends StatelessWidget {
   final String? folderId;
@@ -456,6 +457,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
           onKeepOnDevice: offline.keep,
           onFreeUp: offline.freeUp,
           onTap: () => _onFileTap(context, file),
+          onDownload: () => _downloadFile(context, file),
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
@@ -482,6 +484,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
           onKeepOnDevice: offline.keep,
           onFreeUp: offline.freeUp,
           onTap: () => _onFileTap(context, file),
+          onDownload: () => _downloadFile(context, file),
           onRename: () => _showRenameDialog(context, file),
           onDelete: () => _showDeleteConfirm(context, file),
           onShare: () => _showShareDialog(context, file),
@@ -496,10 +499,23 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       context.go('/home/files/folder/${file.id}');
       return;
     }
-    _downloadFile(context, file);
+    FilePreviewPage.show(
+      context,
+      fileName: file.name,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      openContent: () => getIt<FileRepository>().downloadFileStream(file.id),
+      onDownload: (previewContext, loadedBytes) =>
+          _downloadFile(previewContext, file, loadedBytes: loadedBytes),
+      onShare: (previewContext) => _showShareDialog(previewContext, file),
+    );
   }
 
-  Future<void> _downloadFile(BuildContext context, FileItem file) async {
+  Future<void> _downloadFile(
+    BuildContext context,
+    FileItem file, {
+    Uint8List? loadedBytes,
+  }) async {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context, rootNavigator: true);
     final l10n = AppLocalizations.of(context)!;
@@ -525,7 +541,7 @@ class _FileBrowserViewState extends State<FileBrowserView> {
       // Paint feedback before opening the native save dialog or starting I/O.
       await WidgetsBinding.instance.endOfFrame;
       if (!context.mounted || !progressRoute.isActive) return;
-      await downloadFile(file, getIt<FileRepository>());
+      await downloadFile(file, getIt<FileRepository>(), loadedBytes: loadedBytes);
     } catch (e) {
       if (context.mounted && messenger.mounted) {
         messenger.showSnackBar(SnackBar(content: Text(describeError(e, l10n))));
@@ -700,6 +716,12 @@ Future<void> downloadFile(
   FileItem file,
   FileRepository repository, {
   Future<void> Function(String fileName, Stream<Uint8List> content) save = saveFileStream,
+  Uint8List? loadedBytes,
 }) async {
-  await save(file.name, repository.downloadFileStream(file.id));
+  // Bytes already loaded (and verified) by the preview are saved as they are
+  // instead of downloading the file a second time.
+  await save(
+    file.name,
+    loadedBytes != null ? Stream.value(loadedBytes) : repository.downloadFileStream(file.id),
+  );
 }

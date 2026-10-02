@@ -171,6 +171,40 @@ void main() {
     expect(progress, [1.0]);
   });
 
+  test('OpenDownload_ValidGrant_ReturnsFileNameAndVerifiedContentStream', () async {
+    when(() => dio.post('/shares/link/tok123/download-grant', data: any(named: 'data')))
+        .thenAnswer((_) async => ok({
+              'grant': 'g1',
+              'expiresAt': '2026-01-01T00:05:00.000Z',
+              'fileId': 'f1',
+              'fileName': 'report.pdf',
+              'sizeBytes': 3,
+              'manifestHash': null,
+            }, '/shares/link/tok123/download-grant'));
+    when(() => dio.get('/storage/shared/manifest', options: any(named: 'options')))
+        .thenAnswer((_) async => ok({
+              'totalSize': 3,
+              'chunks': [
+                {'index': 0, 'hash': _sha256Hex}
+              ],
+              'manifestHash': null,
+            }, '/storage/shared/manifest'));
+    when(() => dio.get<List<int>>('/storage/shared/chunk/$_sha256Hex/bytes',
+        options: any(named: 'options'))).thenAnswer((_) async => Response(
+        data: [1, 2, 3],
+        statusCode: 200,
+        requestOptions: RequestOptions(path: '/storage/shared/chunk/$_sha256Hex/bytes')));
+
+    final download = await ds.openDownload('tok123', 'f1');
+    final builder = BytesBuilder();
+    await for (final chunk in download.content) {
+      builder.add(chunk);
+    }
+
+    expect(download.fileName, 'report.pdf');
+    expect(builder.takeBytes(), Uint8List.fromList([1, 2, 3]));
+  });
+
   test(
       'a token with path-hostile characters is percent-encoded before it '
       'goes back into a URL path — go_router hands path parameters over '

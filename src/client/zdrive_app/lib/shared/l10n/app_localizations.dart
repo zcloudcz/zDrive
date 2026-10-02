@@ -1115,6 +1115,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Keeping everything on this device…'**
   String get cloudMigrationKeeping;
+
+  /// No description provided for @previewNotAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview not available'**
+  String get previewNotAvailable;
+
+  /// No description provided for @previewTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'This file is too large to preview. Download it to open it.'**
+  String get previewTooLarge;
+
+  /// No description provided for @previewUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'This type of file cannot be previewed. Download it to open it.'**
+  String get previewUnsupported;
+
+  /// No description provided for @previewImageFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'This image cannot be displayed on this device. Download it to open it.'**
+  String get previewImageFailed;
+
+  /// No description provided for @preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get preview;
 }
 
 class _AppLocalizationsDelegate

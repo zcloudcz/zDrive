@@ -102,6 +102,18 @@ class ShareLinkDataSource {
     void Function(double progress)? onProgress,
     Future<void> Function(String fileName, Stream<Uint8List> content) save = saveFileStream,
   }) async {
+    final download = await openDownload(token, fileId, onProgress: onProgress);
+    await save(download.fileName, download.content);
+  }
+
+  /// The grant + verified-stream half of [downloadFile], without saving: the
+  /// in-app preview reads the same stream into memory instead. The returned
+  /// [content] is lazy — chunks are fetched as it is listened to.
+  Future<({String fileName, Stream<Uint8List> content})> openDownload(
+    String token,
+    String fileId, {
+    void Function(double progress)? onProgress,
+  }) async {
     var grantInfo = await requestDownloadGrant(token, fileId);
     var reMinted = false;
     var transferred = 0;
@@ -125,7 +137,7 @@ class ShareLinkDataSource {
       }
       return chunk;
     });
-    await save(grantInfo.fileName, stream);
+    return (fileName: grantInfo.fileName, content: stream);
   }
 
   /// What this link is allowed to do, and (for a Write link) the owner's

@@ -166,5 +166,10 @@
   "cloudMigrationWorking": "Vapautetaan tilaa…",
   "cloudMigrationFreed": "Vapautettu {count} tiedostoa, {size}",
   "freeUpKeptPinned": "{count} säilytetty tällä laitteella: säilytä aina",
-  "cloudMigrationKeeping": "Säilytetään kaikki tällä laitteella…"
+  "cloudMigrationKeeping": "Säilytetään kaikki tällä laitteella…",
+  "preview": "Esikatselu",
+  "previewNotAvailable": "Esikatselu ei ole käytettävissä",
+  "previewTooLarge": "Tiedosto on liian suuri esikatseltavaksi. Lataa se avataksesi sen.",
+  "previewUnsupported": "Tämän tyyppistä tiedostoa ei voi esikatsella. Lataa se avataksesi sen.",
+  "previewImageFailed": "Tätä kuvaa ei voi näyttää tällä laitteella. Lataa se avataksesi sen."
 }

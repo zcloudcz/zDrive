@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:dio/dio.dart';
@@ -641,6 +642,50 @@ void main() {
     expect(listings, 2);
     expect(state.uploadErrors, isEmpty);
     expect(state.uploadProgress, isEmpty);
+  });
+
+  test('Download_LoadedBytesGiven_SavesThemWithoutRequestingAGrant', () async {
+    when(() => dataSource.getShareLink(token)).thenAnswer(
+        (_) async => (share: _share, file: fileShare(isFolder: true)));
+    when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+    String? savedName;
+    final savedBytes = <int>[];
+    final cubit = ShareLinkCubit(dataSource, token, save: (name, content) async {
+      savedName = name;
+      await for (final chunk in content) {
+        savedBytes.addAll(chunk);
+      }
+    });
+    await cubit.load();
+
+    await cubit.download(child, loadedBytes: Uint8List.fromList([1, 2, 3]));
+
+    expect(savedName, child.name);
+    expect(savedBytes, [1, 2, 3]);
+    verifyNever(() => dataSource.downloadFile(any(), any(),
+        onProgress: any(named: 'onProgress')));
+    expect((cubit.state as ShareLinkLoaded).downloadProgress, isEmpty);
+    await cubit.close();
+  });
+
+  test('Download_SameFileAlreadyRunning_DoesNotStartASecondDownload', () async {
+    when(() => dataSource.getShareLink(token)).thenAnswer(
+        (_) async => (share: _share, file: fileShare(isFolder: true)));
+    when(() => dataSource.getChildren(token)).thenAnswer((_) async => [child]);
+    final running = Completer<void>();
+    when(() => dataSource.downloadFile(token, child.id, onProgress: any(named: 'onProgress')))
+        .thenAnswer((_) => running.future);
+    final cubit = ShareLinkCubit(dataSource, token);
+    await cubit.load();
+
+    final first = cubit.download(child);
+    await cubit.download(child);
+    running.complete();
+    await first;
+
+    verify(() => dataSource.downloadFile(token, child.id, onProgress: any(named: 'onProgress')))
+        .called(1);
+    await cubit.close();
   });
 }
 

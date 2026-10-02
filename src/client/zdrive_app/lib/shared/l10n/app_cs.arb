@@ -221,5 +221,10 @@
   "cloudMigrationWorking": "Uvolňuje se místo…",
   "cloudMigrationFreed": "Uvolněno souborů: {count}, {size}",
   "freeUpKeptPinned": "{count} ponecháno v tomto zařízení: vždy ponechat",
-  "cloudMigrationKeeping": "Ponechává se vše v tomto zařízení…"
+  "cloudMigrationKeeping": "Ponechává se vše v tomto zařízení…",
+  "previewNotAvailable": "Náhled není k dispozici",
+  "previewTooLarge": "Soubor je příliš velký pro náhled. Stáhněte si ho a otevřete.",
+  "previewUnsupported": "Tento typ souboru nelze zobrazit v náhledu. Stáhněte si ho a otevřete.",
+  "previewImageFailed": "Tento obrázek nelze na tomto zařízení zobrazit. Stáhněte si ho a otevřete.",
+  "preview": "Náhled"
 }

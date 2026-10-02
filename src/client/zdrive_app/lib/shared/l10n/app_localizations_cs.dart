@@ -558,4 +558,22 @@ class AppLocalizationsCs extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Ponechává se vše v tomto zařízení…';
+
+  @override
+  String get previewNotAvailable => 'Náhled není k dispozici';
+
+  @override
+  String get previewTooLarge =>
+      'Soubor je příliš velký pro náhled. Stáhněte si ho a otevřete.';
+
+  @override
+  String get previewUnsupported =>
+      'Tento typ souboru nelze zobrazit v náhledu. Stáhněte si ho a otevřete.';
+
+  @override
+  String get previewImageFailed =>
+      'Tento obrázek nelze na tomto zařízení zobrazit. Stáhněte si ho a otevřete.';
+
+  @override
+  String get preview => 'Náhled';
 }

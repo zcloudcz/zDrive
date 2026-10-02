@@ -545,4 +545,19 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'すべてをこのデバイスに保持しています…';
+
+  @override
+  String get previewNotAvailable => 'プレビューは利用できません';
+
+  @override
+  String get previewTooLarge => 'このファイルはプレビューするには大きすぎます。ダウンロードして開いてください。';
+
+  @override
+  String get previewUnsupported => 'この種類のファイルはプレビューできません。ダウンロードして開いてください。';
+
+  @override
+  String get previewImageFailed => 'この画像はこのデバイスでは表示できません。ダウンロードして開いてください。';
+
+  @override
+  String get preview => 'プレビュー';
 }

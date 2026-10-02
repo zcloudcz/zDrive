@@ -114,6 +114,25 @@ void main() {
     expect(captured.headers, {'X-Device-Id': 'dev-1'});
   });
 
+  test('CreateFile_WithMimeType_PostsMimeTypeAndMapsItFromResponse', () async {
+    when(() => dio.post('/files', data: any(named: 'data'), options: any(named: 'options')))
+        .thenAnswer((_) async => ok(fileJson, '/files'));
+
+    final dto = await ds.createFile(
+      name: 'doc.txt',
+      isFolder: false,
+      sizeBytes: 10,
+      mimeType: 'text/plain',
+    );
+
+    final body = verify(() => dio.post('/files',
+            data: captureAny(named: 'data'), options: any(named: 'options')))
+        .captured
+        .single as Map<String, dynamic>;
+    expect(body['mimeType'], 'text/plain');
+    expect(dto.mimeType, 'text/plain');
+  });
+
   test('renameFile uses PUT /files/{id}/rename with newName', () async {
     when(() => dio.put('/files/f1/rename', data: any(named: 'data'), options: any(named: 'options')))
         .thenAnswer((_) async => ok(fileJson, '/files/f1/rename'));

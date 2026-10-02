@@ -564,4 +564,22 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get cloudMigrationKeeping => 'Säilytetään kaikki tällä laitteella…';
+
+  @override
+  String get previewNotAvailable => 'Esikatselu ei ole käytettävissä';
+
+  @override
+  String get previewTooLarge =>
+      'Tiedosto on liian suuri esikatseltavaksi. Lataa se avataksesi sen.';
+
+  @override
+  String get previewUnsupported =>
+      'Tämän tyyppistä tiedostoa ei voi esikatsella. Lataa se avataksesi sen.';
+
+  @override
+  String get previewImageFailed =>
+      'Tätä kuvaa ei voi näyttää tällä laitteella. Lataa se avataksesi sen.';
+
+  @override
+  String get preview => 'Esikatselu';
 }
