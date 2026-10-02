@@ -139,6 +139,20 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0
         }));
 
+    // Photo thumbnails (photos-thumbnail-route only): a timeline screen loads
+    // dozens of small images at once, which would exhaust "fixed" (100/min)
+    // and 429 the same user's normal API calls. Same per-user partitioning as
+    // "fixed"; the responses are tiny, cacheable and ETag-revalidated.
+    options.AddPolicy("thumbnail", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 1200,
+            Window = TimeSpan.FromMinutes(1),
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = 0
+        }));
+
     options.AddPolicy("chunk", httpContext => RateLimitPartition.GetFixedWindowLimiter(
         RateLimiterPartitioning.GetPartitionKey(httpContext.User, httpContext.Connection.RemoteIpAddress?.ToString()),
         _ => new FixedWindowRateLimiterOptions

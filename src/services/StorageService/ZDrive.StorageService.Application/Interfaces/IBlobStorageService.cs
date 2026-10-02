@@ -93,4 +93,19 @@ public interface IBlobStorageService
     /// blob CORS configured). Null when the chunk does not exist.
     /// </summary>
     Task<Stream?> DownloadChunkAsync(Guid tenantId, Guid userId, Guid fileId, string chunkHash, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores a generated photo thumbnail at
+    /// <c>{tenantId}/{userId}/thumbnails/{photoId}/{version}/{size}.webp</c>.
+    /// <paramref name="version"/> identifies the source version (a manifest hash
+    /// prefix), so a slow writer for an older version can never overwrite the
+    /// thumbnails of a newer one. Overwrites the same key.
+    /// </summary>
+    Task UploadThumbnailAsync(Guid tenantId, Guid userId, Guid photoId, string version, int size, byte[] content, CancellationToken ct = default);
+
+    /// <summary>Opens a thumbnail for reading; null when it does not exist.</summary>
+    Task<Stream?> DownloadThumbnailAsync(Guid tenantId, Guid userId, Guid photoId, string version, int size, CancellationToken ct = default);
+
+    /// <summary>Deletes every thumbnail (all versions and sizes) of one photo.</summary>
+    Task DeleteThumbnailsAsync(Guid tenantId, Guid userId, Guid photoId, CancellationToken ct = default);
 }

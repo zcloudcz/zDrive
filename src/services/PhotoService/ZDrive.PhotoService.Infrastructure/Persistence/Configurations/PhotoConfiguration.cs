@@ -33,6 +33,17 @@ public sealed class PhotoConfiguration : IEntityTypeConfiguration<Photo>
         builder.Property(p => p.CreatedAt)
             .HasDefaultValueSql("now() at time zone 'utc'");
 
+        builder.Property(p => p.SourceManifestHash).HasMaxLength(128);
+        builder.Property(p => p.ProcessedManifestHash).HasMaxLength(128);
+        builder.Property(p => p.FailureReason).HasMaxLength(1024);
+
+        // Trashed / non-image photos are invisible to every read. The ingest
+        // worker is the only caller that uses IgnoreQueryFilters().
+        builder.HasQueryFilter(p => !p.IsHidden);
+
+        // Serves the worker's claim query.
+        builder.HasIndex(p => new { p.ProcessingStatus, p.NextAttemptAt });
+
         // Indexes
         builder.HasIndex(p => new { p.UserId, p.TakenAt });
         builder.HasIndex(p => new { p.TenantId, p.UserId });

@@ -89,6 +89,32 @@ namespace ZDrive.PhotoService.Infrastructure.Migrations
                     b.ToTable("album_photos", "photos");
                 });
 
+            modelBuilder.Entity("ZDrive.PhotoService.Domain.Entities.IngestCursor", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("BootstrapCompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("BootstrapHead")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("BootstrapLastNodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("LastChangeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Name");
+
+                    b.ToTable("ingest_cursors", "photos");
+                });
+
             modelBuilder.Entity("ZDrive.PhotoService.Domain.Entities.Memory", b =>
                 {
                     b.Property<Guid>("Id")
@@ -139,6 +165,9 @@ namespace ZDrive.PhotoService.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
                     b.Property<string>("BlobPath")
                         .IsRequired()
                         .HasMaxLength(2048)
@@ -157,17 +186,30 @@ namespace ZDrive.PhotoService.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now() at time zone 'utc'");
 
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
                     b.Property<Guid>("FileId")
                         .HasColumnType("uuid");
 
                     b.Property<int?>("Height")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("IsHidden")
+                        .HasColumnType("boolean");
+
                     b.Property<double?>("Lat")
                         .HasColumnType("double precision");
 
                     b.Property<double?>("Lng")
                         .HasColumnType("double precision");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("Orientation")
                         .HasColumnType("integer");
@@ -177,6 +219,13 @@ namespace ZDrive.PhotoService.Infrastructure.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("character varying(1024)");
 
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProcessedManifestHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<string>("ProcessingStatus")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -185,11 +234,18 @@ namespace ZDrive.PhotoService.Infrastructure.Migrations
                     b.Property<float?>("QualityScore")
                         .HasColumnType("real");
 
+                    b.Property<string>("SourceManifestHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<DateTime?>("TakenAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("ThumbnailsReady")
+                        .HasColumnType("boolean");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
@@ -201,6 +257,8 @@ namespace ZDrive.PhotoService.Infrastructure.Migrations
 
                     b.HasIndex("FileId")
                         .IsUnique();
+
+                    b.HasIndex("ProcessingStatus", "NextAttemptAt");
 
                     b.HasIndex("TenantId", "UserId");
 

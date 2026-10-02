@@ -21,7 +21,8 @@ public static class MappingExtensions
         photo.ProcessingStatus.ToString(),
         photo.OriginalFileName,
         photo.BlobPath,
-        photo.CreatedAt);
+        photo.CreatedAt,
+        photo.ThumbnailsReady);
 
     public static AlbumDto ToDto(this Album album, int photoCount) => new(
         album.Id,

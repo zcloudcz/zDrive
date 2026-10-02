@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ZDrive.PhotoService.Application.DTOs;
 using ZDrive.PhotoService.Application.Interfaces;
+using ZDrive.PhotoService.Domain.Enums;
 
 namespace ZDrive.PhotoService.Application.Queries.GetTimeline;
 
@@ -14,7 +15,10 @@ public sealed class GetTimelineQueryHandler : IRequestHandler<GetTimelineQuery, 
     public async Task<TimelineResultDto> Handle(GetTimelineQuery request, CancellationToken cancellationToken)
     {
         var query = _db.Photos.AsNoTracking()
-            .Where(p => p.UserId == request.UserId && p.TenantId == request.TenantId);
+            .Where(p => p.UserId == request.UserId && p.TenantId == request.TenantId
+                // Only fully processed photos: EXIF date is known and (unless the
+                // format is undecodable here) thumbnails exist. Failed stays hidden.
+                && p.ProcessingStatus == ProcessingStatus.Processed);
 
         if (request.From.HasValue)
         {
