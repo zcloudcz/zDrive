@@ -19,22 +19,10 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
         _client = factory.CreateAuthenticatedClient();
     }
 
-    private async Task<PhotoDto> IngestPhotoAsync(string fileName = "beach.jpg")
-    {
-        var response = await _client.PostAsJsonAsync("/api/v1/photos/ingest", new
-        {
-            fileId = Guid.NewGuid(),
-            originalFileName = fileName,
-            blobPath = $"/tenant/user/{fileName}"
-        });
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        return (await response.Content.ReadFromJsonAsync<PhotoDto>())!;
-    }
-
     [Fact]
-    public async Task Ingest_ValidPayload_AppearsInTimeline()
+    public async Task GetTimeline_SeededPhoto_AppearsInTimeline()
     {
-        var photo = await IngestPhotoAsync();
+        var photo = await _factory.SeedPhotoAsync();
 
         var timelineResponse = await _client.GetAsync("/api/v1/photos/timeline?limit=200");
         timelineResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -44,22 +32,9 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     }
 
     [Fact]
-    public async Task Ingest_EmptyOriginalFileName_Returns400()
-    {
-        var response = await _client.PostAsJsonAsync("/api/v1/photos/ingest", new
-        {
-            fileId = Guid.NewGuid(),
-            originalFileName = "",
-            blobPath = "/tenant/user/x.jpg"
-        });
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-    }
-
-    [Fact]
     public async Task GetById_ExistingPhoto_ReturnsPhoto()
     {
-        var photo = await IngestPhotoAsync("mountains.jpg");
+        var photo = await _factory.SeedPhotoAsync("mountains.jpg");
 
         var response = await _client.GetAsync($"/api/v1/photos/{photo.Id}");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -78,7 +53,7 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     [Fact]
     public async Task GetById_PhotoOwnedByAnotherUser_Returns404()
     {
-        var photo = await IngestPhotoAsync("foreign-owner.jpg");
+        var photo = await _factory.SeedPhotoAsync("foreign-owner.jpg");
 
         using var foreignClient = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
         var response = await foreignClient.GetAsync($"/api/v1/photos/{photo.Id}");
@@ -89,7 +64,7 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     [Fact]
     public async Task GetTimeline_NonUtcFromOffset_ConvertedToCorrectInstant()
     {
-        var photo = await IngestPhotoAsync("timezone-check.jpg");
+        var photo = await _factory.SeedPhotoAsync("timezone-check.jpg");
 
         // Same instant as "30 seconds ago", but expressed with a +10:00 offset
         // so the wall-clock component reads ~10 hours ahead of UTC. If the
@@ -115,7 +90,7 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     [Fact]
     public async Task Search_TaggedPhoto_ReturnsMatchByTag()
     {
-        var photo = await IngestPhotoAsync("sunset.jpg");
+        var photo = await _factory.SeedPhotoAsync("sunset.jpg");
         await _client.PostAsJsonAsync($"/api/v1/photos/{photo.Id}/tags", new
         {
             tag = "sunset-search-marker",
@@ -147,7 +122,7 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     [Fact]
     public async Task AddTag_ExistingPhoto_ReturnsManualTag()
     {
-        var photo = await IngestPhotoAsync("dog.jpg");
+        var photo = await _factory.SeedPhotoAsync("dog.jpg");
 
         var response = await _client.PostAsJsonAsync($"/api/v1/photos/{photo.Id}/tags", new
         {
@@ -165,7 +140,7 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     [Fact]
     public async Task AddTag_ConfidenceOutOfRange_Returns400()
     {
-        var photo = await IngestPhotoAsync("cat.jpg");
+        var photo = await _factory.SeedPhotoAsync("cat.jpg");
 
         var response = await _client.PostAsJsonAsync($"/api/v1/photos/{photo.Id}/tags", new
         {
@@ -183,7 +158,7 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
         // Ownership is enforced by filtering on UserId/TenantId in the photo
         // lookup, not by a separate authorization check — a foreign photo looks
         // the same as a missing one (404, not 403 and not silently tagged).
-        var photo = await IngestPhotoAsync("foreign-tag-target.jpg");
+        var photo = await _factory.SeedPhotoAsync("foreign-tag-target.jpg");
 
         using var foreignClient = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
         var response = await foreignClient.PostAsJsonAsync($"/api/v1/photos/{photo.Id}/tags", new
@@ -201,7 +176,7 @@ public sealed class PhotosFlowTests : IClassFixture<PhotoServiceFactory>
     {
         // Isolates the TenantId half of the ownership filter: same UserId as the
         // photo owner, but a different tenant claim, must still be rejected.
-        var photo = await IngestPhotoAsync("cross-tenant-tag-target.jpg");
+        var photo = await _factory.SeedPhotoAsync("cross-tenant-tag-target.jpg");
 
         using var crossTenantClient = _factory.CreateAuthenticatedClient(_factory.TestUserId, Guid.NewGuid());
         var response = await crossTenantClient.PostAsJsonAsync($"/api/v1/photos/{photo.Id}/tags", new

@@ -33,11 +33,13 @@ Microservices behind an API Gateway (YARP):
 | `photo-service` | Photo processing pipeline, AI tagging, face clustering, albums, memories |
 | `notification-service` | Real-time events (SignalR), push (FCM/APNs), email |
 
-`auth-service`, `file-service`, `storage-service` and `sync-service` run in one
-process, `src/services/Api` (`ZDrive.Api`), to cut App Service count on the
-shared hosting plan — each still owns its Domain/Application/Infrastructure
-layers and its own PostgreSQL schema, only the API host is merged.
-`photo-service` and `notification-service` remain separate (and undeployed).
+`auth-service`, `file-service`, `storage-service`, `sync-service` and
+`photo-service` run in one process, `src/services/Api` (`ZDrive.Api`), to cut
+App Service count on the shared hosting plan — each still owns its
+Domain/Application/Infrastructure layers and its own PostgreSQL schema, only
+the API host is merged. `notification-service` remains separate (and
+undeployed). The Api host needs `ConnectionStrings:PhotoDb` (schema `photos`)
+in addition to the Auth/File/Storage/Sync ones.
 
 Inter-service communication: Azure Service Bus (async events), gRPC (sync calls).
 
@@ -48,12 +50,12 @@ zDrive/
 ├── src/
 │   ├── services/
 │   │   ├── ApiGateway/
-│   │   ├── Api/                    # merged host: Auth + File + Storage + Sync
+│   │   ├── Api/                    # merged host: Auth + File + Storage + Sync + Photo
 │   │   ├── AuthService/            # Domain/Application/Infrastructure only
 │   │   ├── FileService/            # Domain/Application/Infrastructure only
 │   │   ├── StorageService/         # Domain/Application/Infrastructure only
 │   │   ├── SyncService/            # Domain/Application/Infrastructure only
-│   │   ├── PhotoService/
+│   │   ├── PhotoService/           # Domain/Application/Infrastructure only
 │   │   └── NotificationService/
 │   ├── shared/                    # shared .NET libs (DTOs, contracts, utils)
 │   └── client/                    # Flutter app
@@ -75,10 +77,10 @@ dotnet test src/services/{ServiceName}.Tests
 dotnet run --project src/services/{ServiceName}
 ```
 
-Auth/File/Storage/Sync run as one host, `src/services/Api`
+Auth/File/Storage/Sync/Photo run as one host, `src/services/Api`
 (`dotnet run --project src/services/Api`), but each still owns its
 Infrastructure project's EF migrations. `src/services/Api` is now the only
-startup project for `dotnet ef`, for every one of those four contexts:
+startup project for `dotnet ef`, for every one of those five contexts:
 
 ```bash
 dotnet ef migrations add <Name> \
@@ -116,12 +118,13 @@ docker-compose one:
 | Define | Default | Pass it when |
 |--------|---------|--------------|
 | `API_BASE_URL` | `http://localhost:5100/api/v1` | Building for a deployed gateway — CI does this for the Pages build (`.github/workflows/deploy-web.yml`) |
-| `PHOTOS_ENABLED` | `false` | Running PhotoService locally. PhotoService and NotificationService are **not deployed** (MVP scope) and the gateway proxies their routes to localhost, so a deployed build answers 502 for them; the Photos tab and its route are therefore hidden by default |
+| `PHOTOS_ENABLED` | `false` | Running the photo backend locally or against a gateway whose Api host has the photo module deployed. PhotoService is part of the merged Api host, so once that build is deployed the photo routes are served by it (no separate photo service). NotificationService is still **not deployed** (MVP scope) and answers 502 through the gateway; the Photos tab and its route are hidden by default until the backend is rolled out |
 | `ENTRA_CLIENT_ID` | `` (empty) | Enabling Entra sign-in via Drive's own Entra app registration — web (ADR `docs/adr/0002-shared-zcloud-login-entra-sso.md`) and, on the same registration, iOS/Android/Windows (ADR `docs/adr/0003-native-entra-sign-in.md`; macOS/Linux stay password-only). Empty is the safety gate: with no client id the "Sign in with your ZCLOUD account" button on the login page does not render at all, on any platform. No production registration exists yet — see ADR 0002's Migration order step 1 for what a human needs to create in the Entra admin portal first |
 | `ENTRA_API_SCOPE` | `` (empty) | Same feature, same safety gate as `ENTRA_CLIENT_ID` — the sign-in button needs BOTH set to show, since a client id with no scope would still redirect through the whole Entra flow only to fail far from the cause. The scope requested alongside `openid`, e.g. `api://<drive-api-app-id>/access_as_user`; depends on how Drive's API app registration exposes its scope |
 
-`docker-compose up` **does** start PhotoService, so local work on photos needs
-the flag or the tab will not be there:
+`docker-compose up` only starts infrastructure; the photo backend runs inside
+the Api host (`dotnet run --project src/services/Api`), so local work on photos
+needs the Api running and the flag, or the tab will not be there:
 
 ```bash
 flutter run -d windows --dart-define=PHOTOS_ENABLED=true

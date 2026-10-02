@@ -10,7 +10,7 @@ using ZDrive.PhotoService.Application.Queries.GetAlbumPhotos;
 using ZDrive.PhotoService.Application.Queries.GetAlbums;
 using ZDrive.Shared.Auth;
 
-namespace ZDrive.PhotoService.Api.Controllers;
+namespace ZDrive.Api.Controllers.Photos;
 
 [ApiController]
 [Route("api/v1/albums")]
@@ -52,7 +52,8 @@ public class AlbumsController : ControllerBase
     [HttpPost("{id:guid}/photos")]
     public async Task<IActionResult> AddPhotos(Guid id, [FromBody] AddPhotosToAlbumCommand command, CancellationToken ct)
     {
-        var enriched = command with { UserId = User.GetUserId(), AlbumId = id };
+        var userId = User.GetUserId();
+        var enriched = command with { UserId = userId, TenantId = User.GetTenantId() ?? userId, AlbumId = id };
         var result = await _mediator.Send(enriched, ct);
         return Ok(new { added = result });
     }
@@ -60,14 +61,16 @@ public class AlbumsController : ControllerBase
     [HttpDelete("{id:guid}/photos/{photoId:guid}")]
     public async Task<IActionResult> RemovePhoto(Guid id, Guid photoId, CancellationToken ct)
     {
-        await _mediator.Send(new RemovePhotoFromAlbumCommand(User.GetUserId(), id, photoId), ct);
+        var userId = User.GetUserId();
+        await _mediator.Send(new RemovePhotoFromAlbumCommand(userId, User.GetTenantId() ?? userId, id, photoId), ct);
         return NoContent();
     }
 
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAlbumCommand command, CancellationToken ct)
     {
-        var enriched = command with { UserId = User.GetUserId(), AlbumId = id };
+        var userId = User.GetUserId();
+        var enriched = command with { UserId = userId, TenantId = User.GetTenantId() ?? userId, AlbumId = id };
         var result = await _mediator.Send(enriched, ct);
         return Ok(result);
     }
@@ -75,7 +78,8 @@ public class AlbumsController : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
-        await _mediator.Send(new DeleteAlbumCommand(User.GetUserId(), id), ct);
+        var userId = User.GetUserId();
+        await _mediator.Send(new DeleteAlbumCommand(userId, User.GetTenantId() ?? userId, id), ct);
         return NoContent();
     }
 }

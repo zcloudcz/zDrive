@@ -1,7 +1,7 @@
 version: "3.8"
 
-# Production-like overlay for the zDrive microservices (Auth+File+Storage+Sync
-# merged into one "api" host, plus photo-service, notification-service and
+# Production-like overlay for the zDrive microservices (Auth+File+Storage+Sync+Photo
+# merged into one "api" host, plus notification-service and
 # api-gateway). Builds each service from its Dockerfile and runs it with
 # ASPNETCORE_ENVIRONMENT=Production, so none of the Development-only
 # fallbacks (dev JWT keys, Azurite default) are reachable — every secret must
@@ -33,6 +33,7 @@ services:
       ConnectionStrings__FileDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=files
       ConnectionStrings__StorageDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=storage
       ConnectionStrings__SyncDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=sync
+      ConnectionStrings__PhotoDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=photos
       AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1
       Jwt__Issuer: zdrive
       Jwt__Audience: zdrive-api
@@ -40,25 +41,6 @@ services:
       postgres:
         condition: service_healthy
       azurite:
-        condition: service_healthy
-    networks:
-      - zdrive-network
-
-  photo-service:
-    build:
-      context: .
-      dockerfile: src/services/PhotoService/Dockerfile
-    container_name: zdrive-photo-service
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__PhotoDb: Host=postgres;Port=5432;Database=zdrive;Username=zdrive;Password=zdrive_dev;Search Path=photos
-      Jwt__Issuer: zdrive
-      Jwt__Audience: zdrive-api
-    depends_on:
-      postgres:
         condition: service_healthy
     networks:
       - zdrive-network
@@ -98,11 +80,9 @@ services:
       Jwt__Audience: zdrive-api
       Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:-http://localhost:5173}
       ReverseProxy__Clusters__apiCluster__Destinations__apiService__Address: http://api:8080
-      ReverseProxy__Clusters__photoCluster__Destinations__photoService__Address: http://photo-service:8080
       ReverseProxy__Clusters__notificationCluster__Destinations__notificationService__Address: http://notification-service:8080
     depends_on:
       - api
-      - photo-service
       - notification-service
     networks:
       - zdrive-network

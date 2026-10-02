@@ -5,11 +5,14 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Testcontainers.PostgreSql;
 using Xunit;
+using ZDrive.PhotoService.Application.DTOs;
+using ZDrive.PhotoService.Domain.Entities;
+using ZDrive.PhotoService.Domain.Enums;
 using ZDrive.PhotoService.Infrastructure.Persistence;
 using ZDrive.Shared.Auth;
 
@@ -45,33 +48,22 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
                 options => options.TokenValidationParameters.IssuerSigningKey = new RsaSecurityKey(_rsa));
         });
 
-        builder.ConfigureServices(services =>
+        // The merged host migrates all five contexts on startup, so every
+        // connection string must point at this factory's single Postgres
+        // container (each context's own schema, matching DependencyInjection.cs).
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            // Remove the real DbContext registration
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<PhotoDbContext>));
-            if (descriptor is not null)
-                services.Remove(descriptor);
-
-            // Register DbContext pointing to testcontainer.
-            // MigrationsHistoryTable must be schema-qualified here too (matching
-            // DependencyInjection.cs) — otherwise it falls back to the connection's
-            // search_path, which points at a schema that doesn't exist until the
-            // first migration creates it, and Migrate() fails before it gets there.
-            services.AddDbContext<PhotoDbContext>(options =>
-                options.UseNpgsql(_postgres.GetConnectionString() + ";Search Path=photos",
-                    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "photos")));
-        });
+            ["ConnectionStrings:AuthDb"] = _postgres.GetConnectionString() + ";Search Path=auth",
+            ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
+            ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
+            ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+            ["ConnectionStrings:PhotoDb"] = _postgres.GetConnectionString() + ";Search Path=photos",
+        }));
     }
 
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
-
-        // Apply migrations / create schema
-        using var scope = Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PhotoDbContext>();
-        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
@@ -125,6 +117,31 @@ public sealed class PhotoServiceFactory : WebApplicationFactory<Program>, IAsync
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PhotoDbContext>();
         await seed(db);
+    }
+
+    /// <summary>
+    /// Seeds a photo row directly. Photos are only ever created by the ingest
+    /// pipeline (no public API creates one), so tests seed the row itself.
+    /// </summary>
+    public async Task<PhotoDto> SeedPhotoAsync(
+        string fileName = "photo.jpg", Guid? userId = null, Guid? tenantId = null)
+    {
+        var photo = new Photo
+        {
+            Id = Guid.NewGuid(),
+            FileId = Guid.NewGuid(),
+            UserId = userId ?? TestUserId,
+            TenantId = tenantId ?? TestTenantId,
+            OriginalFileName = fileName,
+            BlobPath = $"/tenant/user/{fileName}",
+            ProcessingStatus = ProcessingStatus.Ingested,
+        };
+        await SeedAsync(async db =>
+        {
+            db.Photos.Add(photo);
+            await db.SaveChangesAsync();
+        });
+        return photo.ToDto();
     }
 
     private string GenerateTestToken(Guid userId, Guid tenantId)

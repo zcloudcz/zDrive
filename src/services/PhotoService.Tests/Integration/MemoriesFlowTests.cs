@@ -71,6 +71,22 @@ public sealed class MemoriesFlowTests : IClassFixture<PhotoServiceFactory>
     }
 
     [Fact]
+    public async Task GetAll_AndDismiss_FromAnotherUserAndTenant_SeeNothing()
+    {
+        // memories.Memory has no tenant column (only UserId, which is globally
+        // unique), so isolation between tenants rests on the user id.
+        var memory = await SeedMemoryAsync("Private memory");
+        using var stranger = _factory.CreateAuthenticatedClient(Guid.NewGuid(), Guid.NewGuid());
+
+        var list = await stranger.GetFromJsonAsync<List<MemoryDto>>("/api/v1/memories");
+        list.Should().NotContain(m => m.Id == memory.Id);
+
+        (await stranger.PostAsync($"/api/v1/memories/{memory.Id}/dismiss", null)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var own = await _client.GetFromJsonAsync<List<MemoryDto>>("/api/v1/memories");
+        own.Should().Contain(m => m.Id == memory.Id, "a foreign dismiss must not have marked it seen");
+    }
+
+    [Fact]
     public async Task Dismiss_NonExistingMemory_Returns404()
     {
         var response = await _client.PostAsync($"/api/v1/memories/{Guid.NewGuid()}/dismiss", null);

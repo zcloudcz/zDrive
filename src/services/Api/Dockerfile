@@ -8,6 +8,7 @@ COPY src/services/AuthService/ services/AuthService/
 COPY src/services/FileService/ services/FileService/
 COPY src/services/StorageService/ services/StorageService/
 COPY src/services/SyncService/ services/SyncService/
+COPY src/services/PhotoService/ services/PhotoService/
 COPY src/services/Api/ services/Api/
 
 # Restore dependencies

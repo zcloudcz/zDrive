@@ -15,7 +15,7 @@ public sealed class RemovePhotoFromAlbumCommandHandler : IRequestHandler<RemoveP
     {
         // Verify album ownership
         var albumExists = await _db.Albums
-            .AnyAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId, cancellationToken);
+            .AnyAsync(a => a.Id == request.AlbumId && a.UserId == request.UserId && a.TenantId == request.TenantId, cancellationToken);
         if (!albumExists)
             throw new NotFoundException("Album", request.AlbumId);
 

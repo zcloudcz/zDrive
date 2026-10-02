@@ -73,7 +73,7 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
     {
         builder.UseEnvironment("Development");
 
-        // The merged host migrates all four contexts on startup, so all four
+        // The merged host migrates all five contexts on startup, so all five
         // connection strings must point at this one Postgres container (each
         // context's own schema, matching DependencyInjection.cs).
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -82,6 +82,7 @@ public sealed class BackupCliEnvironment : IAsyncLifetime
             ["ConnectionStrings:FileDb"] = _postgres.GetConnectionString() + ";Search Path=files",
             ["ConnectionStrings:StorageDb"] = _postgres.GetConnectionString() + ";Search Path=storage",
             ["ConnectionStrings:SyncDb"] = _postgres.GetConnectionString() + ";Search Path=sync",
+            ["ConnectionStrings:PhotoDb"] = _postgres.GetConnectionString() + ";Search Path=photos",
         }));
 
         builder.ConfigureServices(services =>
